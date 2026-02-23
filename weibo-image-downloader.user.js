@@ -102,9 +102,18 @@
      * 下载单张图片
      */
     async function downloadImage(url, filename) {
-        // 使用GM_download（需要对象格式）
+        // 使用GM_download
         if (typeof GM_download === 'function') {
             return new Promise((resolve) => {
+                let fallbackTriggered = false;
+                const triggerFallback = () => {
+                    if (!fallbackTriggered) {
+                        fallbackTriggered = true;
+                        log(`GM_download失败，启用备用方案: ${filename}`);
+                        downloadImageFallback(url, filename).then(resolve);
+                    }
+                };
+
                 try {
                     const downloadId = GM_download({
                         url: url,
@@ -115,20 +124,19 @@
                         },
                         onerror: function(error) {
                             log(`GM_download失败: ${error.error || error.message || '未知错误'}`);
-                            // 备用方案
-                            downloadImageFallback(url, filename).then(resolve);
+                            triggerFallback();
                         },
-                        onprogress: function(progress) {
-                            // 可选：进度日志
-                        }
+                        onprogress: function(progress) {}
                     });
-                    if (downloadId) {
-                        log(`GM_download已发起: ${filename}, id: ${downloadId}`);
+                    log(`GM_download已发起: ${filename}, id: ${downloadId}`);
+                    
+                    // 如果立即返回false，说明立即失败了
+                    if (downloadId === false) {
+                        triggerFallback();
                     }
                 } catch (e) {
                     log('GM_download异常:', e.message);
-                    // 备用方案
-                    downloadImageFallback(url, filename).then(resolve);
+                    triggerFallback();
                 }
             });
         }
