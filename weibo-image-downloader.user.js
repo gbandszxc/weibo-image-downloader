@@ -33,9 +33,9 @@
         ],
         // 头部区域选择器 - 按钮要插入到这个容器末尾
         HEADER_SELECTORS: [
+            'div[class*="_iconsPlus_"]',
             'header > div > div[class*="_nick_"]',
             'header > div > div.woo-box-flex',
-            'header .woo-box-item-flex > div',
             '.woo-nickname',
             '.name'
         ]
@@ -103,32 +103,36 @@
      */
     async function downloadImage(url, filename) {
         return new Promise((resolve) => {
-            // 只使用GM_download，更可靠
+            // 只使用GM_download
             if (typeof GM_download === 'function') {
                 try {
-                    const result = GM_download({
-                        url: url,
-                        name: filename,
-                        saveAs: false
-                    });
-                    
-                    // result === 0 表示成功（同步）
-                    // result > 0 表示异步下载正在进行
-                    if (result === 0 || result > 0) {
-                        log(`GM_download已发起: ${filename}`);
-                        resolve(true);
-                        return;
-                    }
+                    GM_download(url, filename);
+                    log(`GM_download已发起: ${filename}`);
+                    resolve(true);
+                    return;
                 } catch (e) {
                     log('GM_download异常:', e.message);
                 }
             }
             
-            // GM_download失败时，使用window.open直接打开
-            // 用户可以在新标签页右键另存为
-            log(`打开图片: ${filename}`);
-            window.open(url, '_blank');
-            resolve(true);
+            // 备用：使用fetch下载
+            try {
+                const response = await fetch(url);
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = filename;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                log(`fetch下载成功: ${filename}`);
+                resolve(true);
+            } catch (e2) {
+                // 最后备用：打开新窗口
+                log(`打开图片: ${filename}`);
+                window.open(url, '_blank');
+                resolve(true);
+            }
         });
     }
 
