@@ -31,12 +31,13 @@
             'article',
             '.vue-feed-item'
         ],
-        // 用户名/昵称区域选择器
-        NAME_SELECTORS: [
+        // 头部区域选择器 - 按钮要插入到这个容器末尾
+        HEADER_SELECTORS: [
+            'header > div > div[class*="_nick_"]',
+            'header > div > div.woo-box-flex',
+            'header .woo-box-item-flex > div',
             '.woo-nickname',
-            '.name',
-            '.nickname',
-            '[node-type="nickname"]'
+            '.name'
         ]
     };
 
@@ -102,31 +103,31 @@
      */
     async function downloadImage(url, filename) {
         return new Promise((resolve) => {
-            // 方法1: 使用GM_download
+            // 只使用GM_download，更可靠
             if (typeof GM_download === 'function') {
                 try {
-                    GM_download({
+                    const result = GM_download({
                         url: url,
                         name: filename,
-                        saveAs: false,
-                        onload: () => {
-                            log(`下载成功: ${filename}`);
-                            resolve(true);
-                        },
-                        onerror: () => {
-                            // 方法2: 模拟点击下载
-                            downloadViaLink(url, filename);
-                            resolve(true);
-                        }
+                        saveAs: false
                     });
-                    return;
+                    
+                    // result === 0 表示成功（同步）
+                    // result > 0 表示异步下载正在进行
+                    if (result === 0 || result > 0) {
+                        log(`GM_download已发起: ${filename}`);
+                        resolve(true);
+                        return;
+                    }
                 } catch (e) {
-                    log('GM_download异常');
+                    log('GM_download异常:', e.message);
                 }
             }
             
-            // 方法2: 模拟点击下载
-            downloadViaLink(url, filename);
+            // GM_download失败时，使用window.open直接打开
+            // 用户可以在新标签页右键另存为
+            log(`打开图片: ${filename}`);
+            window.open(url, '_blank');
             resolve(true);
         });
     }
@@ -275,7 +276,7 @@
     }
 
     /**
-     * 注入下载按钮 - 插入到用户名右侧
+     * 注入下载按钮 - 插入到header区域末尾
      */
     function injectDownloadButtons() {
         let postsAdded = 0;
@@ -288,39 +289,23 @@
                 const btn = createDownloadButton(post);
                 if (!btn) return;
 
-                // 尝试找到用户名区域并插入到右边
+                // 查找header区域并追加到末尾
                 let inserted = false;
                 
-                // 查找昵称元素
-                for (const nameSelector of CONFIG.NAME_SELECTORS) {
-                    const nameEl = post.querySelector(nameSelector);
-                    if (nameEl) {
-                        nameEl.parentNode.insertBefore(btn, nameEl.nextSibling);
+                for (const headerSelector of CONFIG.HEADER_SELECTORS) {
+                    const headerEl = post.querySelector(headerSelector);
+                    if (headerEl) {
+                        headerEl.appendChild(btn);
                         postsAdded++;
                         inserted = true;
                         break;
                     }
                 }
 
-                // 如果没找到，尝试找头像附近的元素
-                if (!inserted) {
-                    const avatarWrap = post.querySelector('.woo-avatar') || 
-                                     post.querySelector('.avatar') ||
-                                     post.querySelector('[node-type="feed_list_userAvatar"]');
-                    if (avatarWrap) {
-                        avatarWrap.parentNode.insertBefore(btn, avatarWrap.nextSibling);
-                        postsAdded++;
-                        inserted = true;
-                    }
-                }
-
                 // 最后的fallback
                 if (!inserted) {
-                    const firstChild = post.firstChild;
-                    if (firstChild) {
-                        post.insertBefore(btn, firstChild);
-                        postsAdded++;
-                    }
+                    post.appendChild(btn);
+                    postsAdded++;
                 }
             });
         }
