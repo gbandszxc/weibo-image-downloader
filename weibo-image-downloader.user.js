@@ -104,20 +104,43 @@
     async function downloadImage(url, filename) {
         // 使用GM_download（需要对象格式）
         if (typeof GM_download === 'function') {
-            try {
-                GM_download({
-                    url: url,
-                    name: filename,
-                    saveAs: true
-                });
-                log(`GM_download已发起: ${filename}`);
-                return true;
-            } catch (e) {
-                log('GM_download异常:', e.message);
-            }
+            return new Promise((resolve) => {
+                try {
+                    const downloadId = GM_download({
+                        url: url,
+                        name: filename,
+                        onload: function() {
+                            log(`GM_download下载完成: ${filename}`);
+                            resolve(true);
+                        },
+                        onerror: function(error) {
+                            log(`GM_download失败: ${error.error || error.message || '未知错误'}`);
+                            // 备用方案
+                            downloadImageFallback(url, filename).then(resolve);
+                        },
+                        onprogress: function(progress) {
+                            // 可选：进度日志
+                        }
+                    });
+                    if (downloadId) {
+                        log(`GM_download已发起: ${filename}, id: ${downloadId}`);
+                    }
+                } catch (e) {
+                    log('GM_download异常:', e.message);
+                    // 备用方案
+                    downloadImageFallback(url, filename).then(resolve);
+                }
+            });
         }
 
-        // 备用：使用fetch下载
+        // 没有GM_download时使用备用方案
+        return downloadImageFallback(url, filename);
+    }
+
+    /**
+     * 备用下载方案（fetch + blob）
+     */
+    async function downloadImageFallback(url, filename) {
         try {
             const response = await fetch(url);
             const blob = await response.blob();
