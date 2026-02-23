@@ -102,38 +102,39 @@
      * 下载单张图片
      */
     async function downloadImage(url, filename) {
-        return new Promise((resolve) => {
-            // 只使用GM_download
-            if (typeof GM_download === 'function') {
-                try {
-                    GM_download(url, filename);
-                    log(`GM_download已发起: ${filename}`);
-                    resolve(true);
-                    return;
-                } catch (e) {
-                    log('GM_download异常:', e.message);
-                }
-            }
-            
-            // 备用：使用fetch下载
+        // 使用GM_download（需要对象格式）
+        if (typeof GM_download === 'function') {
             try {
-                const response = await fetch(url);
-                const blob = await response.blob();
-                const blobUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = blobUrl;
-                a.download = filename;
-                a.click();
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-                log(`fetch下载成功: ${filename}`);
-                resolve(true);
-            } catch (e2) {
-                // 最后备用：打开新窗口
-                log(`打开图片: ${filename}`);
-                window.open(url, '_blank');
-                resolve(true);
+                GM_download({
+                    url: url,
+                    name: filename,
+                    saveAs: true
+                });
+                log(`GM_download已发起: ${filename}`);
+                return true;
+            } catch (e) {
+                log('GM_download异常:', e.message);
             }
-        });
+        }
+
+        // 备用：使用fetch下载
+        try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            log(`fetch下载成功: ${filename}`);
+            return true;
+        } catch (e2) {
+            // 最后备用：打开新窗口
+            log(`打开图片: ${filename}`);
+            window.open(url, '_blank');
+            return true;
+        }
     }
 
     /**
@@ -280,7 +281,7 @@
     }
 
     /**
-     * 注入下载按钮 - 插入到header区域末尾
+     * 注入下载按钮 - 插入到header区域，_iconsPlus之前
      */
     function injectDownloadButtons() {
         let postsAdded = 0;
@@ -293,16 +294,26 @@
                 const btn = createDownloadButton(post);
                 if (!btn) return;
 
-                // 查找header区域并追加到末尾
+                // 优先：插入到 _iconsPlus_ 之前
                 let inserted = false;
-                
-                for (const headerSelector of CONFIG.HEADER_SELECTORS) {
-                    const headerEl = post.querySelector(headerSelector);
-                    if (headerEl) {
-                        headerEl.appendChild(btn);
-                        postsAdded++;
-                        inserted = true;
-                        break;
+                const iconsPlusEl = post.querySelector('div[class*="_iconsPlus_"]');
+                if (iconsPlusEl && iconsPlusEl.parentNode) {
+                    iconsPlusEl.parentNode.insertBefore(btn, iconsPlusEl);
+                    postsAdded++;
+                    inserted = true;
+                    log('按钮插入到 iconsPlus 之前');
+                }
+
+                // 备用：查找header区域
+                if (!inserted) {
+                    for (const headerSelector of CONFIG.HEADER_SELECTORS) {
+                        const headerEl = post.querySelector(headerSelector);
+                        if (headerEl) {
+                            headerEl.appendChild(btn);
+                            postsAdded++;
+                            inserted = true;
+                            break;
+                        }
                     }
                 }
 
