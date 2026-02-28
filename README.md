@@ -15,7 +15,7 @@
 ### 方法1：Tampermonkey（推荐）
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 点击 [weibo-image-downloader.user.js](./weibo-image-downloader.user.js) 文件
+2. 点击 [weibo-image-downloader.user.js](https://github.com/gbandszxc/weibo-image-downloader/raw/refs/heads/main/weibo-image-downloader.user.js) 文件
 3. 或者在 Tampermonkey 面板中选择"添加新脚本"
 4. 将 `weibo-image-downloader.user.js` 的内容粘贴进去并保存
 
