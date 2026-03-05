@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.4
+// @version      1.1.6
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -51,8 +51,6 @@
                 'article[data-testid="tweet"]'
             ],
             IMG_SELECTORS: [
-                '[data-testid="tweetPhoto"] img',
-                'article [data-testid="card.layoutSmall.image"] img',
                 'article img[src*="twimg.com"]'
             ],
             ACTION_GROUP_SELECTORS: [
@@ -142,18 +140,27 @@
         }
 
         try {
-            const urlObj = new URL(url);
+            // 确保 URL 是完整的
+            let fullUrl = url;
+            if (!url.startsWith('http')) {
+                fullUrl = 'https://' + url;
+            }
+            
+            const urlObj = new URL(fullUrl);
             const name = urlObj.searchParams.get('name');
             if (name === 'orig' || name === 'large') {
-                return url;
+                return fullUrl;
             }
+            // 先删除原有的 name 参数，再设置新的
+            urlObj.searchParams.delete('name');
             urlObj.searchParams.set('name', 'orig');
             return urlObj.toString();
         } catch (e) {
             if (url.includes('name=orig') || url.includes('name=large')) {
                 return url;
             }
-            return url + (url.includes('?') ? '&' : '?') + 'name=orig';
+            // 简单替换 name=xxx 为 name=orig
+            return url.replace(/name=[^&]*/, 'name=orig');
         }
     }
 
@@ -317,14 +324,23 @@
             try {
                 const elements = container.querySelectorAll(selector);
                 elements.forEach(img => {
-                    if (!img.src || !img.src.includes('pbs.twimg.com')) return;
+                    const src = img.src;
+                    if (!src || typeof src !== 'string') return;
+                    if (!src.includes('pbs.twimg.com')) return;
                     
-                    const src = img.src.split('?')[0];
-                    if (seen.has(src)) return;
-                    seen.add(src);
+                    const srcKey = src.split('?')[0];
+                    if (seen.has(srcKey)) return;
+                    seen.add(srcKey);
                     
-                    if (img.naturalWidth <= 50 || img.naturalHeight <= 50) return;
-                    if (img.alt && (img.alt.includes('avatar') || img.alt.includes('profile'))) return;
+                    // 过滤头像图片
+                    if (src.includes('/profile_images/')) return;
+                    
+                    // 过滤表情符号
+                    if (src.includes('/emoji/')) return;
+                    
+                    // 过滤 alt 包含 avatar/profile 的图片
+                    const alt = img.alt || '';
+                    if (alt.toLowerCase().includes('avatar') || alt.toLowerCase().includes('profile')) return;
                     
                     images.push(img);
                 });
@@ -470,20 +486,11 @@
                         if (usernameEl) {
                             const parent = usernameEl.parentElement;
                             if (parent) {
-                                const timeLink = parent.querySelector('a[href*="/status/"] time');
-                                if (timeLink && timeLink.parentElement) {
-                                    timeLink.parentElement.parentNode.insertBefore(btn, timeLink.parentElement.nextSibling);
-                                    postsAdded++;
-                                    inserted = true;
-                                    log('X详情页：按钮插入到时间链接右侧');
-                                }
+                                parent.parentNode.insertBefore(btn, parent.nextSibling);
+                                postsAdded++;
+                                inserted = true;
+                                log('X详情页：按钮插入到用户名区域右侧');
                             }
-                        }
-                        if (!inserted) {
-                            usernameEl.parentNode.insertBefore(btn, usernameEl.nextSibling);
-                            postsAdded++;
-                            inserted = true;
-                            log('X详情页：按钮插入到用户名右侧');
                         }
                     } else {
                         const timeEl = post.querySelector('time');
@@ -549,7 +556,7 @@
 
     function init() {
         const platform = getCurrentPlatform();
-        log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器 v1.1.3 加载中...`);
+        log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器 v1.1.5 加载中...`);
 
         setTimeout(() => {
             injectDownloadButtons();
