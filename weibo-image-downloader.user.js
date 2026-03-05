@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.7
+// @version      1.1.8
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -179,38 +179,29 @@
         // 使用GM_download
         if (typeof GM_download === 'function') {
             return new Promise((resolve) => {
-                let fallbackTriggered = false;
-                const triggerFallback = () => {
-                    if (!fallbackTriggered) {
-                        fallbackTriggered = true;
-                        log(`GM_download失败，启用备用方案: ${filename}`);
-                        downloadImageFallback(url, filename).then(resolve);
-                    }
-                };
-
                 try {
                     const downloadId = GM_download({
                         url: url,
                         name: filename,
                         onload: function() {
-                            log(`GM_download下载完成: ${filename}`);
+                            log(`下载完成: ${filename}`);
                             resolve(true);
                         },
                         onerror: function(error) {
-                            log(`GM_download失败: ${error.error || error.message || '未知错误'}`);
-                            triggerFallback();
+                            log(`下载失败: ${error.error || error.message || '未知错误'}`);
+                            resolve(false);
                         },
                         onprogress: function(progress) {}
                     });
-                    log(`GM_download已发起: ${filename}, id: ${downloadId}`);
                     
                     // 如果立即返回false，说明立即失败了
                     if (downloadId === false) {
-                        triggerFallback();
+                        log(`GM_download返回false: ${filename}`);
+                        resolve(false);
                     }
                 } catch (e) {
                     log('GM_download异常:', e.message);
-                    triggerFallback();
+                    resolve(false);
                 }
             });
         }
