@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.6
+// @version      1.1.7
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -269,15 +269,15 @@
         for (let i = 0; i < urls.length; i++) {
             const url = urls[i];
             const filename = getFilename(postId, i + 1);
-            downloadImage(url, filename);
+            await downloadImage(url, filename);
             
             if (i < urls.length - 1) {
                 await new Promise(r => setTimeout(r, CONFIG.DELAY_MS));
             }
         }
 
-        log(`已发起 ${urls.length} 个下载`);
-        alert(`已发起 ${urls.length} 个下载，请查看浏览器下载`);
+        log(`已下载 ${urls.length} 张图片`);
+        alert(`已下载 ${urls.length} 张图片`);
     }
 
     // ==================== DOM操作 ====================
