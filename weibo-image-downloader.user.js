@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.3
+// @version      1.1.4
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -362,13 +362,7 @@
         const urls = [];
 
         images.forEach(img => {
-            let src = img.src;
-            
-            if (isX()) {
-                src = src.split('?')[0];
-            }
-            
-            let url = getOriginalImageUrl(src);
+            let url = getOriginalImageUrl(img.src);
             if (url) {
                 const key = url.split('?')[0];
                 if (!seen.has(key)) {
