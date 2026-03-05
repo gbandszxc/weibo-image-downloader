@@ -1,13 +1,19 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.0.4
-// @description  一键下载微博帖子中的所有图片为原图
+// @version      1.1.1
+// @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
 // @match        https://www.weibo.com/*
 // @match        https://weibo.com.cn/*
+// @match        https://x.com/*
+// @match        https://www.x.com/*
+// @match        https://twitter.com/*
+// @match        https://www.twitter.com/*
 // @connect      *.sinaimg.cn
+// @connect      *.sina.cn
+// @connect      *.twimg.com
 // @grant        GM_download
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
@@ -31,19 +37,57 @@
             'article',
             '.vue-feed-item'
         ],
-        // 头部区域选择器 - 按钮要插入到这个容器末尾
+    // 头部区域选择器 - 按钮要插入到这个容器末尾
         HEADER_SELECTORS: [
             'div[class*="_iconsPlus_"]',
             'header > div > div[class*="_nick_"]',
             'header > div > div.woo-box-flex',
             '.woo-nickname',
             '.name'
-        ]
+        ],
+        // X平台配置
+        X_CONFIG: {
+            POST_SELECTORS: [
+                'article[data-testid="tweet"]'
+            ],
+            IMG_SELECTORS: [
+                'div[data-testid="tweetPhoto"] img',
+                'div[role="link"] img[src*="twimg"]'
+            ],
+            // 详情页用户名区域
+            DETAIL_USERNAME_SELECTORS: [
+                'div[data-testid="User-Name"]',
+                'div[aria-labelledby] span[role="link"]'
+            ],
+            // 详情页时间区域
+            DETAIL_TIME_SELECTORS: [
+                'time'
+            ],
+            ACTION_GROUP_SELECTORS: [
+                '[role="group"]'
+            ]
+        }
     };
+
+    // ==================== 平台检测 ====================
+    function isWeibo() {
+        return window.location.hostname.includes('weibo');
+    }
+
+    function isX() {
+        return window.location.hostname.includes('x.com') || 
+               window.location.hostname.includes('twitter');
+    }
+
+    function getCurrentPlatform() {
+        if (isX()) return 'x';
+        return 'weibo';
+    }
 
     function log(...args) {
         if (CONFIG.DEBUG) {
-            console.log('[Weibo Downloader]', ...args);
+            const platform = getCurrentPlatform();
+            console.log(`[${platform} Downloader]`, ...args);
         }
     }
 
@@ -66,6 +110,14 @@
     function getOriginalImageUrl(url) {
         if (!url || typeof url !== 'string') return null;
 
+        if (isX()) {
+            return getXOriginalImageUrl(url);
+        }
+
+        return getWeiboOriginalImageUrl(url);
+    }
+
+    function getWeiboOriginalImageUrl(url) {
         if (!url.includes('sinaimg.cn') && !url.includes('sina.cn')) {
             return null;
         }
@@ -91,11 +143,26 @@
         return url;
     }
 
+    function getXOriginalImageUrl(url) {
+        if (!url.includes('pbs.twimg.com')) {
+            return null;
+        }
+
+        if (url.includes('name=orig')) return url;
+        if (url.includes('name=large')) return url;
+
+        const urlObj = new URL(url);
+        urlObj.searchParams.set('name', 'orig');
+        
+        return urlObj.toString();
+    }
+
     /**
      * 获取文件名
      */
     function getFilename(postId, index) {
-        return `weibo_${postId}_${index}.jpg`;
+        const platform = getCurrentPlatform();
+        return `${platform}_${postId}_${index}.jpg`;
     }
 
     /**
@@ -213,21 +280,74 @@
      */
     function findImagesInPost(container) {
         const images = [];
+        
+        if (isX()) {
+            return findXImagesInPost(container);
+        }
+        
+        const selectors = CONFIG.IMG_SELECTORS;
 
-        for (const selector of CONFIG.IMG_SELECTORS) {
+        for (const selector of selectors) {
             try {
                 const elements = container.querySelectorAll(selector);
                 elements.forEach(img => {
                     if (!img.src) return;
-                    if (isAvatarImage(img.src)) return;
-                    if (img.src.includes('default_avatar')) return;
-                    if (!img.src.includes('sinaimg') && !img.src.includes('sina.cn')) return;
+                    
+                    if (isWeibo()) {
+                        if (isAvatarImage(img.src)) return;
+                        if (img.src.includes('default_avatar')) return;
+                        if (!img.src.includes('sinaimg') && !img.src.includes('sina.cn')) return;
+                    }
+                    
                     images.push(img);
                 });
             } catch (e) {}
         }
 
         return images;
+    }
+
+    function findXImagesInPost(container) {
+        const images = [];
+        const seen = new Set();
+        
+        const selectors = CONFIG.X_CONFIG.IMG_SELECTORS;
+
+        for (const selector of selectors) {
+            try {
+                const elements = container.querySelectorAll(selector);
+                elements.forEach(img => {
+                    if (!img.src || !img.src.includes('pbs.twimg.com')) return;
+                    
+                    const src = img.src.split('?')[0];
+                    if (seen.has(src)) return;
+                    seen.add(src);
+                    
+                    images.push(img);
+                });
+            } catch (e) {}
+        }
+
+        return images;
+    }
+
+    function isMainTweet(container) {
+        if (!isX()) return true;
+        
+        const article = container.closest('article[data-testid="tweet"]');
+        if (!article) return false;
+        
+        const timeEl = article.querySelector('time');
+        const actionGroup = article.querySelector('[role="group"]');
+        
+        return timeEl !== null;
+    }
+
+    function isDetailPage() {
+        if (!isX()) return false;
+        
+        const path = window.location.pathname;
+        return /\/[\w_]+\/status\/\d+/.test(path);
     }
 
     /**
@@ -239,19 +359,17 @@
         const urls = [];
 
         images.forEach(img => {
-            // 从src获取
-            let url = getOriginalImageUrl(img.src);
-            if (url && !seen.has(url)) {
-                seen.add(url);
-                urls.push(url);
+            let src = img.src;
+            
+            if (isX()) {
+                src = src.split('?')[0];
             }
             
-            // 从data-src获取
-            const dataSrc = img.getAttribute('data-src');
-            if (dataSrc) {
-                url = getOriginalImageUrl(dataSrc);
-                if (url && !seen.has(url)) {
-                    seen.add(url);
+            let url = getOriginalImageUrl(src);
+            if (url) {
+                const key = url.split('?')[0];
+                if (!seen.has(key)) {
+                    seen.add(key);
                     urls.push(url);
                 }
             }
@@ -302,9 +420,26 @@
         btn.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const postId = postContainer.getAttribute('mid') || 
-                          postContainer.getAttribute('data-mid') || 
-                          'weibo_' + Date.now();
+            
+            let postId;
+            if (isX()) {
+                const timeEl = postContainer.querySelector('time');
+                if (timeEl && timeEl.parentElement) {
+                    const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
+                    if (linkEl) {
+                        const match = linkEl.href.match(/\/status\/(\d+)/);
+                        if (match) {
+                            postId = match[1];
+                        }
+                    }
+                }
+                postId = postId || 'x_' + Date.now();
+            } else {
+                postId = postContainer.getAttribute('mid') || 
+                       postContainer.getAttribute('data-mid') || 
+                       'weibo_' + Date.now();
+            }
+            
             downloadAllImages(urls, postId);
         };
 
@@ -312,43 +447,83 @@
     }
 
     /**
-     * 注入下载按钮 - 插入到header区域，_iconsPlus之前
+     * 注入下载按钮
      */
     function injectDownloadButtons() {
         let postsAdded = 0;
+        const selectors = isX() ? CONFIG.X_CONFIG.POST_SELECTORS : CONFIG.POST_SELECTORS;
 
-        for (const selector of CONFIG.POST_SELECTORS) {
+        for (const selector of selectors) {
             const posts = document.querySelectorAll(selector);
             posts.forEach(post => {
                 if (post.querySelector('.weibo-img-download-btn')) return;
 
+                if (isX() && !isMainTweet(post)) {
+                    return;
+                }
+
                 const btn = createDownloadButton(post);
                 if (!btn) return;
 
-                // 优先：插入到 _iconsPlus_ 之前
                 let inserted = false;
-                const iconsPlusEl = post.querySelector('div[class*="_iconsPlus_"]');
-                if (iconsPlusEl && iconsPlusEl.parentNode) {
-                    iconsPlusEl.parentNode.insertBefore(btn, iconsPlusEl);
-                    postsAdded++;
-                    inserted = true;
-                    log('按钮插入到 iconsPlus 之前');
-                }
 
-                // 备用：查找header区域
-                if (!inserted) {
-                    for (const headerSelector of CONFIG.HEADER_SELECTORS) {
-                        const headerEl = post.querySelector(headerSelector);
-                        if (headerEl) {
-                            headerEl.appendChild(btn);
+                if (isX()) {
+                    if (isDetailPage()) {
+                        const usernameEl = post.querySelector('div[data-testid="User-Name"]');
+                        if (usernameEl) {
+                            usernameEl.parentNode.insertBefore(btn, usernameEl.nextSibling);
                             postsAdded++;
                             inserted = true;
-                            break;
+                            log('X详情页：按钮插入到用户名右侧');
+                        }
+                    } else {
+                        const timeEl = post.querySelector('time');
+                        if (timeEl) {
+                            const timeParent = timeEl.parentElement;
+                            if (timeParent && timeParent.nextElementSibling) {
+                                timeParent.parentNode.insertBefore(btn, timeParent.nextElementSibling);
+                                postsAdded++;
+                                inserted = true;
+                                log('X时间线：按钮插入到时间右边');
+                            } else if (timeParent) {
+                                timeParent.parentNode.insertBefore(btn, timeParent.nextSibling);
+                                postsAdded++;
+                                inserted = true;
+                            }
+                        }
+                    }
+                    
+                    if (!inserted) {
+                        const actionGroup = post.querySelector('[role="group"]');
+                        if (actionGroup && actionGroup.parentElement) {
+                            actionGroup.parentElement.insertBefore(btn, actionGroup);
+                            postsAdded++;
+                            inserted = true;
+                            log('X平台：按钮插入到操作按钮组之前');
+                        }
+                    }
+                } else {
+                    const iconsPlusEl = post.querySelector('div[class*="_iconsPlus_"]');
+                    if (iconsPlusEl && iconsPlusEl.parentNode) {
+                        iconsPlusEl.parentNode.insertBefore(btn, iconsPlusEl);
+                        postsAdded++;
+                        inserted = true;
+                        log('微博：按钮插入到 iconsPlus 之前');
+                    }
+
+                    if (!inserted) {
+                        for (const headerSelector of CONFIG.HEADER_SELECTORS) {
+                            const headerEl = post.querySelector(headerSelector);
+                            if (headerEl) {
+                                headerEl.appendChild(btn);
+                                postsAdded++;
+                                inserted = true;
+                                break;
+                            }
                         }
                     }
                 }
 
-                // 最后的fallback
                 if (!inserted) {
                     post.appendChild(btn);
                     postsAdded++;
@@ -364,7 +539,8 @@
     // ==================== 初始化 ====================
 
     function init() {
-        log('微博图片批量下载器 v1.0.4 加载中...');
+        const platform = getCurrentPlatform();
+        log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器 v1.1.1 加载中...`);
 
         setTimeout(() => {
             injectDownloadButtons();
