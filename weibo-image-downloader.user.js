@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.1
+// @version      1.1.2
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -51,17 +51,9 @@
                 'article[data-testid="tweet"]'
             ],
             IMG_SELECTORS: [
-                'div[data-testid="tweetPhoto"] img',
-                'div[role="link"] img[src*="twimg"]'
-            ],
-            // 详情页用户名区域
-            DETAIL_USERNAME_SELECTORS: [
-                'div[data-testid="User-Name"]',
-                'div[aria-labelledby] span[role="link"]'
-            ],
-            // 详情页时间区域
-            DETAIL_TIME_SELECTORS: [
-                'time'
+                '[data-testid="tweetPhoto"] img',
+                'article [data-testid="card.layoutSmall.image"] img',
+                'article img[src*="twimg.com"]'
             ],
             ACTION_GROUP_SELECTORS: [
                 '[role="group"]'
@@ -144,17 +136,25 @@
     }
 
     function getXOriginalImageUrl(url) {
+        if (!url || typeof url !== 'string') return null;
         if (!url.includes('pbs.twimg.com')) {
             return null;
         }
 
-        if (url.includes('name=orig')) return url;
-        if (url.includes('name=large')) return url;
-
-        const urlObj = new URL(url);
-        urlObj.searchParams.set('name', 'orig');
-        
-        return urlObj.toString();
+        try {
+            const urlObj = new URL(url);
+            const name = urlObj.searchParams.get('name');
+            if (name === 'orig' || name === 'large') {
+                return url;
+            }
+            urlObj.searchParams.set('name', 'orig');
+            return urlObj.toString();
+        } catch (e) {
+            if (url.includes('name=orig') || url.includes('name=large')) {
+                return url;
+            }
+            return url + (url.includes('?') ? '&' : '?') + 'name=orig';
+        }
     }
 
     /**
@@ -323,10 +323,16 @@
                     if (seen.has(src)) return;
                     seen.add(src);
                     
+                    if (img.naturalWidth <= 50 || img.naturalHeight <= 50) return;
+                    if (img.alt && (img.alt.includes('avatar') || img.alt.includes('profile'))) return;
+                    
                     images.push(img);
                 });
             } catch (e) {}
         }
+
+        return images;
+    }
 
         return images;
     }
@@ -469,8 +475,20 @@
 
                 if (isX()) {
                     if (isDetailPage()) {
-                        const usernameEl = post.querySelector('div[data-testid="User-Name"]');
+                        const usernameEl = post.querySelector('[data-testid="User-Name"]');
                         if (usernameEl) {
+                            const parent = usernameEl.parentElement;
+                            if (parent) {
+                                const timeLink = parent.querySelector('a[href*="/status/"] time');
+                                if (timeLink && timeLink.parentElement) {
+                                    timeLink.parentElement.parentNode.insertBefore(btn, timeLink.parentElement.nextSibling);
+                                    postsAdded++;
+                                    inserted = true;
+                                    log('X详情页：按钮插入到时间链接右侧');
+                                }
+                            }
+                        }
+                        if (!inserted) {
                             usernameEl.parentNode.insertBefore(btn, usernameEl.nextSibling);
                             postsAdded++;
                             inserted = true;
@@ -540,7 +558,7 @@
 
     function init() {
         const platform = getCurrentPlatform();
-        log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器 v1.1.1 加载中...`);
+        log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器 v1.1.2 加载中...`);
 
         setTimeout(() => {
             injectDownloadButtons();
