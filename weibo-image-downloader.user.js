@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.9
+// @version      1.1.10
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -634,12 +634,23 @@
             modal.appendChild(actions);
             overlay.appendChild(modal);
 
+            const scrollY = window.scrollY || window.pageYOffset || 0;
             const prevOverflow = document.body.style.overflow;
+            const prevPosition = document.body.style.position;
+            const prevTop = document.body.style.top;
+            const prevWidth = document.body.style.width;
             document.body.style.overflow = 'hidden';
+            document.body.style.position = 'fixed';
+            document.body.style.top = `-${scrollY}px`;
+            document.body.style.width = '100%';
 
             const cleanup = () => {
                 document.removeEventListener('keydown', onKeyDown);
                 document.body.style.overflow = prevOverflow;
+                document.body.style.position = prevPosition;
+                document.body.style.top = prevTop;
+                document.body.style.width = prevWidth;
+                window.scrollTo(0, scrollY);
                 if (overlay.parentNode) {
                     overlay.parentNode.removeChild(overlay);
                 }
@@ -725,6 +736,7 @@
 
         let longPressTimer = null;
         let longPressTriggered = false;
+        let suppressNextClick = false;
 
         const clearLongPressTimer = () => {
             if (longPressTimer) {
@@ -740,6 +752,15 @@
 
         btn.addEventListener('contextmenu', (event) => {
             event.preventDefault();
+            event.stopPropagation();
+        });
+
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (suppressNextClick) {
+                suppressNextClick = false;
+            }
         });
 
         btn.addEventListener('pointerdown', (event) => {
@@ -747,10 +768,13 @@
                 return;
             }
 
+            event.preventDefault();
+            event.stopPropagation();
             longPressTriggered = false;
             clearLongPressTimer();
             longPressTimer = setTimeout(async () => {
                 longPressTriggered = true;
+                suppressNextClick = true;
                 clearLongPressTimer();
                 const selectedUrls = await showImageSelectModal(urls);
                 if (selectedUrls && selectedUrls.length > 0) {
