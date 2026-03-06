@@ -510,12 +510,36 @@
                         }
                     }
                 } else {
-                    const iconsPlusEl = post.querySelector('div[class*="_iconsPlus_"]');
-                    if (iconsPlusEl && iconsPlusEl.parentNode) {
-                        iconsPlusEl.parentNode.insertBefore(btn, iconsPlusEl);
+                    // 优先检查是否是转发微博，如果是则插入到"转发微博"文字后面
+                    const retweetSpan = Array.from(post.querySelectorAll('span')).find(el =>
+                        el.textContent.trim() === '转发微博'
+                    );
+                    if (retweetSpan && retweetSpan.parentNode) {
+                        retweetSpan.parentNode.insertBefore(btn, retweetSpan.nextSibling);
                         postsAdded++;
                         inserted = true;
-                        log('微博：按钮插入到 iconsPlus 之前');
+                        log('微博：按钮插入到"转发微博"文字后面');
+                    }
+
+                    // 对于非转发微博，尝试插入到suffixbox容器末尾（用户名/超话标签同一行）
+                    if (!inserted) {
+                        const suffixBox = post.querySelector('div[class*="_suffixbox"]');
+                        if (suffixBox) {
+                            suffixBox.appendChild(btn);
+                            postsAdded++;
+                            inserted = true;
+                            log('微博：按钮插入到用户名/超话标签右侧');
+                        }
+                    }
+
+                    if (!inserted) {
+                        const iconsPlusEl = post.querySelector('div[class*="_iconsPlus_"]');
+                        if (iconsPlusEl && iconsPlusEl.parentNode) {
+                            iconsPlusEl.parentNode.insertBefore(btn, iconsPlusEl);
+                            postsAdded++;
+                            inserted = true;
+                            log('微博：按钮插入到 iconsPlus 之前');
+                        }
                     }
 
                     if (!inserted) {
