@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.10
+// @version      1.2.0
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -427,7 +427,7 @@
             .weibo-img-select-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(0, 0, 0, 0.45);
+                background: rgba(0, 0, 0, 0.16);
                 z-index: 2147483647;
                 display: flex;
                 align-items: center;
@@ -634,23 +634,10 @@
             modal.appendChild(actions);
             overlay.appendChild(modal);
 
-            const scrollY = window.scrollY || window.pageYOffset || 0;
-            const prevOverflow = document.body.style.overflow;
-            const prevPosition = document.body.style.position;
-            const prevTop = document.body.style.top;
-            const prevWidth = document.body.style.width;
-            document.body.style.overflow = 'hidden';
-            document.body.style.position = 'fixed';
-            document.body.style.top = `-${scrollY}px`;
-            document.body.style.width = '100%';
-
             const cleanup = () => {
                 document.removeEventListener('keydown', onKeyDown);
-                document.body.style.overflow = prevOverflow;
-                document.body.style.position = prevPosition;
-                document.body.style.top = prevTop;
-                document.body.style.width = prevWidth;
-                window.scrollTo(0, scrollY);
+                overlay.removeEventListener('wheel', preventScroll, { passive: false });
+                overlay.removeEventListener('touchmove', preventScroll, { passive: false });
                 if (overlay.parentNode) {
                     overlay.parentNode.removeChild(overlay);
                 }
@@ -690,6 +677,17 @@
                     closeWithResult(null);
                 }
             });
+
+            const preventScroll = (event) => {
+                event.preventDefault();
+            };
+
+            modal.addEventListener('click', (event) => {
+                event.stopPropagation();
+            });
+
+            overlay.addEventListener('wheel', preventScroll, { passive: false });
+            overlay.addEventListener('touchmove', preventScroll, { passive: false });
 
             document.addEventListener('keydown', onKeyDown);
             document.body.appendChild(overlay);
