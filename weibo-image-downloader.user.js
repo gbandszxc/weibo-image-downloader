@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.1.8
+// @version      1.1.9
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -178,35 +178,46 @@
     async function downloadImage(url, filename) {
         // 使用GM_download
         if (typeof GM_download === 'function') {
-            return new Promise((resolve) => {
-                try {
-                    const downloadId = GM_download({
-                        url: url,
-                        name: filename,
-                        onload: function() {
-                            log(`下载完成: ${filename}`);
-                            resolve(true);
-                        },
-                        onerror: function(error) {
-                            log(`下载失败: ${error.error || error.message || '未知错误'}`);
+            try {
+                const success = await new Promise((resolve) => {
+                    try {
+                        const downloadId = GM_download({
+                            url: url,
+                            name: filename,
+                            onload: function() {
+                                log(`下载完成: ${filename}`);
+                                resolve(true);
+                            },
+                            onerror: function(error) {
+                                log(`GM_download失败: ${error.error || error.message || '未知错误'}`);
+                                resolve(false);
+                            },
+                            onprogress: function(progress) {}
+                        });
+
+                        // 如果立即返回false，说明立即失败了
+                        if (downloadId === false) {
+                            log(`GM_download返回false: ${filename}`);
                             resolve(false);
-                        },
-                        onprogress: function(progress) {}
-                    });
-                    
-                    // 如果立即返回false，说明立即失败了
-                    if (downloadId === false) {
-                        log(`GM_download返回false: ${filename}`);
+                        }
+                    } catch (e) {
+                        log('GM_download异常:', e.message);
                         resolve(false);
                     }
-                } catch (e) {
-                    log('GM_download异常:', e.message);
-                    resolve(false);
+                });
+
+                if (success) {
+                    return true;
                 }
-            });
+
+                // GM_download 失败，尝试备用方案
+                log('GM_download失败，尝试备用方案');
+            } catch (e) {
+                log('GM_download异常，尝试备用方案:', e.message);
+            }
         }
 
-        // 没有GM_download时使用备用方案
+        // 没有GM_download或GM_download失败时使用备用方案
         return downloadImageFallback(url, filename);
     }
 
