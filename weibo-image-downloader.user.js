@@ -28,6 +28,7 @@
     const CONFIG = {
         BATCH_SIZE: 5,
         DELAY_MS: 300,
+        LONG_PRESS_MS: 500,
         DEBUG: true,
         IMG_SELECTORS: [
             'img.woo-picture-img',
@@ -394,6 +395,296 @@
         return urls;
     }
 
+    function getPostId(postContainer) {
+        let postId;
+        if (isX()) {
+            const timeEl = postContainer.querySelector('time');
+            if (timeEl && timeEl.parentElement) {
+                const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
+                if (linkEl) {
+                    const match = linkEl.href.match(/\/status\/(\d+)/);
+                    if (match) {
+                        postId = match[1];
+                    }
+                }
+            }
+            postId = postId || 'x_' + Date.now();
+        } else {
+            postId = postContainer.getAttribute('mid') ||
+                   postContainer.getAttribute('data-mid') ||
+                   'weibo_' + Date.now();
+        }
+
+        return postId;
+    }
+
+    function ensureImageSelectModalStyles() {
+        if (document.getElementById('weibo-img-select-modal-style')) {
+            return;
+        }
+
+        const css = `
+            .weibo-img-select-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.45);
+                z-index: 2147483647;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                box-sizing: border-box;
+            }
+            .weibo-img-select-modal {
+                width: 100%;
+                max-width: 420px;
+                max-height: 80vh;
+                background: #fff;
+                border-radius: 8px;
+                box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+            .weibo-img-select-header {
+                padding: 14px 16px;
+                border-bottom: 1px solid #eee;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+            .weibo-img-select-header-title {
+                font-size: 15px;
+                font-weight: 600;
+                color: #222;
+            }
+            .weibo-img-select-toggle-btn {
+                height: 28px;
+                padding: 0 10px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background: #fff;
+                color: #333;
+                font-size: 12px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                line-height: 1;
+                cursor: pointer;
+                box-sizing: border-box;
+                white-space: nowrap;
+            }
+            .weibo-img-select-list {
+                padding: 12px 16px;
+                overflow: auto;
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+                gap: 10px;
+            }
+            .weibo-img-select-item {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 8px;
+                border: 1px solid #eee;
+                border-radius: 6px;
+                user-select: none;
+                font-size: 14px;
+                color: #333;
+            }
+            .weibo-img-select-actions {
+                padding: 12px 16px;
+                border-top: 1px solid #eee;
+                display: flex;
+                justify-content: flex-end;
+                gap: 8px;
+            }
+            .weibo-img-select-btn {
+                min-width: 90px;
+                height: 32px;
+                padding: 0 12px;
+                border-radius: 4px;
+                border: 1px solid transparent;
+                font-size: 13px;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                line-height: 1;
+                box-sizing: border-box;
+            }
+            .weibo-img-select-modal button {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                vertical-align: middle;
+            }
+            .weibo-img-select-btn-cancel {
+                background: #fff;
+                border-color: #ccc;
+                color: #333;
+            }
+            .weibo-img-select-btn-confirm {
+                background: #ff8200;
+                color: #fff;
+            }
+        `;
+
+        if (typeof GM_addStyle === 'function') {
+            GM_addStyle(css);
+        } else {
+            const style = document.createElement('style');
+            style.id = 'weibo-img-select-modal-style';
+            style.textContent = css;
+            document.head.appendChild(style);
+            return;
+        }
+
+        const marker = document.createElement('style');
+        marker.id = 'weibo-img-select-modal-style';
+        marker.textContent = '';
+        document.head.appendChild(marker);
+    }
+
+    function showImageSelectModal(urls) {
+        return new Promise((resolve) => {
+            ensureImageSelectModalStyles();
+
+            const overlay = document.createElement('div');
+            overlay.className = 'weibo-img-select-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'weibo-img-select-modal';
+
+            const header = document.createElement('div');
+            header.className = 'weibo-img-select-header';
+            const toggleAllBtn = document.createElement('button');
+            toggleAllBtn.type = 'button';
+            toggleAllBtn.className = 'weibo-img-select-toggle-btn';
+
+            const headerTitle = document.createElement('div');
+            headerTitle.className = 'weibo-img-select-header-title';
+            headerTitle.textContent = `选择要下载的图片（共 ${urls.length} 张）`;
+
+            header.appendChild(toggleAllBtn);
+            header.appendChild(headerTitle);
+
+            const list = document.createElement('div');
+            list.className = 'weibo-img-select-list';
+            urls.forEach((_, index) => {
+                const label = document.createElement('label');
+                label.className = 'weibo-img-select-item';
+
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = true;
+                input.value = String(index);
+
+                const text = document.createElement('span');
+                text.textContent = String(index + 1);
+
+                label.appendChild(input);
+                label.appendChild(text);
+                list.appendChild(label);
+            });
+
+            const actions = document.createElement('div');
+            actions.className = 'weibo-img-select-actions';
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'weibo-img-select-btn weibo-img-select-btn-cancel';
+            cancelBtn.textContent = '取消';
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.type = 'button';
+            confirmBtn.className = 'weibo-img-select-btn weibo-img-select-btn-confirm';
+            confirmBtn.textContent = '下载所选';
+
+            actions.appendChild(cancelBtn);
+            actions.appendChild(confirmBtn);
+
+            const getInputs = () => Array.from(list.querySelectorAll('input[type="checkbox"]'));
+            const areAllChecked = () => {
+                const inputs = getInputs();
+                return inputs.length > 0 && inputs.every((input) => input.checked);
+            };
+            const updateToggleText = () => {
+                toggleAllBtn.textContent = areAllChecked() ? '全不选' : '全选';
+            };
+
+            getInputs().forEach((input) => {
+                input.addEventListener('change', updateToggleText);
+            });
+
+            toggleAllBtn.addEventListener('click', () => {
+                const shouldCheckAll = !areAllChecked();
+                getInputs().forEach((input) => {
+                    input.checked = shouldCheckAll;
+                });
+                updateToggleText();
+            });
+
+            updateToggleText();
+
+            modal.appendChild(header);
+            modal.appendChild(list);
+            modal.appendChild(actions);
+            overlay.appendChild(modal);
+
+            const prevOverflow = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
+
+            const cleanup = () => {
+                document.removeEventListener('keydown', onKeyDown);
+                document.body.style.overflow = prevOverflow;
+                if (overlay.parentNode) {
+                    overlay.parentNode.removeChild(overlay);
+                }
+            };
+
+            const closeWithResult = (result) => {
+                cleanup();
+                resolve(result);
+            };
+
+            const onKeyDown = (event) => {
+                if (event.key === 'Escape') {
+                    closeWithResult(null);
+                }
+            };
+
+            cancelBtn.addEventListener('click', () => closeWithResult(null));
+            confirmBtn.addEventListener('click', () => {
+                const selected = Array.from(
+                    list.querySelectorAll('input[type="checkbox"]:checked')
+                ).map((el) => Number(el.value));
+
+                if (selected.length === 0) {
+                    alert('请至少选择一张图片');
+                    return;
+                }
+
+                const selectedUrls = selected
+                    .map((index) => urls[index])
+                    .filter(Boolean);
+
+                closeWithResult(selectedUrls);
+            });
+
+            overlay.addEventListener('click', (event) => {
+                if (event.target === overlay) {
+                    closeWithResult(null);
+                }
+            });
+
+            document.addEventListener('keydown', onKeyDown);
+            document.body.appendChild(overlay);
+        });
+    }
+
     /**
      * 创建下载按钮 - 简洁样式
      */
@@ -427,36 +718,66 @@
             vertical-align: middle;
         `;
         btn.innerHTML = '↓' + urls.length;
-        btn.title = '下载' + urls.length + '张原图';
+        btn.title = '点击下载全部，长按选择下载';
 
         btn.onmouseenter = () => { btn.style.background = '#ff6a00'; };
         btn.onmouseleave = () => { btn.style.background = '#ff8200'; };
 
-        btn.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            let postId;
-            if (isX()) {
-                const timeEl = postContainer.querySelector('time');
-                if (timeEl && timeEl.parentElement) {
-                    const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
-                    if (linkEl) {
-                        const match = linkEl.href.match(/\/status\/(\d+)/);
-                        if (match) {
-                            postId = match[1];
-                        }
-                    }
-                }
-                postId = postId || 'x_' + Date.now();
-            } else {
-                postId = postContainer.getAttribute('mid') || 
-                       postContainer.getAttribute('data-mid') || 
-                       'weibo_' + Date.now();
+        let longPressTimer = null;
+        let longPressTriggered = false;
+
+        const clearLongPressTimer = () => {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
             }
-            
-            downloadAllImages(urls, postId);
         };
+
+        const startDownload = (targetUrls) => {
+            const postId = getPostId(postContainer);
+            downloadAllImages(targetUrls, postId);
+        };
+
+        btn.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+        });
+
+        btn.addEventListener('pointerdown', (event) => {
+            if (event.pointerType === 'mouse' && event.button !== 0) {
+                return;
+            }
+
+            longPressTriggered = false;
+            clearLongPressTimer();
+            longPressTimer = setTimeout(async () => {
+                longPressTriggered = true;
+                clearLongPressTimer();
+                const selectedUrls = await showImageSelectModal(urls);
+                if (selectedUrls && selectedUrls.length > 0) {
+                    startDownload(selectedUrls);
+                }
+            }, CONFIG.LONG_PRESS_MS);
+        });
+
+        btn.addEventListener('pointerup', (event) => {
+            if (event.pointerType === 'mouse' && event.button !== 0) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            const wasLongPress = longPressTriggered;
+            clearLongPressTimer();
+            longPressTriggered = false;
+
+            if (!wasLongPress) {
+                startDownload(urls);
+            }
+        });
+
+        btn.addEventListener('pointerleave', clearLongPressTimer);
+        btn.addEventListener('pointercancel', clearLongPressTimer);
 
         return btn;
     }
@@ -583,6 +904,7 @@
     function init() {
         const platform = getCurrentPlatform();
         log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器 v1.1.5 加载中...`);
+        ensureImageSelectModalStyles();
 
         setTimeout(() => {
             injectDownloadButtons();
