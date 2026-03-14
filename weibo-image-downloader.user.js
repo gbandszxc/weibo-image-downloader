@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.2.0
+// @version      1.2.1
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       Sisyphus
 // @match        https://weibo.com/*
@@ -921,6 +921,76 @@
         }
     }
 
+    // ==================== 跳转原文菜单项 ====================
+
+    function getWeiboPostUrl(article) {
+        if (!article) return null;
+        const links = article.querySelectorAll('a[href]');
+        for (const link of links) {
+            const href = link.href;
+            // 匹配 weibo.com/{user_id}/{post_id}，排除用户主页 /u/
+            if (/weibo\.com\/\d+\/\w+/.test(href) && !href.includes('/u/')) {
+                return href;
+            }
+        }
+        return null;
+    }
+
+    function injectGotoOriginalMenuItem(popMain, article) {
+        if (!popMain || popMain.dataset.gotoInjected) return;
+
+        const postUrl = getWeiboPostUrl(article);
+        if (!postUrl) return;
+
+        const wrapMain = popMain.querySelector('.woo-pop-wrap-main');
+        if (!wrapMain) return;
+
+        // 找"分享"所在的第一个子元素
+        const shareItem = wrapMain.firstElementChild;
+        if (!shareItem) return;
+
+        const item = document.createElement('div');
+        item.setAttribute('role', 'button');
+        item.className = 'woo-box-flex woo-box-alignCenter woo-pop-item-main woo-pop-item-main';
+        item.innerHTML = `<div class="woo-box-flex woo-box-column" style="width:100%"><div class="woo-box-flex woo-box-justifyBetween"><div>跳转原文</div></div><div class="_desc_1v5ao_2"></div></div>`;
+
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.open(postUrl, '_blank');
+        });
+
+        wrapMain.insertBefore(item, shareItem.nextSibling);
+        popMain.dataset.gotoInjected = '1';
+        log(`已注入"跳转原文"菜单项: ${postUrl}`);
+    }
+
+    function initGotoOriginalMenuObserver() {
+        if (!isWeibo()) return;
+
+        const menuObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (!(node instanceof Element)) continue;
+
+                    // woo-pop-main 直接被加入 DOM
+                    if (node.classList.contains('woo-pop-main')) {
+                        const article = node.closest('article');
+                        if (article) {
+                            // 确认是帖子操作菜单（含"分享"项）
+                            const hasShare = node.textContent.includes('分享');
+                            if (hasShare) {
+                                injectGotoOriginalMenuItem(node, article);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        menuObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
     // ==================== 初始化 ====================
 
     function init() {
@@ -942,6 +1012,8 @@
         });
 
         setInterval(injectDownloadButtons, 5000);
+
+        initGotoOriginalMenuObserver();
 
         log('初始化完成');
     }
