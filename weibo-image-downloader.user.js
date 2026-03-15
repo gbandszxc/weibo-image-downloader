@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.2.1
 // @description  一键下载微博/X帖子中的所有图片为原图
-// @author       Sisyphus
+// @author       gbandszxc
 // @match        https://weibo.com/*
 // @match        https://www.weibo.com/*
 // @match        https://weibo.com.cn/*
@@ -26,7 +26,6 @@
 
     // ==================== 配置 ====================
     const CONFIG = {
-        BATCH_SIZE: 5,
         DELAY_MS: 300,
         LONG_PRESS_MS: 500,
         DEBUG: true,
@@ -193,7 +192,7 @@
                                 log(`GM_download失败: ${error.error || error.message || '未知错误'}`);
                                 resolve(false);
                             },
-                            onprogress: function(progress) {}
+                            onprogress: () => {}
                         });
 
                         // 如果立即返回false，说明立即失败了
@@ -246,19 +245,6 @@
     }
 
     /**
-     * 通过创建链接下载
-     */
-    function downloadViaLink(url, filename) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.target = '_blank';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => document.body.removeChild(a), 100);
-    }
-
-    /**
      * 批量下载图片
      */
     async function downloadAllImages(urls, postId) {
@@ -302,16 +288,16 @@
                 const elements = container.querySelectorAll(selector);
                 elements.forEach(img => {
                     if (!img.src) return;
-                    
+
                     if (isWeibo()) {
                         if (isAvatarImage(img.src)) return;
                         if (img.src.includes('default_avatar')) return;
                         if (!img.src.includes('sinaimg') && !img.src.includes('sina.cn')) return;
                     }
-                    
+
                     images.push(img);
                 });
-            } catch (e) {}
+            } catch (e) { log('findImagesInPost selector error:', e.message); }
         }
 
         return images;
@@ -347,7 +333,7 @@
                     
                     images.push(img);
                 });
-            } catch (e) {}
+            } catch (e) { log('findXImagesInPost selector error:', e.message); }
         }
 
         return images;
@@ -355,13 +341,12 @@
 
     function isMainTweet(container) {
         if (!isX()) return true;
-        
+
         const article = container.closest('article[data-testid="tweet"]');
         if (!article) return false;
-        
+
         const timeEl = article.querySelector('time');
-        const actionGroup = article.querySelector('[role="group"]');
-        
+
         return timeEl !== null;
     }
 
@@ -995,15 +980,19 @@
 
     function init() {
         const platform = getCurrentPlatform();
-        log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器 v1.1.5 加载中...`);
         ensureImageSelectModalStyles();
 
         setTimeout(() => {
             injectDownloadButtons();
         }, 2000);
 
+        let injectTimer = null;
         const observer = new MutationObserver(() => {
-            injectDownloadButtons();
+            if (injectTimer) return;
+            injectTimer = setTimeout(() => {
+                injectTimer = null;
+                injectDownloadButtons();
+            }, 300);
         });
 
         observer.observe(document.body, {
@@ -1014,8 +1003,7 @@
         setInterval(injectDownloadButtons, 5000);
 
         initGotoOriginalMenuObserver();
-
-        log('初始化完成');
+        log(`${platform === 'x' ? 'X' : '微博'}图片批量下载器初始化完成！`);
     }
 
     if (document.readyState === 'loading') {
