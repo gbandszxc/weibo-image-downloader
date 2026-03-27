@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  一键下载微博/X帖子中的所有图片为原图
 // @author       gbandszxc
 // @match        https://weibo.com/*
@@ -79,6 +79,59 @@
             const platform = getCurrentPlatform();
             console.log(`[${platform} Downloader]`, ...args);
         }
+    }
+
+    // ==================== Toast 提示 ====================
+    function showToast(message, duration = 3000) {
+        const existing = document.getElementById('weibo-img-toast');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.id = 'weibo-img-toast';
+        toast.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 2147483647;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+        `;
+
+        const text = document.createElement('span');
+        text.textContent = message;
+        toast.appendChild(text);
+
+        const closeBtn = document.createElement('span');
+        closeBtn.textContent = '×';
+        closeBtn.style.cssText = `
+            font-size: 18px;
+            cursor: pointer;
+            opacity: 0.7;
+            line-height: 1;
+        `;
+        closeBtn.onmouseenter = () => { closeBtn.style.opacity = '1'; };
+        closeBtn.onmouseleave = () => { closeBtn.style.opacity = '0.7'; };
+        closeBtn.onclick = () => toast.remove();
+        toast.appendChild(closeBtn);
+
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s';
+                setTimeout(() => toast.remove(), 300);
+            }
+        }, duration);
     }
 
     // ==================== 工具函数 ====================
@@ -249,7 +302,7 @@
      */
     async function downloadAllImages(urls, postId) {
         if (!urls || urls.length === 0) {
-            alert('未找到图片');
+            showToast('未找到图片');
             return;
         }
 
@@ -266,7 +319,7 @@
         }
 
         log(`已下载 ${urls.length} 张图片`);
-        alert(`已下载 ${urls.length} 张图片`);
+        showToast(`已下载 ${urls.length} 张图片`);
     }
 
     // ==================== DOM操作 ====================
@@ -646,7 +699,7 @@
                 ).map((el) => Number(el.value));
 
                 if (selected.length === 0) {
-                    alert('请至少选择一张图片');
+                    showToast('请至少选择一张图片');
                     return;
                 }
 
@@ -700,8 +753,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 20px;
             height: 20px;
+            padding: 0 6px;
             margin-left: 8px;
             background: #ff8200;
             color: white;
@@ -710,6 +763,7 @@
             font-weight: bold;
             cursor: pointer;
             vertical-align: middle;
+            box-sizing: border-box;
         `;
         btn.innerHTML = '↓' + urls.length;
         btn.title = '点击下载全部，长按选择下载';
