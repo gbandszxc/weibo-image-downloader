@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Weibo Image Downloader - UI
-// @version      1.3.0
+// @version      1.3.2
 // ==/UserScript==
 
 (function(global) {
@@ -63,6 +63,7 @@
                     if (WID_UTILS.isWeibo()) {
                         if (WID_UTILS.isAvatarImage(img.src)) return;
                         if (img.src.includes('default_avatar')) return;
+                        if (img.src.includes('h5.sinaimg.cn')) return; // 过滤徽章/图标
                         if (!img.src.includes('sinaimg') && !img.src.includes('sina.cn')) return;
                     }
 
@@ -611,6 +612,23 @@
                         }
                     }
                 } else {
+                    // 搜索页专属处理：追加到作者名行（.info 内非 .menu 的 div），改为 flex 布局
+                    if (!inserted && WID_UTILS.isSearchPage()) {
+                        const infoEl = post.querySelector('.content .info');
+                        if (infoEl) {
+                            const nameDiv = Array.from(infoEl.children).find(el => !el.classList.contains('menu'));
+                            if (nameDiv) {
+                                nameDiv.style.display = 'flex';
+                                nameDiv.style.alignItems = 'center';
+                                nameDiv.style.gap = '4px';
+                                nameDiv.appendChild(btn);
+                                postsAdded++;
+                                inserted = true;
+                                WID_UTILS.log('搜索页：按钮插入到作者名行末尾');
+                            }
+                        }
+                    }
+
                     // 优先检查是否是转发微博，如果是则插入到"转发微博"文字后面
                     const retweetSpan = Array.from(post.querySelectorAll('span')).find(el =>
                         el.textContent.trim() === '转发微博'
@@ -666,6 +684,11 @@
         if (postsAdded > 0) {
             WID_UTILS.log(`成功注入 ${postsAdded} 个下载按钮`);
         }
+
+        // 搜索页：同步注入"跳转原文"菜单项
+        if (WID_UTILS.isSearchPage()) {
+            injectSearchPageGotoOriginal();
+        }
     }
 
     WID_UI.injectDownloadButtons = injectDownloadButtons;
@@ -714,8 +737,34 @@
         WID_UTILS.log(`已注入"跳转原文"菜单项: ${postUrl}`);
     }
 
-    function initGotoOriginalMenuObserver() {
-        if (!WID_UTILS.isWeibo()) return;
+    /**
+     * 搜索页：直接注入"跳转原文"到静态下拉菜单
+     */
+    function injectSearchPageGotoOriginal() {
+        document.querySelectorAll('div[action-type="feed_list_item"]').forEach(post => {
+            const menuUl = post.querySelector('ul[node-type="fl_menu_right"]');
+            if (!menuUl || menuUl.dataset.gotoInjected) return;
+
+            const postUrl = getWeiboPostUrl(post);
+            if (!postUrl) return;
+
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = 'javascript:void(0);';
+            a.textContent = '跳转原文';
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(postUrl, '_blank');
+            });
+            li.appendChild(a);
+            menuUl.insertBefore(li, menuUl.firstChild);
+            menuUl.dataset.gotoInjected = '1';
+            WID_UTILS.log(`搜索页：已注入"跳转原文"菜单项: ${postUrl}`);
+        });
+    }
+
+    function initGotoOriginalMenuObserver() {        if (!WID_UTILS.isWeibo()) return;
 
         const menuObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations) {

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Weibo Image Downloader - Utils
-// @version      1.3.0
+// @version      1.3.2
 // ==/UserScript==
 
 (function(global) {
@@ -10,6 +10,10 @@
 
     function isWeibo() {
         return window.location.hostname.includes('weibo');
+    }
+
+    function isSearchPage() {
+        return window.location.hostname === 's.weibo.com';
     }
 
     function isX() {
@@ -223,6 +227,7 @@
 
     global.WID_UTILS = {
         isWeibo,
+        isSearchPage,
         isX,
         getCurrentPlatform,
         log,

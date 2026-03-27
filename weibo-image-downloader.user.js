@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         微博/X图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.3.0
+// @version      1.3.2
 // @description  一键下载微博和X帖子中的所有图片为原图
 // @author       gbandszxc
 // @match        https://weibo.com/*
 // @match        https://www.weibo.com/*
 // @match        https://weibo.com.cn/*
+// @match        https://s.weibo.com/*
 // @match        https://x.com/*
 // @match        https://www.x.com/*
 // @match        https://twitter.com/*

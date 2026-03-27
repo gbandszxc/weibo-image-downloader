@@ -152,8 +152,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: auto !important;
     height: 20px;
-    padding: 0 6px;
+    padding: 0 6px !important;
     margin-left: 8px;
     background: #ff8200;
     color: white;
@@ -162,7 +163,8 @@
     font-weight: bold;
     cursor: pointer;
     vertical-align: middle;
-    box-sizing: border-box;
+    white-space: nowrap;
+    box-sizing: content-box;
 }
 
 .weibo-img-download-btn:hover {

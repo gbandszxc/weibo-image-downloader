@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Weibo Image Downloader - Config
-// @version      1.3.0
+// @version      1.3.2
 // ==/UserScript==
 
 (function(global) {
@@ -12,11 +12,14 @@
         DEBUG: true,
         IMG_SELECTORS: [
             'img.woo-picture-img',
-            '.picture img'
+            '.picture img',
+            '.m3 img',
+            'div[class^="m"] img'
         ],
         POST_SELECTORS: [
             'article',
-            '.vue-feed-item'
+            '.vue-feed-item',
+            'div[action-type="feed_list_item"]'
         ],
         // 头部区域选择器 - 按钮要插入到这个容器末尾
         HEADER_SELECTORS: [
