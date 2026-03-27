@@ -21,15 +21,15 @@ description: 在本地启动 HTTP 服务，替换 CDN 地址为 localhost 进行
 ## stop - 停止本地测试
 
 1. 停止本地 HTTP 服务
-2. 恢复 weibo-image-downloader.user.js 中的 CDN 地址为 jsDelivr（使用当前 @version）
+2. 恢复 weibo-image-downloader.user.js 中的 CDN 地址为 jsDelivr（@latest）
 
 执行步骤：
 1. 停止服务：`taskkill /f /im python.exe` 或直接关闭终端
-2. 恢复 CDN 地址为 `https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@{当前版本}/`
+2. 恢复 CDN 地址为 `https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@latest/`
 
 ## 注意事项
 
 - 测试完成后**务必执行 `local-test stop`** 恢复 CDN 地址
 - 提交代码前确保 CDN 地址已恢复为 jsDelivr 地址
 - 本地服务端口默认为 8080
-- 版本号从主脚本 weibo-image-downloader.user.js 的 @version 动态读取
+- CDN 使用 @latest 获取最新版本
