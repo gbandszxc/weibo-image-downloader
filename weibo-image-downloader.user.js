@@ -20,12 +20,12 @@
 // @grant        GM_log
 // @grant        GM_addElement
 // @grant        GM_getResourceText
-// @resource     mainCSS https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.0/style.css
-// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.0/config.js
-// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.0/utils.js
-// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.0/ui.js
-// @downloadURL  https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.0/weibo-image-downloader.user.js
-// @updateURL    https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.0/weibo-image-downloader.user.js
+// @resource     mainCSS https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@latest/style.css
+// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@latest/config.js
+// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@latest/utils.js
+// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@latest/ui.js
+// @downloadURL  https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@latest/weibo-image-downloader.user.js
+// @updateURL    https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@latest/weibo-image-downloader.user.js
 // @supportURL   https://github.com/gbandszxc/weibo-image-downloader/issues
 // @license      MIT
 // ==/UserScript==
