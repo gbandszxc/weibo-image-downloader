@@ -25,8 +25,6 @@
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/config.js
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/utils.js
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/ui.js
-// @downloadURL  https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/weibo-image-downloader.user.js
-// @updateURL    https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/weibo-image-downloader.user.js
 // @supportURL   https://github.com/gbandszxc/weibo-image-downloader/issues
 // @license      MIT
 // ==/UserScript==
