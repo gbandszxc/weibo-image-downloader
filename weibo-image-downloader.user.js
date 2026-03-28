@@ -21,7 +21,7 @@
 // @grant        GM_log
 // @grant        GM_addElement
 // @grant        GM_getResourceText
-// @resource     mainCSS https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/style.css
+// @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/style.css.js
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/config.js
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/utils.js
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/ui.js
@@ -34,8 +34,8 @@
 (function() {
     'use strict';
 
-    // 注入外部 CSS
-    GM_addElement(document.head, 'style', { textContent: GM_getResourceText('mainCSS') });
+    // 注入 CSS
+    GM_addStyle(WID_CSS);
 
     // ==================== 初始化 ====================
 

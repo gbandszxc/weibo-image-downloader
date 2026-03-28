@@ -1,0 +1,174 @@
+// ==================== Toast 提示样式 ====================
+const WID_CSS = `
+#weibo-img-toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 4px;
+    font-size: 14px;
+    z-index: 2147483647;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+#weibo-img-toast .close-btn {
+    font-size: 18px;
+    cursor: pointer;
+    opacity: 0.7;
+    line-height: 1;
+}
+
+#weibo-img-toast .close-btn:hover {
+    opacity: 1;
+}
+
+/* ==================== 图片选择弹窗样式 ==================== */
+.weibo-img-select-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.16);
+    z-index: 2147483647;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+}
+
+.weibo-img-select-modal {
+    width: 100%;
+    max-width: 420px;
+    max-height: 80vh;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.weibo-img-select-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.weibo-img-select-header-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #222;
+}
+
+.weibo-img-select-toggle-btn {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1;
+    cursor: pointer;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+.weibo-img-select-list {
+    padding: 12px 16px;
+    overflow: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 10px;
+}
+
+.weibo-img-select-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid #eee;
+    border-radius: 6px;
+    user-select: none;
+    font-size: 14px;
+    color: #333;
+}
+
+.weibo-img-select-actions {
+    padding: 12px 16px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.weibo-img-select-btn {
+    min-width: 90px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1;
+    box-sizing: border-box;
+}
+
+.weibo-img-select-modal button {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    vertical-align: middle;
+}
+
+.weibo-img-select-btn-cancel {
+    background: #fff;
+    border-color: #ccc;
+    color: #333;
+}
+
+.weibo-img-select-btn-confirm {
+    background: #ff8200;
+    color: #fff;
+}
+
+/* ==================== 下载按钮样式 ==================== */
+.weibo-img-download-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto !important;
+    height: 20px;
+    padding: 0 6px !important;
+    margin-left: 8px;
+    background: #ff8200;
+    color: white;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    vertical-align: middle;
+    white-space: nowrap;
+    box-sizing: content-box;
+}
+
+.weibo-img-download-btn:hover {
+    background: #ff6a00;
+}
+`;
