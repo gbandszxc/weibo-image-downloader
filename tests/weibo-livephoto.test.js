@@ -26,6 +26,24 @@ function loadUtils() {
     return context.window.WID_UTILS;
 }
 
+function loadUI() {
+    const code = fs.readFileSync(path.join(__dirname, '..', 'ui.js'), 'utf8');
+    const context = {
+        console,
+        WeakMap,
+        window: {},
+        WID_UTILS: {
+            isWeibo: () => true
+        },
+        WID_CONFIG: {}
+    };
+
+    vm.createContext(context);
+    vm.runInContext(code, context);
+
+    return context.window.WID_UI;
+}
+
 const sampleStatus = {
     pic_ids: [
         'ba6a4518gy1ic2xakxgvwj23b04eoe83',
@@ -121,8 +139,72 @@ const sampleRetweetStatus = {
     }
 };
 
+const sampleGifStatus = {
+    pic_ids: [
+        '006g4E90ly1ic0o6472r0g30ha0cub2d',
+        '006g4E90ly1ic0o67wxswj30ta0gi48x'
+    ],
+    pic_infos: {
+        '006g4E90ly1ic0o6472r0g30ha0cub2d': {
+            type: 'gif',
+            largest: {
+                url: 'https://wx1.sinaimg.cn/large/006g4E90ly1ic0o6472r0g30ha0cub2d.gif'
+            },
+            original: {
+                url: 'https://wx1.sinaimg.cn/orj1080/006g4E90ly1ic0o6472r0g30ha0cub2d.gif'
+            },
+            video: 'http://g.us.sinaimg.cn/o0/8xaw2eGLlx08wJk0Niso010412000yee0E010.mp4?label=gif_mp4'
+        },
+        '006g4E90ly1ic0o67wxswj30ta0gi48x': {
+            type: 'pic',
+            largest: {
+                url: 'https://wx1.sinaimg.cn/large/006g4E90ly1ic0o67wxswj30ta0gi48x.jpg'
+            },
+            original: {
+                url: 'https://wx1.sinaimg.cn/orj1080/006g4E90ly1ic0o67wxswj30ta0gi48x.jpg'
+            }
+        }
+    }
+};
+
+const sampleMixMediaStatus = {
+    pic_num: 2,
+    pic_ids: [
+        'bc6e55efly1ic2uitv1fxj20p00xctem'
+    ],
+    pic_infos: {},
+    mix_media_info: {
+        items: [
+            {
+                type: 'video',
+                data: {
+                    object_type: 'video',
+                    media_info: {
+                        stream_url_hd: 'https://video.weibo.com/media/play?livephoto=0'
+                    },
+                    pic_info: {
+                        pic_big: {
+                            url: 'https://wx3.sinaimg.cn/orj480/bc6e55efly1ic2ukvy56dj20zk0k03zx.jpg'
+                        }
+                    }
+                }
+            },
+            {
+                type: 'pic',
+                data: {
+                    object_type: 'pic',
+                    largest: {
+                        url: 'https://wx4.sinaimg.cn/large/bc6e55efly1ic2uitv1fxj20p00xctem.jpg'
+                    }
+                }
+            }
+        ]
+    }
+};
+
 function run() {
     const utils = loadUtils();
+    const ui = loadUI();
 
     const mediaItems = utils.getWeiboMediaItemsFromStatus(sampleStatus);
     assert.equal(mediaItems.length, 3, '应该完整解析出 3 个 live photo 媒体项');
@@ -162,6 +244,77 @@ function run() {
     const retweetMediaItems = utils.getWeiboMediaItemsFromStatus(sampleRetweetStatus);
     assert.equal(retweetMediaItems.length, 9, '转发微博应沿 retweeted_status 解析到原微博的 9 个媒体项');
     assert.equal(retweetMediaItems[0].id, '006QzRougy1ibzk7pm7ecj32c0340b29', '转发微博媒体顺序应继承原微博 pic_ids');
+
+    const gifMediaItems = utils.getWeiboMediaItemsFromStatus(sampleGifStatus);
+    assert.equal(gifMediaItems.length, 2, 'gif 场景应正常解析媒体项');
+    assert.equal(gifMediaItems[0].kind, 'gif', 'gif 应单独标记类型');
+    assert.equal(gifMediaItems[0].videoUrl, null, 'gif 不应附带额外视频下载链接');
+    assert.equal(gifMediaItems[0].imageExt, '.gif', 'gif 应保留 .gif 扩展名');
+
+    const gifJobs = utils.buildMediaDownloadJobs(gifMediaItems, '5280000000000001');
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(gifJobs.map((job) => job.filename))),
+        [
+            'weibo_5280000000000001_1.gif',
+            'weibo_5280000000000001_2.jpg'
+        ],
+        'gif 与普通图片都应只生成单文件下载任务'
+    );
+
+    const mixMediaItems = utils.getWeiboMediaItemsFromStatus(sampleMixMediaStatus);
+    assert.equal(mixMediaItems.length, 1, '视频 + 图片混合微博应至少保留图片媒体项');
+    assert.equal(mixMediaItems[0].kind, 'image', '混合微博中的图片应按普通图片处理');
+    assert.equal(
+        mixMediaItems[0].imageUrl,
+        'https://wx4.sinaimg.cn/large/bc6e55efly1ic2uitv1fxj20p00xctem.jpg',
+        '混合微博中的图片应从 mix_media_info 中提取原图地址'
+    );
+
+    const mixJobs = utils.buildMediaDownloadJobs(mixMediaItems, '5286590000000000');
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(mixJobs.map((job) => job.filename))),
+        [
+            'weibo_5286590000000000_1.jpg'
+        ],
+        '视频 + 图片混合微博应只生成图片下载任务'
+    );
+
+    const fallbackDomItems = [
+        { id: 'dom-1', kind: 'image', imageUrl: 'https://wx1.sinaimg.cn/large/a.jpg', videoUrl: null },
+        { id: 'dom-2', kind: 'image', imageUrl: 'https://wx2.sinaimg.cn/large/b.jpg', videoUrl: null }
+    ];
+    const authoritativeEmptyItems = ui.selectPreferredWeiboMediaItems(fallbackDomItems, [], true);
+    assert.equal(authoritativeEmptyItems.length, 0, '微博接口成功且无可下载图片时，不应回退到 DOM 缩略图');
+
+    const fallbackOnErrorItems = ui.selectPreferredWeiboMediaItems(fallbackDomItems, [], false);
+    assert.equal(fallbackOnErrorItems.length, 2, '只有接口失败时才应回退到 DOM 结果');
+
+    const button = {
+        innerHTML: '',
+        removed: false,
+        remove() {
+            this.removed = true;
+        }
+    };
+    ui.syncDownloadButtonState(button, []);
+    assert.equal(button.removed, true, '纯视频帖子在最终解析后应移除下载按钮');
+
+    const videoThumbImage = {
+        closest(selector) {
+            if (selector === '.woo-picture-main') {
+                return {
+                    querySelector(query) {
+                        if (query === '[class*="_videotime_"], [class*="_videobox_"], .woo-font--play') {
+                            return { textContent: '00:22' };
+                        }
+                        return null;
+                    }
+                };
+            }
+            return null;
+        }
+    };
+    assert.equal(ui.isWeiboVideoThumbnailImage(videoThumbImage), true, '微博视频封面不应参与图片兜底匹配');
 }
 
 run();

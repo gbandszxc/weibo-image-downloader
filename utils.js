@@ -120,13 +120,103 @@
         return candidates.find((url) => typeof url === 'string' && url.length > 0) || null;
     }
 
+    function getWeiboMixMediaItems(status) {
+        const mixMediaItems = status && status.mix_media_info && Array.isArray(status.mix_media_info.items)
+            ? status.mix_media_info.items
+            : [];
+
+        return mixMediaItems.map((item, index) => {
+            const data = item && item.data;
+            if (!data || typeof data !== 'object') {
+                return null;
+            }
+
+            const mediaType = typeof item.type === 'string' ? item.type.toLowerCase() : '';
+            const objectType = typeof data.object_type === 'string' ? data.object_type.toLowerCase() : '';
+            if (mediaType === 'video' || objectType === 'video') {
+                return null;
+            }
+
+            const picInfo = data.pic_info || data;
+            const imageUrl = getBestWeiboImageUrl(picInfo) ||
+                getBestWeiboImageUrl({
+                    largest: data.pic_info && data.pic_info.pic_big,
+                    bmiddle: data.pic_info && data.pic_info.pic_middle,
+                    thumbnail: data.pic_info && data.pic_info.pic_small
+                });
+
+            if (!imageUrl) {
+                return null;
+            }
+
+            return {
+                id: getFileBasenameFromUrl(imageUrl, `mix-${index + 1}`),
+                kind: 'image',
+                label: `图片 ${index + 1}`,
+                imageUrl,
+                videoUrl: null,
+                imageExt: getFileExtensionFromUrl(imageUrl, '.jpg'),
+                videoExt: '.mov'
+            };
+        }).filter(Boolean);
+    }
+
+    function getFileBasenameFromUrl(url, fallback) {
+        if (!url || typeof url !== 'string') {
+            return fallback;
+        }
+
+        try {
+            const pathname = new URL(url.startsWith('http') ? url : `https://${url}`).pathname;
+            const parts = pathname.split('/');
+            const lastSegment = parts[parts.length - 1] || '';
+            return lastSegment.replace(/\.[^.]+$/, '') || fallback;
+        } catch (e) {
+            const cleanUrl = url.split('?')[0];
+            const parts = cleanUrl.split('/');
+            const lastSegment = parts[parts.length - 1] || '';
+            return lastSegment.replace(/\.[^.]+$/, '') || fallback;
+        }
+    }
+
+    function createWeiboMediaItem(picId, picInfo, index) {
+        if (!picInfo || typeof picInfo !== 'object') {
+            return null;
+        }
+
+        const imageUrl = getBestWeiboImageUrl(picInfo);
+        if (!imageUrl) {
+            return null;
+        }
+
+        const mediaType = typeof picInfo.type === 'string' ? picInfo.type.toLowerCase() : 'pic';
+        const isLivePhoto = mediaType === 'livephoto';
+        const isGif = mediaType === 'gif' || getFileExtensionFromUrl(imageUrl, '.jpg') === '.gif';
+        const videoUrl = isLivePhoto && typeof picInfo.video === 'string' ? picInfo.video : null;
+        const kind = isLivePhoto ? 'livephoto' : (isGif ? 'gif' : 'image');
+        const label = isLivePhoto
+            ? `Live Photo ${index + 1}`
+            : (isGif ? `GIF ${index + 1}` : `图片 ${index + 1}`);
+
+        return {
+            id: picId,
+            kind,
+            label,
+            imageUrl,
+            videoUrl,
+            imageExt: getFileExtensionFromUrl(imageUrl, '.jpg'),
+            videoExt: getFileExtensionFromUrl(videoUrl, '.mov')
+        };
+    }
+
     function getWeiboMediaSourceStatus(status) {
         if (!status || typeof status !== 'object') {
             return null;
         }
 
         const hasPics = Array.isArray(status.pic_ids) && status.pic_ids.length > 0;
-        if (hasPics) {
+        const hasMixMedia = status.mix_media_info && Array.isArray(status.mix_media_info.items) && status.mix_media_info.items.length > 0;
+        if (hasPics || hasMixMedia) {
             return status;
         }
 
@@ -145,30 +235,12 @@
 
         const picIds = Array.isArray(mediaSourceStatus.pic_ids) ? mediaSourceStatus.pic_ids : [];
         const picInfos = mediaSourceStatus.pic_infos || {};
+        const directMediaItems = picIds.map((picId, index) => createWeiboMediaItem(picId, picInfos[picId], index)).filter(Boolean);
+        if (directMediaItems.length > 0) {
+            return directMediaItems;
+        }
 
-        return picIds.map((picId, index) => {
-            const picInfo = picInfos[picId];
-            if (!picInfo) {
-                return null;
-            }
-
-            const imageUrl = getBestWeiboImageUrl(picInfo);
-            if (!imageUrl) {
-                return null;
-            }
-
-            const videoUrl = typeof picInfo.video === 'string' ? picInfo.video : null;
-
-            return {
-                id: picId,
-                kind: videoUrl ? 'livephoto' : 'image',
-                label: videoUrl ? `Live Photo ${index + 1}` : `图片 ${index + 1}`,
-                imageUrl,
-                videoUrl,
-                imageExt: getFileExtensionFromUrl(imageUrl, '.jpg'),
-                videoExt: getFileExtensionFromUrl(videoUrl, '.mov')
-            };
-        }).filter(Boolean);
+        return getWeiboMixMediaItems(mediaSourceStatus);
     }
 
     function getXOriginalImageUrl(url) {
@@ -418,6 +490,9 @@
         getWeiboOriginalImageUrl,
         getFileExtensionFromUrl,
         getBestWeiboImageUrl,
+        getFileBasenameFromUrl,
+        createWeiboMediaItem,
+        getWeiboMixMediaItems,
         getWeiboMediaSourceStatus,
         getWeiboMediaItemsFromStatus,
         getXOriginalImageUrl,

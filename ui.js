@@ -66,6 +66,7 @@
                         if (img.src.includes('default_avatar')) return;
                         if (img.src.includes('h5.sinaimg.cn')) return; // 过滤徽章/图标
                         if (!img.src.includes('sinaimg') && !img.src.includes('sina.cn')) return;
+                        if (isWeiboVideoThumbnailImage(img)) return;
                     }
 
                     images.push(img);
@@ -74,6 +75,19 @@
         }
 
         return images;
+    }
+
+    function isWeiboVideoThumbnailImage(img) {
+        if (!img || typeof img.closest !== 'function') {
+            return false;
+        }
+
+        const pictureMain = img.closest('.woo-picture-main');
+        if (!pictureMain || typeof pictureMain.querySelector !== 'function') {
+            return false;
+        }
+
+        return !!pictureMain.querySelector('[class*="_videotime_"], [class*="_videobox_"], .woo-font--play');
     }
 
     function findXImagesInPost(container) {
@@ -165,6 +179,23 @@
         return getFallbackMediaItems(container).map((item) => item.imageUrl);
     }
 
+    function selectPreferredWeiboMediaItems(fallbackItems, resolvedMediaItems, apiResolved) {
+        return apiResolved ? resolvedMediaItems : fallbackItems;
+    }
+
+    function syncDownloadButtonState(btn, mediaItems) {
+        if (!btn) {
+            return;
+        }
+
+        if (!Array.isArray(mediaItems) || mediaItems.length === 0) {
+            btn.remove();
+            return;
+        }
+
+        btn.innerHTML = '↓' + mediaItems.length;
+    }
+
     function getWeiboStatusLookupId(postContainer) {
         const mid = postContainer.getAttribute('mid') || postContainer.getAttribute('data-mid');
         if (mid) {
@@ -201,15 +232,13 @@
 
             try {
                 const weiboMediaItems = await WID_UTILS.getWeiboMediaItemsById(statusId);
-                if (weiboMediaItems.length > 0) {
-                    WID_UTILS.log(`微博接口找到 ${weiboMediaItems.length} 个媒体项: ${statusId}`);
-                    return weiboMediaItems;
-                }
+                WID_UTILS.log(`微博接口找到 ${weiboMediaItems.length} 个媒体项: ${statusId}`);
+                return selectPreferredWeiboMediaItems(fallbackItems, weiboMediaItems, true);
             } catch (error) {
                 WID_UTILS.log('微博接口解析失败，回退DOM:', error.message);
             }
 
-            return fallbackItems;
+            return selectPreferredWeiboMediaItems(fallbackItems, [], false);
         })();
 
         postMediaItemsCache.set(postContainer, mediaPromise);
@@ -519,6 +548,9 @@
 
     WID_UI.ensureImageSelectModalStyles = ensureImageSelectModalStyles;
     WID_UI.showImageSelectModal = showImageSelectModal;
+    WID_UI.isWeiboVideoThumbnailImage = isWeiboVideoThumbnailImage;
+    WID_UI.selectPreferredWeiboMediaItems = selectPreferredWeiboMediaItems;
+    WID_UI.syncDownloadButtonState = syncDownloadButtonState;
 
     // ==================== 下载按钮 ====================
 
@@ -544,9 +576,7 @@
 
         if (WID_UTILS.isWeibo()) {
             resolvePostMediaItems(postContainer).then((mediaItems) => {
-                if (mediaItems && mediaItems.length > 0) {
-                    btn.innerHTML = '↓' + mediaItems.length;
-                }
+                syncDownloadButtonState(btn, mediaItems);
             });
         }
 
