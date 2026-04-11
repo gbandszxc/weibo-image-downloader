@@ -21,7 +21,7 @@
 // @grant        GM_log
 // @grant        GM_addElement
 // @grant        GM_getResourceText
-// @resource     mainCSS https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.2/style.css
+// @resource     mainCSS https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.3/style.css
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/config.js
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/utils.js
 // @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/ui.js
