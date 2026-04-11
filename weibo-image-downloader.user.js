@@ -22,9 +22,9 @@
 // @grant        GM_addElement
 // @grant        GM_getResourceText
 // @resource     mainCSS https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.3/style.css
-// @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/config.js
-// @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/utils.js
-// @require      https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/ui.js
+// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.3/config.js
+// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.3/utils.js
+// @require      https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@1.3.3/ui.js
 // @supportURL   https://github.com/gbandszxc/weibo-image-downloader/issues
 // @license      MIT
 // ==/UserScript==

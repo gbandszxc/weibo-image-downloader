@@ -25,9 +25,7 @@ description: 在本地启动 HTTP 服务，替换 CDN 地址为 localhost 进行
 
 执行步骤：
 1. 停止服务：`taskkill /f /im python.exe` 或直接关闭终端
-2. 恢复 CDN 地址：
-   - CSS：`https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@版本号/style.css`
-   - JS：`https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/refs/heads/main/`
+2. 恢复 CDN 地址，如：`https://cdn.jsdelivr.net/gh/gbandszxc/weibo-image-downloader@版本号/style.css`
 
 ## 注意事项
 
