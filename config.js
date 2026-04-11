@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Weibo Image Downloader - Config
-// @version      1.3.2
+// @version      1.3.3
 // ==/UserScript==
 
 (function(global) {
