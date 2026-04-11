@@ -134,7 +134,7 @@ userscript metadata 调整原则如下：
 - `package.json.version` 为唯一版本来源。
 - `scripts/build.mjs` 在构建 userscript 产物时自动注入对应版本号。
 - README 中的更新日志仍然手工维护，但发布前应校验是否与当前版本一致。
-- Git tag 继续遵循仓库约定，例如 `v1.3.4`，并与 `package.json.version`、userscript `@version` 保持一致。
+- Git tag 继续遵循仓库约定，例如 `v1.4.0`，并与 `package.json.version`、userscript `@version` 保持一致。
 
 该策略可以减少当前多点维护版本带来的重复劳动与遗漏风险。
 
@@ -147,6 +147,7 @@ userscript metadata 调整原则如下：
 3. 检查 `dist/weibo-image-downloader.user.js` 顶部 metadata 是否完整，尤其是 `@version`、`@match`、`@grant`、`@connect`。
 4. 在本地浏览器安装 `dist/weibo-image-downloader.user.js`，验证微博基础按钮注入和下载链路未回归。
 5. 检查 README 安装说明是否已切换到 `dist/weibo-image-downloader.user.js`。
+6. 核对 `CLAUDE.md` 中是否存在重构后已经过时的描述，并补充新的重要注意点。
 
 ## 实施范围
 
@@ -234,6 +235,7 @@ userscript metadata 调整原则如下：
 4. 统一样式到 `src/style.css`，删除重复样式定义。
 5. 调整测试与 README。
 6. 执行构建与回归验证。
+7. 核对并更新 `CLAUDE.md`。
 
 ## 结论
 

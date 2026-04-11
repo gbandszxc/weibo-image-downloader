@@ -50,7 +50,7 @@
 ```json
 {
   "name": "weibo-image-downloader",
-  "version": "1.3.4",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -671,7 +671,7 @@ bun run test
 - [ ] **Step 3: 调整更新日志，新增构建迁移版本说明**
 
 ```md
-### v1.3.4
+### v1.4.0
 - 重构：引入 `esbuild` 构建链，改为 `src/` 模块化开发、`dist/` 单文件发布
 - 优化：移除 `@require` 与 `@resource` 外部依赖，兼容 GreasyFork 单文件同步
 - 优化：统一样式来源，减少脚本与样式重复维护
@@ -702,12 +702,12 @@ git commit -m "docs: update build and install instructions"
 - [ ] **Step 1: 检查 userscript 头部是否只保留单文件发布需要的 metadata**
 
 Run: `Get-Content -Path 'dist\\weibo-image-downloader.user.js' -TotalCount 25`  
-Expected: 头部包含 `@version 1.3.4`、`@grant`、`@match`、`@connect`，且不包含 `@require`、`@resource`
+Expected: 头部包含 `@version 1.4.0`、`@grant`、`@match`、`@connect`，且不包含 `@require`、`@resource`
 
 - [ ] **Step 2: 检查版本号一致性**
 
-Run: `Select-String -Path 'package.json','README.md','dist\\weibo-image-downloader.user.js' -Pattern '1.3.4'`  
-Expected: 三处都能匹配到 `1.3.4`
+Run: `Select-String -Path 'package.json','README.md','dist\\weibo-image-downloader.user.js' -Pattern '1.4.0'`  
+Expected: 三处都能匹配到 `1.4.0`
 
 - [ ] **Step 3: 检查工作区状态**
 
@@ -723,12 +723,27 @@ Expected: 仅包含本次构建迁移相关文件，无意外脏文件
 - 打开微博详情页，确认 live photo 仍可下载 `.jpg` 与 `.mov`
 - 打开 X 时间线，确认推文图片按钮仍正常注入
 
-- [ ] **Step 5: 提交最终校验结果**
+- [ ] **Step 5: 核对并更新 `CLAUDE.md`**
+
+Run: `Get-Content -Path 'CLAUDE.md'`  
+Expected: 能定位到与旧的根目录脚本结构、安装入口、发布约束相关的描述，并补充重构后的重要注意点
+
+将 `CLAUDE.md` 至少更新为包含以下约束：
+
+```md
+1. 你可以通过 @README.md 快速了解项目。修改脚本同时需要保证 @README.md 始终与最新代码保持一致。
+2. 请专注当前功能开发与问题修改，禁止调整无关代码的逻辑，导致已有功能受损。
+3. 后续更新版本时，务必同步创建对应 tag（如 v1.4.0），并确保 `package.json`、`dist/weibo-image-downloader.user.js` 中的 `@version` 与 tag 保持一致。
+4. 源码位于 `src/`，发布产物位于 `dist/weibo-image-downloader.user.js`。涉及发布逻辑时，禁止直接手改 `dist/` 产物，应通过构建命令生成。
+5. 涉及 userscript metadata、构建脚本或发布流程的修改时，务必同步检查 README、构建脚本和最终产物头部是否一致。
+```
+
+- [ ] **Step 6: 提交最终校验结果**
 
 ```powershell
 git add .
-git commit -m "release: v1.3.4"
-git tag v1.3.4
+git commit -m "release: v1.4.0"
+git tag v1.4.0
 ```
 
 ## Self-Review
@@ -752,4 +767,4 @@ git tag v1.3.4
 
 - `CONFIG`、`createUtils`、`createUi`、`src/main.js` 的命名在各任务中保持一致。
 - 构建产物路径统一为 `dist/weibo-image-downloader.user.js`。
-- 版本号统一规划为 `1.3.4`。
+- 版本号统一规划为 `1.4.0`。
