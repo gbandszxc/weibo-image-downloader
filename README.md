@@ -19,9 +19,9 @@
 ### 方法1：Tampermonkey（推荐）
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 点击 [weibo-image-downloader.user.js](https://github.com/gbandszxc/weibo-image-downloader/raw/refs/heads/main/weibo-image-downloader.user.js) 文件
+2. 点击 [dist/weibo-image-downloader.user.js](https://github.com/gbandszxc/weibo-image-downloader/raw/refs/heads/main/dist/weibo-image-downloader.user.js) 文件
 3. 或者在 Tampermonkey 面板中选择"添加新脚本"
-4. 将 `weibo-image-downloader.user.js` 的内容粘贴进去并保存
+4. 将 `dist/weibo-image-downloader.user.js` 的内容粘贴进去并保存
 
 ### 方法2：Violentmonkey
 
@@ -111,7 +111,26 @@ A:
 - 避免触发平台的反爬机制
 - 兼容 Chrome 浏览器的下载限制
 
+## 开发
+
+```bash
+bun install
+bun run build
+bun run test
+bun run verify:dist
+```
+
+- 源码位于 `src/`
+- 发布产物位于 `dist/weibo-image-downloader.user.js`
+- 版本号以 `package.json` 为准，发布时需同步更新 Git tag、README 更新日志和最终 userscript `@version`
+- 发布前执行 `bun run verify:dist`，确认 `dist/` 产物已由当前源码重新生成且 metadata 一致
+
 ## 更新日志
+
+### v1.4.0
+- 重构：引入 `esbuild` 构建链，改为 `src/` 模块化开发、`dist/` 单文件发布
+- 优化：移除 `@require` 与 `@resource` 外部依赖，兼容 GreasyFork 单文件同步
+- 优化：统一样式来源，减少脚本与样式重复维护
 
 ### v1.3.3
 - 新增功能：微博 live photo 下载时自动同时保存封面图和原始 `.mov`

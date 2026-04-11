@@ -1,0 +1,1209 @@
+// ==UserScript==
+// @name         微博/X图片批量下载器
+// @namespace    http://tampermonkey.net/
+// @version      1.4.0
+// @description  一键下载微博和X帖子中的所有图片为原图
+// @author       gbandszxc
+// @match        https://weibo.com/*
+// @match        https://www.weibo.com/*
+// @match        https://weibo.com.cn/*
+// @match        https://s.weibo.com/*
+// @match        https://x.com/*
+// @match        https://www.x.com/*
+// @match        https://twitter.com/*
+// @match        https://www.twitter.com/*
+// @connect      *.sinaimg.cn
+// @connect      *.sina.cn
+// @connect      *.twimg.com
+// @grant        GM_download
+// @grant        GM_addStyle
+// @grant        GM_registerMenuCommand
+// @grant        GM_log
+// @grant        GM_addElement
+// @updateURL    https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/dist/weibo-image-downloader.user.js
+// @downloadURL  https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/dist/weibo-image-downloader.user.js
+// @supportURL   https://github.com/gbandszxc/weibo-image-downloader/issues
+// @license      MIT
+// ==/UserScript==
+
+(() => {
+  // src/style.css
+  var style_default = '#weibo-img-toast {\r\n    position: fixed;\r\n    top: 20px;\r\n    left: 50%;\r\n    transform: translateX(-50%);\r\n    background: rgba(0, 0, 0, 0.75);\r\n    color: #fff;\r\n    padding: 10px 20px;\r\n    border-radius: 4px;\r\n    font-size: 14px;\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 10px;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);\r\n}\r\n\r\n#weibo-img-toast .close-btn {\r\n    font-size: 18px;\r\n    cursor: pointer;\r\n    opacity: 0.7;\r\n    line-height: 1;\r\n}\r\n\r\n#weibo-img-toast .close-btn:hover {\r\n    opacity: 1;\r\n}\r\n\r\n.weibo-img-select-overlay {\r\n    position: fixed;\r\n    inset: 0;\r\n    background: rgba(0, 0, 0, 0.16);\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    padding: 16px;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal {\r\n    width: 100%;\r\n    max-width: 420px;\r\n    max-height: 80vh;\r\n    background: #fff;\r\n    border-radius: 8px;\r\n    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);\r\n    display: flex;\r\n    flex-direction: column;\r\n    overflow: hidden;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n}\r\n\r\n.weibo-img-select-header {\r\n    padding: 14px 16px;\r\n    border-bottom: 1px solid #eee;\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: space-between;\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-header-title {\r\n    font-size: 15px;\r\n    font-weight: 600;\r\n    color: #222;\r\n}\r\n\r\n.weibo-img-select-toggle-btn {\r\n    height: 28px;\r\n    padding: 0 10px;\r\n    border: 1px solid #ccc;\r\n    border-radius: 4px;\r\n    background: #fff;\r\n    color: #333;\r\n    font-size: 12px;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    cursor: pointer;\r\n    box-sizing: border-box;\r\n    white-space: nowrap;\r\n}\r\n\r\n.weibo-img-select-list {\r\n    padding: 12px 16px;\r\n    overflow: auto;\r\n    display: grid;\r\n    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));\r\n    gap: 10px;\r\n}\r\n\r\n.weibo-img-select-item {\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 6px;\r\n    padding: 6px 8px;\r\n    border: 1px solid #eee;\r\n    border-radius: 6px;\r\n    user-select: none;\r\n    font-size: 14px;\r\n    color: #333;\r\n}\r\n\r\n.weibo-img-select-actions {\r\n    padding: 12px 16px;\r\n    border-top: 1px solid #eee;\r\n    display: flex;\r\n    justify-content: flex-end;\r\n    gap: 8px;\r\n}\r\n\r\n.weibo-img-select-btn {\r\n    min-width: 90px;\r\n    height: 32px;\r\n    padding: 0 12px;\r\n    border-radius: 4px;\r\n    border: 1px solid transparent;\r\n    font-size: 13px;\r\n    cursor: pointer;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal button {\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    vertical-align: middle;\r\n}\r\n\r\n.weibo-img-select-btn-cancel {\r\n    background: #fff;\r\n    border-color: #ccc;\r\n    color: #333;\r\n}\r\n\r\n.weibo-img-select-btn-confirm {\r\n    background: #ff8200;\r\n    color: #fff;\r\n}\r\n\r\n.weibo-img-download-btn {\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    width: auto !important;\r\n    height: 20px;\r\n    padding: 0 6px !important;\r\n    margin-left: 8px;\r\n    background: #ff8200;\r\n    color: white;\r\n    border-radius: 3px;\r\n    font-size: 11px;\r\n    font-weight: bold;\r\n    cursor: pointer;\r\n    vertical-align: middle;\r\n    white-space: nowrap;\r\n    box-sizing: content-box;\r\n}\r\n\r\n.weibo-img-download-btn:hover {\r\n    background: #ff6a00;\r\n}\r\n';
+
+  // src/config.js
+  var CONFIG = {
+    DELAY_MS: 300,
+    LONG_PRESS_MS: 500,
+    DEBUG: true,
+    IMG_SELECTORS: [
+      "img.woo-picture-img",
+      ".picture img",
+      ".m3 img",
+      'div[class^="m"] img'
+    ],
+    POST_SELECTORS: [
+      "article",
+      ".vue-feed-item",
+      'div[action-type="feed_list_item"]'
+    ],
+    HEADER_SELECTORS: [
+      'div[class*="_iconsPlus_"]',
+      'header > div > div[class*="_nick_"]',
+      "header > div > div.woo-box-flex",
+      ".woo-nickname",
+      ".name"
+    ],
+    X_CONFIG: {
+      POST_SELECTORS: ['article[data-testid="tweet"]'],
+      IMG_SELECTORS: ['article img[src*="twimg.com"]'],
+      ACTION_GROUP_SELECTORS: ['[role="group"]']
+    }
+  };
+
+  // src/utils.js
+  function createUtils({ config, windowRef, fetchRef, gmDownload, ui: ui2 }) {
+    const weiboStatusCache = /* @__PURE__ */ new Map();
+    function isWeibo() {
+      return windowRef.location.hostname.includes("weibo");
+    }
+    function isSearchPage() {
+      return windowRef.location.hostname === "s.weibo.com";
+    }
+    function isX() {
+      return windowRef.location.hostname.includes("x.com") || windowRef.location.hostname.includes("twitter");
+    }
+    function getCurrentPlatform() {
+      if (isX()) {
+        return "x";
+      }
+      return "weibo";
+    }
+    function log(...args) {
+      if (config.DEBUG) {
+        const platform = getCurrentPlatform();
+        console.log(`[${platform} Downloader]`, ...args);
+      }
+    }
+    function isAvatarImage(url) {
+      if (!url) {
+        return false;
+      }
+      return url.includes("/crop.") || url.includes("/avatar") || url.includes("_cute") || url.includes("_online");
+    }
+    function getOriginalImageUrl(url) {
+      if (!url || typeof url !== "string") {
+        return null;
+      }
+      if (isX()) {
+        return getXOriginalImageUrl(url);
+      }
+      return getWeiboOriginalImageUrl(url);
+    }
+    function getWeiboOriginalImageUrl(url) {
+      if (!url.includes("sinaimg.cn") && !url.includes("sina.cn")) {
+        return null;
+      }
+      if (isAvatarImage(url)) {
+        return null;
+      }
+      if (url.includes("/large/")) {
+        return url;
+      }
+      const sizePatterns = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"];
+      for (const size of sizePatterns) {
+        if (url.includes(`/${size}/`)) {
+          return url.replace(`/${size}/`, "/large/");
+        }
+      }
+      const match = url.match(/(\.sinaimg\.cn\/)([a-z0-9]+\/)/);
+      if (match) {
+        return url.replace(match[2], "large/");
+      }
+      return url;
+    }
+    function getFileExtensionFromUrl(url, fallback = ".jpg") {
+      if (!url || typeof url !== "string") {
+        return fallback;
+      }
+      try {
+        const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+        const pathname = new URL(fullUrl).pathname;
+        const match = pathname.match(/(\.[a-z0-9]+)$/i);
+        return match ? match[1].toLowerCase() : fallback;
+      } catch {
+        const cleanUrl = url.split("?")[0];
+        const match = cleanUrl.match(/(\.[a-z0-9]+)$/i);
+        return match ? match[1].toLowerCase() : fallback;
+      }
+    }
+    function getBestWeiboImageUrl(picInfo) {
+      if (!picInfo || typeof picInfo !== "object") {
+        return null;
+      }
+      const candidates = [
+        picInfo.largest && picInfo.largest.url,
+        picInfo.original && picInfo.original.url,
+        picInfo.large && picInfo.large.url,
+        picInfo.bmiddle && picInfo.bmiddle.url,
+        picInfo.thumbnail && picInfo.thumbnail.url
+      ];
+      return candidates.find((url) => typeof url === "string" && url.length > 0) || null;
+    }
+    function getWeiboMixMediaItems(status) {
+      const mixMediaItems = status && status.mix_media_info && Array.isArray(status.mix_media_info.items) ? status.mix_media_info.items : [];
+      return mixMediaItems.map((item, index) => {
+        const data = item && item.data;
+        if (!data || typeof data !== "object") {
+          return null;
+        }
+        const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
+        const objectType = typeof data.object_type === "string" ? data.object_type.toLowerCase() : "";
+        if (mediaType === "video" || objectType === "video") {
+          return null;
+        }
+        const picInfo = data.pic_info || data;
+        const imageUrl = getBestWeiboImageUrl(picInfo) || getBestWeiboImageUrl({
+          largest: data.pic_info && data.pic_info.pic_big,
+          bmiddle: data.pic_info && data.pic_info.pic_middle,
+          thumbnail: data.pic_info && data.pic_info.pic_small
+        });
+        if (!imageUrl) {
+          return null;
+        }
+        return {
+          id: getFileBasenameFromUrl(imageUrl, `mix-${index + 1}`),
+          kind: "image",
+          label: `图片 ${index + 1}`,
+          imageUrl,
+          videoUrl: null,
+          imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
+          videoExt: ".mov"
+        };
+      }).filter(Boolean);
+    }
+    function getFileBasenameFromUrl(url, fallback) {
+      if (!url || typeof url !== "string") {
+        return fallback;
+      }
+      try {
+        const pathname = new URL(url.startsWith("http") ? url : `https://${url}`).pathname;
+        const parts = pathname.split("/");
+        const lastSegment = parts[parts.length - 1] || "";
+        return lastSegment.replace(/\.[^.]+$/, "") || fallback;
+      } catch {
+        const cleanUrl = url.split("?")[0];
+        const parts = cleanUrl.split("/");
+        const lastSegment = parts[parts.length - 1] || "";
+        return lastSegment.replace(/\.[^.]+$/, "") || fallback;
+      }
+    }
+    function createWeiboMediaItem(picId, picInfo, index) {
+      if (!picInfo || typeof picInfo !== "object") {
+        return null;
+      }
+      const imageUrl = getBestWeiboImageUrl(picInfo);
+      if (!imageUrl) {
+        return null;
+      }
+      const mediaType = typeof picInfo.type === "string" ? picInfo.type.toLowerCase() : "pic";
+      const isLivePhoto = mediaType === "livephoto";
+      const isGif = mediaType === "gif" || getFileExtensionFromUrl(imageUrl, ".jpg") === ".gif";
+      const videoUrl = isLivePhoto && typeof picInfo.video === "string" ? picInfo.video : null;
+      const kind = isLivePhoto ? "livephoto" : isGif ? "gif" : "image";
+      const label = isLivePhoto ? `Live Photo ${index + 1}` : isGif ? `GIF ${index + 1}` : `图片 ${index + 1}`;
+      return {
+        id: picId,
+        kind,
+        label,
+        imageUrl,
+        videoUrl,
+        imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
+        videoExt: getFileExtensionFromUrl(videoUrl, ".mov")
+      };
+    }
+    function getWeiboMediaSourceStatus(status) {
+      if (!status || typeof status !== "object") {
+        return null;
+      }
+      const hasPics = Array.isArray(status.pic_ids) && status.pic_ids.length > 0;
+      const hasMixMedia = status.mix_media_info && Array.isArray(status.mix_media_info.items) && status.mix_media_info.items.length > 0;
+      if (hasPics || hasMixMedia) {
+        return status;
+      }
+      if (status.retweeted_status) {
+        return getWeiboMediaSourceStatus(status.retweeted_status);
+      }
+      return status;
+    }
+    function getWeiboMediaItemsFromStatus(status) {
+      const mediaSourceStatus = getWeiboMediaSourceStatus(status);
+      if (!mediaSourceStatus || typeof mediaSourceStatus !== "object") {
+        return [];
+      }
+      const picIds = Array.isArray(mediaSourceStatus.pic_ids) ? mediaSourceStatus.pic_ids : [];
+      const picInfos = mediaSourceStatus.pic_infos || {};
+      const directMediaItems = picIds.map((picId, index) => createWeiboMediaItem(picId, picInfos[picId], index)).filter(Boolean);
+      if (directMediaItems.length > 0) {
+        return directMediaItems;
+      }
+      return getWeiboMixMediaItems(mediaSourceStatus);
+    }
+    function getXOriginalImageUrl(url) {
+      if (!url || typeof url !== "string") {
+        return null;
+      }
+      if (!url.includes("pbs.twimg.com")) {
+        return null;
+      }
+      try {
+        let fullUrl = url;
+        if (!url.startsWith("http")) {
+          fullUrl = `https://${url}`;
+        }
+        const urlObj = new URL(fullUrl);
+        const name = urlObj.searchParams.get("name");
+        if (name === "orig" || name === "large") {
+          return fullUrl;
+        }
+        urlObj.searchParams.delete("name");
+        urlObj.searchParams.set("name", "orig");
+        return urlObj.toString();
+      } catch {
+        if (url.includes("name=orig") || url.includes("name=large")) {
+          return url;
+        }
+        return url.replace(/name=[^&]*/, "name=orig");
+      }
+    }
+    function getFilename(postId, index) {
+      const platform = getCurrentPlatform();
+      return `${platform}_${postId}_${index}.jpg`;
+    }
+    function buildMediaDownloadJobs(mediaItems, postId) {
+      const platform = getCurrentPlatform();
+      const jobs = [];
+      mediaItems.forEach((item, index) => {
+        if (!item || typeof item !== "object") {
+          return;
+        }
+        const baseName = `${platform}_${postId}_${index + 1}`;
+        if (item.imageUrl) {
+          jobs.push({
+            type: "image",
+            url: item.imageUrl,
+            filename: `${baseName}${item.imageExt || getFileExtensionFromUrl(item.imageUrl, ".jpg")}`
+          });
+        }
+        if (item.videoUrl) {
+          jobs.push({
+            type: "video",
+            url: item.videoUrl,
+            filename: `${baseName}_live${item.videoExt || getFileExtensionFromUrl(item.videoUrl, ".mov")}`
+          });
+        }
+      });
+      return jobs;
+    }
+    async function fetchWeiboStatus(statusId) {
+      if (!statusId) {
+        return null;
+      }
+      if (weiboStatusCache.has(statusId)) {
+        return weiboStatusCache.get(statusId);
+      }
+      const request = (async () => {
+        const response = await fetchRef(`/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`, {
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "X-Requested-With": "XMLHttpRequest"
+          }
+        });
+        if (!response.ok) {
+          throw new Error(`微博接口请求失败: ${response.status}`);
+        }
+        return response.json();
+      })();
+      weiboStatusCache.set(statusId, request);
+      try {
+        return await request;
+      } catch (error) {
+        weiboStatusCache.delete(statusId);
+        throw error;
+      }
+    }
+    async function getWeiboMediaItemsById(statusId) {
+      const status = await fetchWeiboStatus(statusId);
+      return getWeiboMediaItemsFromStatus(status);
+    }
+    function normalizeLegacyMediaItems(urls) {
+      return (urls || []).map((url, index) => ({
+        id: `legacy-${index + 1}`,
+        kind: "image",
+        label: `图片 ${index + 1}`,
+        imageUrl: url,
+        videoUrl: null,
+        imageExt: getFileExtensionFromUrl(url, ".jpg"),
+        videoExt: ".mov"
+      }));
+    }
+    async function downloadImage(url, filename) {
+      if (typeof gmDownload === "function") {
+        try {
+          const success = await new Promise((resolve) => {
+            try {
+              const downloadId = gmDownload({
+                url,
+                name: filename,
+                onload() {
+                  log(`下载完成: ${filename}`);
+                  resolve(true);
+                },
+                onerror(error) {
+                  log(`GM_download失败: ${error.error || error.message || "未知错误"}`);
+                  resolve(false);
+                },
+                onprogress: () => {
+                }
+              });
+              if (downloadId === false) {
+                log(`GM_download返回false: ${filename}`);
+                resolve(false);
+              }
+            } catch (error) {
+              log("GM_download异常:", error.message);
+              resolve(false);
+            }
+          });
+          if (success) {
+            return true;
+          }
+          log("GM_download失败，尝试备用方案");
+        } catch (error) {
+          log("GM_download异常，尝试备用方案:", error.message);
+        }
+      }
+      return downloadImageFallback(url, filename);
+    }
+    async function downloadImageFallback(url, filename) {
+      try {
+        const response = await fetchRef(url);
+        const blob = await response.blob();
+        const blobUrl = windowRef.URL.createObjectURL(blob);
+        const anchor = windowRef.document.createElement("a");
+        anchor.href = blobUrl;
+        anchor.download = filename;
+        anchor.click();
+        setTimeout(() => windowRef.URL.revokeObjectURL(blobUrl), 1e3);
+        log(`fetch下载成功: ${filename}`);
+        return true;
+      } catch {
+        log(`打开图片: ${filename}`);
+        windowRef.open(url, "_blank");
+        return true;
+      }
+    }
+    async function downloadAllImages(urls, postId) {
+      return downloadMediaItems(normalizeLegacyMediaItems(urls), postId);
+    }
+    async function downloadMediaItems(mediaItems, postId) {
+      if (!mediaItems || mediaItems.length === 0) {
+        if (ui2 && typeof ui2.showToast === "function") {
+          ui2.showToast("未找到图片");
+        }
+        return;
+      }
+      const jobs = buildMediaDownloadJobs(mediaItems, postId);
+      if (jobs.length === 0) {
+        if (ui2 && typeof ui2.showToast === "function") {
+          ui2.showToast("未找到图片");
+        }
+        return;
+      }
+      log(`开始下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件...`);
+      for (let i = 0; i < jobs.length; i++) {
+        const job = jobs[i];
+        await downloadImage(job.url, job.filename);
+        if (i < jobs.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
+        }
+      }
+      const message = jobs.length === mediaItems.length ? `已下载 ${jobs.length} 张图片` : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
+      log(message);
+      if (ui2 && typeof ui2.showToast === "function") {
+        ui2.showToast(message);
+      }
+    }
+    return {
+      isWeibo,
+      isSearchPage,
+      isX,
+      getCurrentPlatform,
+      log,
+      isAvatarImage,
+      getOriginalImageUrl,
+      getWeiboOriginalImageUrl,
+      getFileExtensionFromUrl,
+      getBestWeiboImageUrl,
+      getFileBasenameFromUrl,
+      createWeiboMediaItem,
+      getWeiboMixMediaItems,
+      getWeiboMediaSourceStatus,
+      getWeiboMediaItemsFromStatus,
+      getXOriginalImageUrl,
+      getFilename,
+      buildMediaDownloadJobs,
+      fetchWeiboStatus,
+      getWeiboMediaItemsById,
+      downloadImage,
+      downloadImageFallback,
+      downloadAllImages,
+      downloadMediaItems
+    };
+  }
+
+  // src/ui.js
+  function createUi({ config, utils: utils2, windowRef, documentRef, addStyle }) {
+    const postMediaItemsCache = /* @__PURE__ */ new WeakMap();
+    function showToast(message, duration = 3e3) {
+      const existing = documentRef.getElementById("weibo-img-toast");
+      if (existing) {
+        existing.remove();
+      }
+      const toast = documentRef.createElement("div");
+      toast.id = "weibo-img-toast";
+      const closeBtn = documentRef.createElement("span");
+      closeBtn.textContent = "×";
+      closeBtn.className = "close-btn";
+      closeBtn.onclick = () => toast.remove();
+      const text = documentRef.createElement("span");
+      text.textContent = message;
+      toast.appendChild(text);
+      toast.appendChild(closeBtn);
+      documentRef.body.appendChild(toast);
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.style.opacity = "0";
+          toast.style.transition = "opacity 0.3s";
+          setTimeout(() => toast.remove(), 300);
+        }
+      }, duration);
+    }
+    function findImagesInPost(container) {
+      const images = [];
+      if (utils2.isX()) {
+        return findXImagesInPost(container);
+      }
+      const selectors = config.IMG_SELECTORS;
+      for (const selector of selectors) {
+        try {
+          const elements = container.querySelectorAll(selector);
+          elements.forEach((img) => {
+            if (!img.src) {
+              return;
+            }
+            if (utils2.isWeibo()) {
+              if (utils2.isAvatarImage(img.src)) {
+                return;
+              }
+              if (img.src.includes("default_avatar")) {
+                return;
+              }
+              if (img.src.includes("h5.sinaimg.cn")) {
+                return;
+              }
+              if (!img.src.includes("sinaimg") && !img.src.includes("sina.cn")) {
+                return;
+              }
+              if (isWeiboVideoThumbnailImage(img)) {
+                return;
+              }
+            }
+            images.push(img);
+          });
+        } catch (error) {
+          utils2.log("findImagesInPost selector error:", error.message);
+        }
+      }
+      return images;
+    }
+    function isWeiboVideoThumbnailImage(img) {
+      if (!img || typeof img.closest !== "function") {
+        return false;
+      }
+      const pictureMain = img.closest(".woo-picture-main");
+      if (!pictureMain || typeof pictureMain.querySelector !== "function") {
+        return false;
+      }
+      return !!pictureMain.querySelector('[class*="_videotime_"], [class*="_videobox_"], .woo-font--play');
+    }
+    function findXImagesInPost(container) {
+      const images = [];
+      const seen = /* @__PURE__ */ new Set();
+      const selectors = config.X_CONFIG.IMG_SELECTORS;
+      for (const selector of selectors) {
+        try {
+          const elements = container.querySelectorAll(selector);
+          elements.forEach((img) => {
+            const src = img.src;
+            if (!src || typeof src !== "string") {
+              return;
+            }
+            if (!src.includes("pbs.twimg.com")) {
+              return;
+            }
+            const srcKey = src.split("?")[0];
+            if (seen.has(srcKey)) {
+              return;
+            }
+            seen.add(srcKey);
+            if (src.includes("/profile_images/")) {
+              return;
+            }
+            if (src.includes("/emoji/")) {
+              return;
+            }
+            const alt = img.alt || "";
+            if (alt.toLowerCase().includes("avatar") || alt.toLowerCase().includes("profile")) {
+              return;
+            }
+            images.push(img);
+          });
+        } catch (error) {
+          utils2.log("findXImagesInPost selector error:", error.message);
+        }
+      }
+      return images;
+    }
+    function isMainTweet(container) {
+      if (!utils2.isX()) {
+        return true;
+      }
+      const article = container.closest('article[data-testid="tweet"]');
+      if (!article) {
+        return false;
+      }
+      const timeEl = article.querySelector("time");
+      return timeEl !== null;
+    }
+    function isDetailPage() {
+      if (!utils2.isX()) {
+        return false;
+      }
+      const path = windowRef.location.pathname;
+      return /\/[\w_]+\/status\/\d+/.test(path);
+    }
+    function getFallbackMediaItems(container) {
+      const images = findImagesInPost(container);
+      const seen = /* @__PURE__ */ new Set();
+      const mediaItems = [];
+      images.forEach((img) => {
+        const url = utils2.getOriginalImageUrl(img.src);
+        if (!url) {
+          return;
+        }
+        const key = url.split("?")[0];
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        mediaItems.push({
+          id: `dom-${mediaItems.length + 1}`,
+          kind: "image",
+          label: `图片 ${mediaItems.length + 1}`,
+          imageUrl: url,
+          videoUrl: null,
+          imageExt: utils2.getFileExtensionFromUrl(url, ".jpg"),
+          videoExt: ".mov"
+        });
+      });
+      utils2.log(`DOM兜底找到 ${mediaItems.length} 张图片`);
+      return mediaItems;
+    }
+    function getImageUrls(container) {
+      return getFallbackMediaItems(container).map((item) => item.imageUrl);
+    }
+    function selectPreferredWeiboMediaItems(fallbackItems, resolvedMediaItems, apiResolved) {
+      return apiResolved ? resolvedMediaItems : fallbackItems;
+    }
+    function syncDownloadButtonState(btn, mediaItems) {
+      if (!btn) {
+        return;
+      }
+      if (!Array.isArray(mediaItems) || mediaItems.length === 0) {
+        btn.remove();
+        return;
+      }
+      btn.innerHTML = `↓${mediaItems.length}`;
+    }
+    function getWeiboStatusLookupId(postContainer) {
+      const mid = postContainer.getAttribute("mid") || postContainer.getAttribute("data-mid");
+      if (mid) {
+        return mid;
+      }
+      const links = postContainer.querySelectorAll("a[href]");
+      for (const link of links) {
+        const href = link.href || "";
+        const match = href.match(/weibo\.com\/(?:u\/)?\d+\/([A-Za-z0-9]+)/);
+        if (match && !href.includes("/u/")) {
+          return match[1];
+        }
+      }
+      return null;
+    }
+    async function resolvePostMediaItems(postContainer) {
+      if (postMediaItemsCache.has(postContainer)) {
+        return postMediaItemsCache.get(postContainer);
+      }
+      const fallbackItems = getFallbackMediaItems(postContainer);
+      const mediaPromise = (async () => {
+        if (!utils2.isWeibo()) {
+          return fallbackItems;
+        }
+        const statusId = getWeiboStatusLookupId(postContainer);
+        if (!statusId) {
+          return fallbackItems;
+        }
+        try {
+          const weiboMediaItems = await utils2.getWeiboMediaItemsById(statusId);
+          utils2.log(`微博接口找到 ${weiboMediaItems.length} 个媒体项: ${statusId}`);
+          return selectPreferredWeiboMediaItems(fallbackItems, weiboMediaItems, true);
+        } catch (error) {
+          utils2.log("微博接口解析失败，回退DOM:", error.message);
+        }
+        return selectPreferredWeiboMediaItems(fallbackItems, [], false);
+      })();
+      postMediaItemsCache.set(postContainer, mediaPromise);
+      return mediaPromise;
+    }
+    function getPostId(postContainer) {
+      let postId;
+      if (utils2.isX()) {
+        const timeEl = postContainer.querySelector("time");
+        if (timeEl && timeEl.parentElement) {
+          const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
+          if (linkEl) {
+            const match = linkEl.href.match(/\/status\/(\d+)/);
+            if (match) {
+              postId = match[1];
+            }
+          }
+        }
+        postId = postId || `x_${Date.now()}`;
+      } else {
+        postId = postContainer.getAttribute("mid") || postContainer.getAttribute("data-mid") || `weibo_${Date.now()}`;
+      }
+      return postId;
+    }
+    function ensureImageSelectModalStyles() {
+      if (documentRef.getElementById("weibo-img-select-modal-style")) {
+        return;
+      }
+      if (typeof addStyle === "function") {
+        addStyle();
+      }
+      const marker = documentRef.createElement("style");
+      marker.id = "weibo-img-select-modal-style";
+      marker.textContent = "";
+      documentRef.head.appendChild(marker);
+    }
+    function showImageSelectModal(mediaItems) {
+      return new Promise((resolve) => {
+        ensureImageSelectModalStyles();
+        const overlay = documentRef.createElement("div");
+        overlay.className = "weibo-img-select-overlay";
+        const modal = documentRef.createElement("div");
+        modal.className = "weibo-img-select-modal";
+        const header = documentRef.createElement("div");
+        header.className = "weibo-img-select-header";
+        const toggleAllBtn = documentRef.createElement("button");
+        toggleAllBtn.type = "button";
+        toggleAllBtn.className = "weibo-img-select-toggle-btn";
+        const headerTitle = documentRef.createElement("div");
+        headerTitle.className = "weibo-img-select-header-title";
+        headerTitle.textContent = `选择要下载的内容（共 ${mediaItems.length} 项）`;
+        header.appendChild(toggleAllBtn);
+        header.appendChild(headerTitle);
+        const list = documentRef.createElement("div");
+        list.className = "weibo-img-select-list";
+        mediaItems.forEach((item, index) => {
+          const label = documentRef.createElement("label");
+          label.className = "weibo-img-select-item";
+          const input = documentRef.createElement("input");
+          input.type = "checkbox";
+          input.checked = true;
+          input.value = String(index);
+          const text = documentRef.createElement("span");
+          text.textContent = item.label || (item.videoUrl ? `Live Photo ${index + 1}` : `图片 ${index + 1}`);
+          label.appendChild(input);
+          label.appendChild(text);
+          list.appendChild(label);
+        });
+        const actions = documentRef.createElement("div");
+        actions.className = "weibo-img-select-actions";
+        const cancelBtn = documentRef.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "weibo-img-select-btn weibo-img-select-btn-cancel";
+        cancelBtn.textContent = "取消";
+        const confirmBtn = documentRef.createElement("button");
+        confirmBtn.type = "button";
+        confirmBtn.className = "weibo-img-select-btn weibo-img-select-btn-confirm";
+        confirmBtn.textContent = "下载所选";
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+        const getInputs = () => Array.from(list.querySelectorAll('input[type="checkbox"]'));
+        const areAllChecked = () => {
+          const inputs = getInputs();
+          return inputs.length > 0 && inputs.every((input) => input.checked);
+        };
+        const updateToggleText = () => {
+          toggleAllBtn.textContent = areAllChecked() ? "全不选" : "全选";
+        };
+        getInputs().forEach((input) => {
+          input.addEventListener("change", updateToggleText);
+        });
+        toggleAllBtn.addEventListener("click", () => {
+          const shouldCheckAll = !areAllChecked();
+          getInputs().forEach((input) => {
+            input.checked = shouldCheckAll;
+          });
+          updateToggleText();
+        });
+        updateToggleText();
+        modal.appendChild(header);
+        modal.appendChild(list);
+        modal.appendChild(actions);
+        overlay.appendChild(modal);
+        const cleanup = () => {
+          documentRef.removeEventListener("keydown", onKeyDown);
+          overlay.removeEventListener("wheel", preventScroll, { passive: false });
+          overlay.removeEventListener("touchmove", preventScroll, { passive: false });
+          if (overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+          }
+        };
+        const closeWithResult = (result) => {
+          cleanup();
+          resolve(result);
+        };
+        const onKeyDown = (event) => {
+          if (event.key === "Escape") {
+            closeWithResult(null);
+          }
+        };
+        cancelBtn.addEventListener("click", () => closeWithResult(null));
+        confirmBtn.addEventListener("click", () => {
+          const selected = Array.from(
+            list.querySelectorAll('input[type="checkbox"]:checked')
+          ).map((el) => Number(el.value));
+          if (selected.length === 0) {
+            showToast("请至少选择一项内容");
+            return;
+          }
+          const selectedItems = selected.map((index) => mediaItems[index]).filter(Boolean);
+          closeWithResult(selectedItems);
+        });
+        overlay.addEventListener("click", (event) => {
+          if (event.target === overlay) {
+            closeWithResult(null);
+          }
+        });
+        const preventScroll = (event) => {
+          event.preventDefault();
+        };
+        modal.addEventListener("click", (event) => {
+          event.stopPropagation();
+        });
+        overlay.addEventListener("wheel", preventScroll, { passive: false });
+        overlay.addEventListener("touchmove", preventScroll, { passive: false });
+        documentRef.addEventListener("keydown", onKeyDown);
+        documentRef.body.appendChild(overlay);
+      });
+    }
+    function createDownloadButton(postContainer) {
+      if (postContainer.querySelector(".weibo-img-download-btn")) {
+        return null;
+      }
+      const initialMediaItems = getFallbackMediaItems(postContainer);
+      if (initialMediaItems.length === 0) {
+        return null;
+      }
+      utils2.log(`创建按钮: ${initialMediaItems.length} 个媒体项`);
+      const btn = documentRef.createElement("span");
+      btn.className = "weibo-img-download-btn";
+      btn.innerHTML = `↓${initialMediaItems.length}`;
+      btn.title = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
+      if (utils2.isWeibo()) {
+        resolvePostMediaItems(postContainer).then((mediaItems) => {
+          syncDownloadButtonState(btn, mediaItems);
+        });
+      }
+      let longPressTimer = null;
+      let longPressTriggered = false;
+      let suppressNextClick = false;
+      const clearLongPressTimer = () => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      };
+      const startDownload = async (targetMediaItems) => {
+        const postId = getPostId(postContainer);
+        await utils2.downloadMediaItems(targetMediaItems, postId);
+      };
+      btn.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (suppressNextClick) {
+          suppressNextClick = false;
+        }
+      });
+      btn.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        longPressTriggered = false;
+        clearLongPressTimer();
+        longPressTimer = setTimeout(async () => {
+          longPressTriggered = true;
+          suppressNextClick = true;
+          clearLongPressTimer();
+          const mediaItems = await resolvePostMediaItems(postContainer);
+          const selectedMediaItems = await showImageSelectModal(mediaItems);
+          if (selectedMediaItems && selectedMediaItems.length > 0) {
+            startDownload(selectedMediaItems);
+          }
+        }, config.LONG_PRESS_MS);
+      });
+      btn.addEventListener("pointerup", async (event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const wasLongPress = longPressTriggered;
+        clearLongPressTimer();
+        longPressTriggered = false;
+        if (!wasLongPress) {
+          const mediaItems = await resolvePostMediaItems(postContainer);
+          await startDownload(mediaItems);
+        }
+      });
+      btn.addEventListener("pointerleave", clearLongPressTimer);
+      btn.addEventListener("pointercancel", clearLongPressTimer);
+      return btn;
+    }
+    function injectDownloadButtons() {
+      let postsAdded = 0;
+      const selectors = utils2.isX() ? config.X_CONFIG.POST_SELECTORS : config.POST_SELECTORS;
+      for (const selector of selectors) {
+        const posts = documentRef.querySelectorAll(selector);
+        posts.forEach((post) => {
+          if (post.querySelector(".weibo-img-download-btn")) {
+            return;
+          }
+          if (utils2.isX() && !isMainTweet(post)) {
+            return;
+          }
+          const btn = createDownloadButton(post);
+          if (!btn) {
+            return;
+          }
+          let inserted = false;
+          if (utils2.isX()) {
+            if (isDetailPage()) {
+              const usernameEl = post.querySelector('[data-testid="User-Name"]');
+              if (usernameEl) {
+                const parent = usernameEl.parentElement;
+                if (parent && parent.parentNode) {
+                  parent.parentNode.insertBefore(btn, parent.nextSibling);
+                  postsAdded++;
+                  inserted = true;
+                  utils2.log("X详情页：按钮插入到用户名区域右侧");
+                }
+              }
+            } else {
+              const timeEl = post.querySelector("time");
+              if (timeEl) {
+                const timeParent = timeEl.parentElement;
+                if (timeParent && timeParent.nextElementSibling && timeParent.parentNode) {
+                  timeParent.parentNode.insertBefore(btn, timeParent.nextElementSibling);
+                  postsAdded++;
+                  inserted = true;
+                  utils2.log("X时间线：按钮插入到时间右边");
+                } else if (timeParent && timeParent.parentNode) {
+                  timeParent.parentNode.insertBefore(btn, timeParent.nextSibling);
+                  postsAdded++;
+                  inserted = true;
+                }
+              }
+            }
+            if (!inserted) {
+              const actionGroup = post.querySelector('[role="group"]');
+              if (actionGroup && actionGroup.parentElement) {
+                actionGroup.parentElement.insertBefore(btn, actionGroup);
+                postsAdded++;
+                inserted = true;
+                utils2.log("X平台：按钮插入到操作按钮组之前");
+              }
+            }
+          } else {
+            if (!inserted && utils2.isSearchPage()) {
+              const infoEl = post.querySelector(".content .info");
+              if (infoEl) {
+                const nameDiv = Array.from(infoEl.children).find((el) => !el.classList.contains("menu"));
+                if (nameDiv) {
+                  nameDiv.style.display = "flex";
+                  nameDiv.style.alignItems = "center";
+                  nameDiv.style.gap = "4px";
+                  nameDiv.appendChild(btn);
+                  postsAdded++;
+                  inserted = true;
+                  utils2.log("搜索页：按钮插入到作者名行末尾");
+                }
+              }
+            }
+            const retweetSpan = Array.from(post.querySelectorAll("span")).find(
+              (el) => el.textContent.trim() === "转发微博"
+            );
+            if (retweetSpan && retweetSpan.parentNode) {
+              retweetSpan.parentNode.insertBefore(btn, retweetSpan.nextSibling);
+              postsAdded++;
+              inserted = true;
+              utils2.log('微博：按钮插入到"转发微博"文字后面');
+            }
+            if (!inserted) {
+              const suffixBox = post.querySelector('div[class*="_suffixbox"]');
+              if (suffixBox) {
+                suffixBox.appendChild(btn);
+                postsAdded++;
+                inserted = true;
+                utils2.log("微博：按钮插入到用户名/超话标签右侧");
+              }
+            }
+            if (!inserted) {
+              const iconsPlusEl = post.querySelector('div[class*="_iconsPlus_"]');
+              if (iconsPlusEl && iconsPlusEl.parentNode) {
+                iconsPlusEl.parentNode.insertBefore(btn, iconsPlusEl);
+                postsAdded++;
+                inserted = true;
+                utils2.log("微博：按钮插入到 iconsPlus 之前");
+              }
+            }
+            if (!inserted) {
+              for (const headerSelector of config.HEADER_SELECTORS) {
+                const headerEl = post.querySelector(headerSelector);
+                if (headerEl) {
+                  headerEl.appendChild(btn);
+                  postsAdded++;
+                  inserted = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!inserted) {
+            post.appendChild(btn);
+            postsAdded++;
+          }
+        });
+      }
+      if (postsAdded > 0) {
+        utils2.log(`成功注入 ${postsAdded} 个下载按钮`);
+      }
+      if (utils2.isSearchPage()) {
+        injectSearchPageGotoOriginal();
+      }
+    }
+    function getWeiboPostUrl(article) {
+      if (!article) {
+        return null;
+      }
+      const links = article.querySelectorAll("a[href]");
+      for (const link of links) {
+        const href = link.href;
+        if (/weibo\.com\/\d+\/\w+/.test(href) && !href.includes("/u/")) {
+          return href;
+        }
+      }
+      return null;
+    }
+    function injectGotoOriginalMenuItem(popMain, article) {
+      if (!popMain || popMain.dataset.gotoInjected) {
+        return;
+      }
+      const postUrl = getWeiboPostUrl(article);
+      if (!postUrl) {
+        return;
+      }
+      const wrapMain = popMain.querySelector(".woo-pop-wrap-main");
+      if (!wrapMain) {
+        return;
+      }
+      const shareItem = wrapMain.firstElementChild;
+      if (!shareItem) {
+        return;
+      }
+      const item = documentRef.createElement("div");
+      item.setAttribute("role", "button");
+      item.className = "woo-box-flex woo-box-alignCenter woo-pop-item-main woo-pop-item-main";
+      item.innerHTML = '<div class="woo-box-flex woo-box-column" style="width:100%"><div class="woo-box-flex woo-box-justifyBetween"><div>跳转原文</div></div><div class="_desc_1v5ao_2"></div></div>';
+      item.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        windowRef.open(postUrl, "_blank");
+      });
+      wrapMain.insertBefore(item, shareItem.nextSibling);
+      popMain.dataset.gotoInjected = "1";
+      utils2.log(`已注入"跳转原文"菜单项: ${postUrl}`);
+    }
+    function injectSearchPageGotoOriginal() {
+      documentRef.querySelectorAll('div[action-type="feed_list_item"]').forEach((post) => {
+        const menuUl = post.querySelector('ul[node-type="fl_menu_right"]');
+        if (!menuUl || menuUl.dataset.gotoInjected) {
+          return;
+        }
+        const postUrl = getWeiboPostUrl(post);
+        if (!postUrl) {
+          return;
+        }
+        const li = documentRef.createElement("li");
+        const a = documentRef.createElement("a");
+        a.href = "javascript:void(0);";
+        a.textContent = "跳转原文";
+        a.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          windowRef.open(postUrl, "_blank");
+        });
+        li.appendChild(a);
+        menuUl.insertBefore(li, menuUl.firstChild);
+        menuUl.dataset.gotoInjected = "1";
+        utils2.log(`搜索页：已注入"跳转原文"菜单项: ${postUrl}`);
+      });
+    }
+    function initGotoOriginalMenuObserver() {
+      if (!utils2.isWeibo()) {
+        return;
+      }
+      const MutationObserverRef = windowRef.MutationObserver || MutationObserver;
+      const menuObserver = new MutationObserverRef((mutations) => {
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (!(node instanceof Element)) {
+              continue;
+            }
+            if (node.classList.contains("woo-pop-main")) {
+              const article = node.closest("article");
+              if (article) {
+                const hasShare = node.textContent.includes("分享");
+                if (hasShare) {
+                  injectGotoOriginalMenuItem(node, article);
+                }
+              }
+            }
+          }
+        }
+      });
+      menuObserver.observe(documentRef.body, { childList: true, subtree: true });
+    }
+    return {
+      createDownloadButton,
+      ensureImageSelectModalStyles,
+      getWeiboPostUrl,
+      initGotoOriginalMenuObserver,
+      injectDownloadButtons,
+      injectGotoOriginalMenuItem,
+      isWeiboVideoThumbnailImage,
+      selectPreferredWeiboMediaItems,
+      showImageSelectModal,
+      showToast,
+      syncDownloadButtonState,
+      getImageUrls
+    };
+  }
+
+  // src/main.js
+  var styleId = "weibo-image-downloader-style";
+  function injectStyles() {
+    if (document.getElementById(styleId)) {
+      return;
+    }
+    if (typeof GM_addStyle === "function") {
+      GM_addStyle(style_default);
+      const marker = document.createElement("style");
+      marker.id = styleId;
+      marker.textContent = "";
+      document.head.appendChild(marker);
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = style_default;
+    document.head.appendChild(style);
+  }
+  var ui;
+  var utils = createUtils({
+    config: CONFIG,
+    windowRef: window,
+    fetchRef: window.fetch.bind(window),
+    gmDownload: typeof GM_download === "function" ? GM_download : null,
+    ui: {
+      showToast(message) {
+        if (ui) {
+          ui.showToast(message);
+        }
+      }
+    }
+  });
+  ui = createUi({
+    config: CONFIG,
+    utils,
+    windowRef: window,
+    documentRef: document,
+    addStyle: injectStyles
+  });
+  function init() {
+    injectStyles();
+    ui.ensureImageSelectModalStyles();
+    const platform = utils.getCurrentPlatform();
+    setTimeout(() => {
+      ui.injectDownloadButtons();
+    }, 2e3);
+    let injectTimer = null;
+    const observer = new MutationObserver(() => {
+      if (injectTimer) {
+        return;
+      }
+      injectTimer = setTimeout(() => {
+        injectTimer = null;
+        ui.injectDownloadButtons();
+      }, 300);
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    setInterval(() => {
+      ui.injectDownloadButtons();
+    }, 5e3);
+    ui.initGotoOriginalMenuObserver();
+    utils.log(`${platform === "x" ? "X" : "微博"}图片批量下载器初始化完成！`);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+  if (typeof GM_registerMenuCommand === "function") {
+    GM_registerMenuCommand("刷新按钮", () => {
+      ui.injectDownloadButtons();
+    });
+  }
+})();

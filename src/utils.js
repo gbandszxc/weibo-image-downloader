@@ -1,58 +1,47 @@
-// ==UserScript==
-// @name         Weibo Image Downloader - Utils
-// @version      1.3.3
-// ==/UserScript==
-
-(function(global) {
-    'use strict';
-
+export function createUtils({ config, windowRef, fetchRef, gmDownload, ui }) {
     const weiboStatusCache = new Map();
 
-    // ==================== 平台检测 ====================
-
     function isWeibo() {
-        return window.location.hostname.includes('weibo');
+        return windowRef.location.hostname.includes("weibo");
     }
 
     function isSearchPage() {
-        return window.location.hostname === 's.weibo.com';
+        return windowRef.location.hostname === "s.weibo.com";
     }
 
     function isX() {
-        return window.location.hostname.includes('x.com') ||
-               window.location.hostname.includes('twitter');
+        return windowRef.location.hostname.includes("x.com") ||
+            windowRef.location.hostname.includes("twitter");
     }
 
     function getCurrentPlatform() {
-        if (isX()) return 'x';
-        return 'weibo';
+        if (isX()) {
+            return "x";
+        }
+        return "weibo";
     }
 
     function log(...args) {
-        if (WID_CONFIG.DEBUG) {
+        if (config.DEBUG) {
             const platform = getCurrentPlatform();
             console.log(`[${platform} Downloader]`, ...args);
         }
     }
 
-    // ==================== 工具函数 ====================
-
-    /**
-     * 判断是否为头像图片
-     */
     function isAvatarImage(url) {
-        if (!url) return false;
-        return url.includes('/crop.') ||
-               url.includes('/avatar') ||
-               url.includes('_cute') ||
-               url.includes('_online');
+        if (!url) {
+            return false;
+        }
+        return url.includes("/crop.") ||
+            url.includes("/avatar") ||
+            url.includes("_cute") ||
+            url.includes("_online");
     }
 
-    /**
-     * 获取图片原始URL
-     */
     function getOriginalImageUrl(url) {
-        if (!url || typeof url !== 'string') return null;
+        if (!url || typeof url !== "string") {
+            return null;
+        }
 
         if (isX()) {
             return getXOriginalImageUrl(url);
@@ -62,7 +51,7 @@
     }
 
     function getWeiboOriginalImageUrl(url) {
-        if (!url.includes('sinaimg.cn') && !url.includes('sina.cn')) {
+        if (!url.includes("sinaimg.cn") && !url.includes("sina.cn")) {
             return null;
         }
 
@@ -70,42 +59,44 @@
             return null;
         }
 
-        if (url.includes('/large/')) return url;
+        if (url.includes("/large/")) {
+            return url;
+        }
 
-        const sizePatterns = ['thumb180', 'thumb300', 'square', 'bmiddle', 'mw690', 'mw1024', 'orj360', 'orj480', 'webp720'];
+        const sizePatterns = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"];
         for (const size of sizePatterns) {
             if (url.includes(`/${size}/`)) {
-                return url.replace(`/${size}/`, '/large/');
+                return url.replace(`/${size}/`, "/large/");
             }
         }
 
         const match = url.match(/(\.sinaimg\.cn\/)([a-z0-9]+\/)/);
         if (match) {
-            return url.replace(match[2], 'large/');
+            return url.replace(match[2], "large/");
         }
 
         return url;
     }
 
-    function getFileExtensionFromUrl(url, fallback = '.jpg') {
-        if (!url || typeof url !== 'string') {
+    function getFileExtensionFromUrl(url, fallback = ".jpg") {
+        if (!url || typeof url !== "string") {
             return fallback;
         }
 
         try {
-            const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+            const fullUrl = url.startsWith("http") ? url : `https://${url}`;
             const pathname = new URL(fullUrl).pathname;
             const match = pathname.match(/(\.[a-z0-9]+)$/i);
             return match ? match[1].toLowerCase() : fallback;
-        } catch (e) {
-            const cleanUrl = url.split('?')[0];
+        } catch {
+            const cleanUrl = url.split("?")[0];
             const match = cleanUrl.match(/(\.[a-z0-9]+)$/i);
             return match ? match[1].toLowerCase() : fallback;
         }
     }
 
     function getBestWeiboImageUrl(picInfo) {
-        if (!picInfo || typeof picInfo !== 'object') {
+        if (!picInfo || typeof picInfo !== "object") {
             return null;
         }
 
@@ -117,7 +108,7 @@
             picInfo.thumbnail && picInfo.thumbnail.url
         ];
 
-        return candidates.find((url) => typeof url === 'string' && url.length > 0) || null;
+        return candidates.find((url) => typeof url === "string" && url.length > 0) || null;
     }
 
     function getWeiboMixMediaItems(status) {
@@ -127,13 +118,13 @@
 
         return mixMediaItems.map((item, index) => {
             const data = item && item.data;
-            if (!data || typeof data !== 'object') {
+            if (!data || typeof data !== "object") {
                 return null;
             }
 
-            const mediaType = typeof item.type === 'string' ? item.type.toLowerCase() : '';
-            const objectType = typeof data.object_type === 'string' ? data.object_type.toLowerCase() : '';
-            if (mediaType === 'video' || objectType === 'video') {
+            const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
+            const objectType = typeof data.object_type === "string" ? data.object_type.toLowerCase() : "";
+            if (mediaType === "video" || objectType === "video") {
                 return null;
             }
 
@@ -151,36 +142,36 @@
 
             return {
                 id: getFileBasenameFromUrl(imageUrl, `mix-${index + 1}`),
-                kind: 'image',
+                kind: "image",
                 label: `图片 ${index + 1}`,
                 imageUrl,
                 videoUrl: null,
-                imageExt: getFileExtensionFromUrl(imageUrl, '.jpg'),
-                videoExt: '.mov'
+                imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
+                videoExt: ".mov"
             };
         }).filter(Boolean);
     }
 
     function getFileBasenameFromUrl(url, fallback) {
-        if (!url || typeof url !== 'string') {
+        if (!url || typeof url !== "string") {
             return fallback;
         }
 
         try {
-            const pathname = new URL(url.startsWith('http') ? url : `https://${url}`).pathname;
-            const parts = pathname.split('/');
-            const lastSegment = parts[parts.length - 1] || '';
-            return lastSegment.replace(/\.[^.]+$/, '') || fallback;
-        } catch (e) {
-            const cleanUrl = url.split('?')[0];
-            const parts = cleanUrl.split('/');
-            const lastSegment = parts[parts.length - 1] || '';
-            return lastSegment.replace(/\.[^.]+$/, '') || fallback;
+            const pathname = new URL(url.startsWith("http") ? url : `https://${url}`).pathname;
+            const parts = pathname.split("/");
+            const lastSegment = parts[parts.length - 1] || "";
+            return lastSegment.replace(/\.[^.]+$/, "") || fallback;
+        } catch {
+            const cleanUrl = url.split("?")[0];
+            const parts = cleanUrl.split("/");
+            const lastSegment = parts[parts.length - 1] || "";
+            return lastSegment.replace(/\.[^.]+$/, "") || fallback;
         }
     }
 
     function createWeiboMediaItem(picId, picInfo, index) {
-        if (!picInfo || typeof picInfo !== 'object') {
+        if (!picInfo || typeof picInfo !== "object") {
             return null;
         }
 
@@ -189,11 +180,11 @@
             return null;
         }
 
-        const mediaType = typeof picInfo.type === 'string' ? picInfo.type.toLowerCase() : 'pic';
-        const isLivePhoto = mediaType === 'livephoto';
-        const isGif = mediaType === 'gif' || getFileExtensionFromUrl(imageUrl, '.jpg') === '.gif';
-        const videoUrl = isLivePhoto && typeof picInfo.video === 'string' ? picInfo.video : null;
-        const kind = isLivePhoto ? 'livephoto' : (isGif ? 'gif' : 'image');
+        const mediaType = typeof picInfo.type === "string" ? picInfo.type.toLowerCase() : "pic";
+        const isLivePhoto = mediaType === "livephoto";
+        const isGif = mediaType === "gif" || getFileExtensionFromUrl(imageUrl, ".jpg") === ".gif";
+        const videoUrl = isLivePhoto && typeof picInfo.video === "string" ? picInfo.video : null;
+        const kind = isLivePhoto ? "livephoto" : (isGif ? "gif" : "image");
         const label = isLivePhoto
             ? `Live Photo ${index + 1}`
             : (isGif ? `GIF ${index + 1}` : `图片 ${index + 1}`);
@@ -204,13 +195,13 @@
             label,
             imageUrl,
             videoUrl,
-            imageExt: getFileExtensionFromUrl(imageUrl, '.jpg'),
-            videoExt: getFileExtensionFromUrl(videoUrl, '.mov')
+            imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
+            videoExt: getFileExtensionFromUrl(videoUrl, ".mov")
         };
     }
 
     function getWeiboMediaSourceStatus(status) {
-        if (!status || typeof status !== 'object') {
+        if (!status || typeof status !== "object") {
             return null;
         }
 
@@ -229,7 +220,7 @@
 
     function getWeiboMediaItemsFromStatus(status) {
         const mediaSourceStatus = getWeiboMediaSourceStatus(status);
-        if (!mediaSourceStatus || typeof mediaSourceStatus !== 'object') {
+        if (!mediaSourceStatus || typeof mediaSourceStatus !== "object") {
             return [];
         }
 
@@ -244,39 +235,35 @@
     }
 
     function getXOriginalImageUrl(url) {
-        if (!url || typeof url !== 'string') return null;
-        if (!url.includes('pbs.twimg.com')) {
+        if (!url || typeof url !== "string") {
+            return null;
+        }
+        if (!url.includes("pbs.twimg.com")) {
             return null;
         }
 
         try {
-            // 确保 URL 是完整的
             let fullUrl = url;
-            if (!url.startsWith('http')) {
-                fullUrl = 'https://' + url;
+            if (!url.startsWith("http")) {
+                fullUrl = `https://${url}`;
             }
 
             const urlObj = new URL(fullUrl);
-            const name = urlObj.searchParams.get('name');
-            if (name === 'orig' || name === 'large') {
+            const name = urlObj.searchParams.get("name");
+            if (name === "orig" || name === "large") {
                 return fullUrl;
             }
-            // 先删除原有的 name 参数，再设置新的
-            urlObj.searchParams.delete('name');
-            urlObj.searchParams.set('name', 'orig');
+            urlObj.searchParams.delete("name");
+            urlObj.searchParams.set("name", "orig");
             return urlObj.toString();
-        } catch (e) {
-            if (url.includes('name=orig') || url.includes('name=large')) {
+        } catch {
+            if (url.includes("name=orig") || url.includes("name=large")) {
                 return url;
             }
-            // 简单替换 name=xxx 为 name=orig
-            return url.replace(/name=[^&]*/, 'name=orig');
+            return url.replace(/name=[^&]*/, "name=orig");
         }
     }
 
-    /**
-     * 获取文件名
-     */
     function getFilename(postId, index) {
         const platform = getCurrentPlatform();
         return `${platform}_${postId}_${index}.jpg`;
@@ -287,7 +274,7 @@
         const jobs = [];
 
         mediaItems.forEach((item, index) => {
-            if (!item || typeof item !== 'object') {
+            if (!item || typeof item !== "object") {
                 return;
             }
 
@@ -295,17 +282,17 @@
 
             if (item.imageUrl) {
                 jobs.push({
-                    type: 'image',
+                    type: "image",
                     url: item.imageUrl,
-                    filename: `${baseName}${item.imageExt || getFileExtensionFromUrl(item.imageUrl, '.jpg')}`
+                    filename: `${baseName}${item.imageExt || getFileExtensionFromUrl(item.imageUrl, ".jpg")}`
                 });
             }
 
             if (item.videoUrl) {
                 jobs.push({
-                    type: 'video',
+                    type: "video",
                     url: item.videoUrl,
-                    filename: `${baseName}_live${item.videoExt || getFileExtensionFromUrl(item.videoUrl, '.mov')}`
+                    filename: `${baseName}_live${item.videoExt || getFileExtensionFromUrl(item.videoUrl, ".mov")}`
                 });
             }
         });
@@ -323,11 +310,11 @@
         }
 
         const request = (async () => {
-            const response = await fetch(`/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`, {
-                credentials: 'same-origin',
+            const response = await fetchRef(`/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`, {
+                credentials: "same-origin",
                 headers: {
-                    'Accept': 'application/json, text/plain, */*',
-                    'X-Requested-With': 'XMLHttpRequest'
+                    Accept: "application/json, text/plain, */*",
+                    "X-Requested-With": "XMLHttpRequest"
                 }
             });
 
@@ -356,47 +343,40 @@
     function normalizeLegacyMediaItems(urls) {
         return (urls || []).map((url, index) => ({
             id: `legacy-${index + 1}`,
-            kind: 'image',
+            kind: "image",
             label: `图片 ${index + 1}`,
             imageUrl: url,
             videoUrl: null,
-            imageExt: getFileExtensionFromUrl(url, '.jpg'),
-            videoExt: '.mov'
+            imageExt: getFileExtensionFromUrl(url, ".jpg"),
+            videoExt: ".mov"
         }));
     }
 
-    // ==================== 下载函数 ====================
-
-    /**
-     * 下载单张图片
-     */
     async function downloadImage(url, filename) {
-        // 使用GM_download
-        if (typeof GM_download === 'function') {
+        if (typeof gmDownload === "function") {
             try {
                 const success = await new Promise((resolve) => {
                     try {
-                        const downloadId = GM_download({
-                            url: url,
+                        const downloadId = gmDownload({
+                            url,
                             name: filename,
-                            onload: function() {
+                            onload() {
                                 log(`下载完成: ${filename}`);
                                 resolve(true);
                             },
-                            onerror: function(error) {
-                                log(`GM_download失败: ${error.error || error.message || '未知错误'}`);
+                            onerror(error) {
+                                log(`GM_download失败: ${error.error || error.message || "未知错误"}`);
                                 resolve(false);
                             },
                             onprogress: () => {}
                         });
 
-                        // 如果立即返回false，说明立即失败了
                         if (downloadId === false) {
                             log(`GM_download返回false: ${filename}`);
                             resolve(false);
                         }
-                    } catch (e) {
-                        log('GM_download异常:', e.message);
+                    } catch (error) {
+                        log("GM_download异常:", error.message);
                         resolve(false);
                     }
                 });
@@ -405,56 +385,51 @@
                     return true;
                 }
 
-                // GM_download 失败，尝试备用方案
-                log('GM_download失败，尝试备用方案');
-            } catch (e) {
-                log('GM_download异常，尝试备用方案:', e.message);
+                log("GM_download失败，尝试备用方案");
+            } catch (error) {
+                log("GM_download异常，尝试备用方案:", error.message);
             }
         }
 
-        // 没有GM_download或GM_download失败时使用备用方案
         return downloadImageFallback(url, filename);
     }
 
-    /**
-     * 备用下载方案（fetch + blob）
-     */
     async function downloadImageFallback(url, filename) {
         try {
-            const response = await fetch(url);
+            const response = await fetchRef(url);
             const blob = await response.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = filename;
-            a.click();
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            const blobUrl = windowRef.URL.createObjectURL(blob);
+            const anchor = windowRef.document.createElement("a");
+            anchor.href = blobUrl;
+            anchor.download = filename;
+            anchor.click();
+            setTimeout(() => windowRef.URL.revokeObjectURL(blobUrl), 1000);
             log(`fetch下载成功: ${filename}`);
             return true;
-        } catch (e2) {
-            // 最后备用：打开新窗口
+        } catch {
             log(`打开图片: ${filename}`);
-            window.open(url, '_blank');
+            windowRef.open(url, "_blank");
             return true;
         }
     }
 
-    /**
-     * 批量下载图片
-     */
     async function downloadAllImages(urls, postId) {
         return downloadMediaItems(normalizeLegacyMediaItems(urls), postId);
     }
 
     async function downloadMediaItems(mediaItems, postId) {
         if (!mediaItems || mediaItems.length === 0) {
-            WID_UI.showToast('未找到图片');
+            if (ui && typeof ui.showToast === "function") {
+                ui.showToast("未找到图片");
+            }
             return;
         }
 
         const jobs = buildMediaDownloadJobs(mediaItems, postId);
         if (jobs.length === 0) {
-            WID_UI.showToast('未找到图片');
+            if (ui && typeof ui.showToast === "function") {
+                ui.showToast("未找到图片");
+            }
             return;
         }
 
@@ -463,9 +438,8 @@
         for (let i = 0; i < jobs.length; i++) {
             const job = jobs[i];
             await downloadImage(job.url, job.filename);
-
             if (i < jobs.length - 1) {
-                await new Promise(r => setTimeout(r, WID_CONFIG.DELAY_MS));
+                await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
             }
         }
 
@@ -474,12 +448,12 @@
             : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
 
         log(message);
-        WID_UI.showToast(message);
+        if (ui && typeof ui.showToast === "function") {
+            ui.showToast(message);
+        }
     }
 
-    // ==================== 导出 ====================
-
-    global.WID_UTILS = {
+    return {
         isWeibo,
         isSearchPage,
         isX,
@@ -505,5 +479,4 @@
         downloadAllImages,
         downloadMediaItems
     };
-
-})(window);
+}

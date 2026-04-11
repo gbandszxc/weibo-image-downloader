@@ -1,0 +1,15 @@
+{
+  "name": "weibo-image-downloader",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run scripts/build.mjs",
+    "dev": "bun run scripts/build.mjs --watch",
+    "test": "node --test",
+    "verify:dist": "bun run scripts/verify-dist.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.3"
+  }
+}
