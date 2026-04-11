@@ -6,6 +6,8 @@
 (function(global) {
     'use strict';
 
+    const weiboStatusCache = new Map();
+
     // ==================== 平台检测 ====================
 
     function isWeibo() {
@@ -85,6 +87,90 @@
         return url;
     }
 
+    function getFileExtensionFromUrl(url, fallback = '.jpg') {
+        if (!url || typeof url !== 'string') {
+            return fallback;
+        }
+
+        try {
+            const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+            const pathname = new URL(fullUrl).pathname;
+            const match = pathname.match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        } catch (e) {
+            const cleanUrl = url.split('?')[0];
+            const match = cleanUrl.match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        }
+    }
+
+    function getBestWeiboImageUrl(picInfo) {
+        if (!picInfo || typeof picInfo !== 'object') {
+            return null;
+        }
+
+        const candidates = [
+            picInfo.largest && picInfo.largest.url,
+            picInfo.original && picInfo.original.url,
+            picInfo.large && picInfo.large.url,
+            picInfo.bmiddle && picInfo.bmiddle.url,
+            picInfo.thumbnail && picInfo.thumbnail.url
+        ];
+
+        return candidates.find((url) => typeof url === 'string' && url.length > 0) || null;
+    }
+
+    function getWeiboMediaSourceStatus(status) {
+        if (!status || typeof status !== 'object') {
+            return null;
+        }
+
+        const hasPics = Array.isArray(status.pic_ids) && status.pic_ids.length > 0;
+        if (hasPics) {
+            return status;
+        }
+
+        if (status.retweeted_status) {
+            return getWeiboMediaSourceStatus(status.retweeted_status);
+        }
+
+        return status;
+    }
+
+    function getWeiboMediaItemsFromStatus(status) {
+        const mediaSourceStatus = getWeiboMediaSourceStatus(status);
+        if (!mediaSourceStatus || typeof mediaSourceStatus !== 'object') {
+            return [];
+        }
+
+        const picIds = Array.isArray(mediaSourceStatus.pic_ids) ? mediaSourceStatus.pic_ids : [];
+        const picInfos = mediaSourceStatus.pic_infos || {};
+
+        return picIds.map((picId, index) => {
+            const picInfo = picInfos[picId];
+            if (!picInfo) {
+                return null;
+            }
+
+            const imageUrl = getBestWeiboImageUrl(picInfo);
+            if (!imageUrl) {
+                return null;
+            }
+
+            const videoUrl = typeof picInfo.video === 'string' ? picInfo.video : null;
+
+            return {
+                id: picId,
+                kind: videoUrl ? 'livephoto' : 'image',
+                label: videoUrl ? `Live Photo ${index + 1}` : `图片 ${index + 1}`,
+                imageUrl,
+                videoUrl,
+                imageExt: getFileExtensionFromUrl(imageUrl, '.jpg'),
+                videoExt: getFileExtensionFromUrl(videoUrl, '.mov')
+            };
+        }).filter(Boolean);
+    }
+
     function getXOriginalImageUrl(url) {
         if (!url || typeof url !== 'string') return null;
         if (!url.includes('pbs.twimg.com')) {
@@ -122,6 +208,89 @@
     function getFilename(postId, index) {
         const platform = getCurrentPlatform();
         return `${platform}_${postId}_${index}.jpg`;
+    }
+
+    function buildMediaDownloadJobs(mediaItems, postId) {
+        const platform = getCurrentPlatform();
+        const jobs = [];
+
+        mediaItems.forEach((item, index) => {
+            if (!item || typeof item !== 'object') {
+                return;
+            }
+
+            const baseName = `${platform}_${postId}_${index + 1}`;
+
+            if (item.imageUrl) {
+                jobs.push({
+                    type: 'image',
+                    url: item.imageUrl,
+                    filename: `${baseName}${item.imageExt || getFileExtensionFromUrl(item.imageUrl, '.jpg')}`
+                });
+            }
+
+            if (item.videoUrl) {
+                jobs.push({
+                    type: 'video',
+                    url: item.videoUrl,
+                    filename: `${baseName}_live${item.videoExt || getFileExtensionFromUrl(item.videoUrl, '.mov')}`
+                });
+            }
+        });
+
+        return jobs;
+    }
+
+    async function fetchWeiboStatus(statusId) {
+        if (!statusId) {
+            return null;
+        }
+
+        if (weiboStatusCache.has(statusId)) {
+            return weiboStatusCache.get(statusId);
+        }
+
+        const request = (async () => {
+            const response = await fetch(`/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`, {
+                credentials: 'same-origin',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`微博接口请求失败: ${response.status}`);
+            }
+
+            return response.json();
+        })();
+
+        weiboStatusCache.set(statusId, request);
+
+        try {
+            return await request;
+        } catch (error) {
+            weiboStatusCache.delete(statusId);
+            throw error;
+        }
+    }
+
+    async function getWeiboMediaItemsById(statusId) {
+        const status = await fetchWeiboStatus(statusId);
+        return getWeiboMediaItemsFromStatus(status);
+    }
+
+    function normalizeLegacyMediaItems(urls) {
+        return (urls || []).map((url, index) => ({
+            id: `legacy-${index + 1}`,
+            kind: 'image',
+            label: `图片 ${index + 1}`,
+            imageUrl: url,
+            videoUrl: null,
+            imageExt: getFileExtensionFromUrl(url, '.jpg'),
+            videoExt: '.mov'
+        }));
     }
 
     // ==================== 下载函数 ====================
@@ -202,25 +371,38 @@
      * 批量下载图片
      */
     async function downloadAllImages(urls, postId) {
-        if (!urls || urls.length === 0) {
+        return downloadMediaItems(normalizeLegacyMediaItems(urls), postId);
+    }
+
+    async function downloadMediaItems(mediaItems, postId) {
+        if (!mediaItems || mediaItems.length === 0) {
             WID_UI.showToast('未找到图片');
             return;
         }
 
-        log(`开始下载 ${urls.length} 张图片...`);
+        const jobs = buildMediaDownloadJobs(mediaItems, postId);
+        if (jobs.length === 0) {
+            WID_UI.showToast('未找到图片');
+            return;
+        }
 
-        for (let i = 0; i < urls.length; i++) {
-            const url = urls[i];
-            const filename = getFilename(postId, i + 1);
-            await downloadImage(url, filename);
+        log(`开始下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件...`);
 
-            if (i < urls.length - 1) {
+        for (let i = 0; i < jobs.length; i++) {
+            const job = jobs[i];
+            await downloadImage(job.url, job.filename);
+
+            if (i < jobs.length - 1) {
                 await new Promise(r => setTimeout(r, WID_CONFIG.DELAY_MS));
             }
         }
 
-        log(`已下载 ${urls.length} 张图片`);
-        WID_UI.showToast(`已下载 ${urls.length} 张图片`);
+        const message = jobs.length === mediaItems.length
+            ? `已下载 ${jobs.length} 张图片`
+            : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
+
+        log(message);
+        WID_UI.showToast(message);
     }
 
     // ==================== 导出 ====================
@@ -234,11 +416,19 @@
         isAvatarImage,
         getOriginalImageUrl,
         getWeiboOriginalImageUrl,
+        getFileExtensionFromUrl,
+        getBestWeiboImageUrl,
+        getWeiboMediaSourceStatus,
+        getWeiboMediaItemsFromStatus,
         getXOriginalImageUrl,
         getFilename,
+        buildMediaDownloadJobs,
+        fetchWeiboStatus,
+        getWeiboMediaItemsById,
         downloadImage,
         downloadImageFallback,
-        downloadAllImages
+        downloadAllImages,
+        downloadMediaItems
     };
 
 })(window);
