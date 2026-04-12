@@ -31,11 +31,11 @@
 
 ## 使用方法
 
-![微博/X 下载按钮示例](docs/screenshots/dl_button.png)
+<img src="docs/screenshots/dl_button.png" alt="微博/X 下载按钮示例" width="70%">
 
 *下载按钮会显示为橙色 `↓N`，其中 `N` 表示当前帖子中可下载的媒体数量。*
 
-![长按下载按钮后的选择弹窗示例](docs/screenshots/long_press_modal.png)
+<img src="docs/screenshots/long_press_modal.png" alt="长按下载按钮后的选择弹窗示例" width="70%">
 
 *长按下载按钮后会展开选择弹窗，可按媒体项勾选下载；普通图片显示为 `p1`、`p2`，Live Photo 显示为 `lp1`、`lp2`，动图显示为 `a1`、`a2`。*
 
