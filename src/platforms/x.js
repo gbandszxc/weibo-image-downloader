@@ -1,7 +1,6 @@
-export function createXPlatform({ windowRef, log }) {
+export function createXPlatform({ windowRef, log, getFileExtensionFromUrl }) {
     const imageSelectors = ['article img[src*="twimg.com"]'];
     const postSelectors = ['article[data-testid="tweet"]'];
-
     function getOriginalImageUrl(url) {
         if (!url || typeof url !== "string") {
             return null;
@@ -18,18 +17,61 @@ export function createXPlatform({ windowRef, log }) {
 
             const urlObj = new URL(fullUrl);
             const name = urlObj.searchParams.get("name");
-            if (name === "orig" || name === "large") {
+            if (name === "orig") {
                 return fullUrl;
             }
             urlObj.searchParams.delete("name");
             urlObj.searchParams.set("name", "orig");
             return urlObj.toString();
         } catch {
-            if (url.includes("name=orig") || url.includes("name=large")) {
+            if (url.includes("name=orig")) {
                 return url;
             }
             return url.replace(/name=[^&]*/, "name=orig");
         }
+    }
+
+    function isPhotoImageUrl(url) {
+        return typeof url === "string" && url.includes("pbs.twimg.com/media/");
+    }
+
+    function getVideoSourceUrl(video) {
+        if (!video) {
+            return null;
+        }
+
+        const directSrc = video.currentSrc || video.src || null;
+        if (typeof directSrc === "string" && directSrc.startsWith("http")) {
+            return directSrc;
+        }
+
+        if (typeof video.querySelectorAll === "function") {
+            const sources = video.querySelectorAll("source");
+            for (const source of sources) {
+                const src = source?.src;
+                if (typeof src === "string" && src.startsWith("http")) {
+                    return src;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function getVideoMediaContainer(node) {
+        if (!node || typeof node.closest !== "function") {
+            return null;
+        }
+
+        return node.closest('[data-testid="videoComponent"]') ||
+            node.closest('[data-testid="videoPlayer"]') ||
+            node.closest("[data-testid]");
+    }
+
+    function isGifVideo(video) {
+        const container = getVideoMediaContainer(video);
+        const text = container?.textContent || "";
+        return /\bGIF\b/i.test(text);
     }
 
     function findImagesInPost(container) {
@@ -45,6 +87,9 @@ export function createXPlatform({ windowRef, log }) {
                         return;
                     }
                     if (!src.includes("pbs.twimg.com")) {
+                        return;
+                    }
+                    if (!isPhotoImageUrl(src)) {
                         return;
                     }
 
@@ -74,6 +119,88 @@ export function createXPlatform({ windowRef, log }) {
         }
 
         return images;
+    }
+
+    function createMediaItem({ id, kind, label, url, fallbackExt }) {
+        if (!url) {
+            return null;
+        }
+
+        return {
+            id,
+            kind,
+            label,
+            imageUrl: url,
+            videoUrl: null,
+            imageExt: getFileExtensionFromUrl(url, fallbackExt),
+            videoExt: ".mov"
+        };
+    }
+
+    function getDomMediaItems(container) {
+        const mediaItems = [];
+        const seen = new Set();
+
+        const photoImages = findImagesInPost(container);
+        photoImages.forEach((img) => {
+            const url = getOriginalImageUrl(img.src);
+            if (!url) {
+                return;
+            }
+
+            const key = `photo:${url.split("?")[0]}`;
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+
+            const item = createMediaItem({
+                id: `dom-photo-${mediaItems.length + 1}`,
+                kind: "image",
+                label: `图片 ${mediaItems.length + 1}`,
+                url,
+                fallbackExt: ".jpg"
+            });
+            if (item) {
+                mediaItems.push(item);
+            }
+        });
+
+        if (typeof container.querySelectorAll !== "function") {
+            return mediaItems;
+        }
+
+        const videos = container.querySelectorAll("video");
+        videos.forEach((video) => {
+            if (!isGifVideo(video)) {
+                return;
+            }
+
+            const url = getVideoSourceUrl(video);
+            if (!url) {
+                return;
+            }
+
+            const key = `gif:${url.split("?")[0]}`;
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+
+            const gifCount = mediaItems.filter((item) => item.kind === "gif").length + 1;
+            const item = createMediaItem({
+                id: `dom-gif-${gifCount}`,
+                kind: "gif",
+                label: `GIF ${gifCount}`,
+                url,
+                fallbackExt: ".mp4"
+            });
+            if (item) {
+                mediaItems.push(item);
+            }
+        });
+
+        return mediaItems;
     }
 
     function resolvePostMediaItems(_postContainer, fallbackItems) {
@@ -114,33 +241,23 @@ export function createXPlatform({ windowRef, log }) {
         return postId || `x_${Date.now()}`;
     }
 
-    function isDetailPage() {
-        const path = windowRef.location.pathname;
-        return /\/[\w_]+\/status\/\d+/.test(path);
-    }
-
     function insertDownloadButton({ post, btn }) {
-        if (isDetailPage()) {
-            const usernameEl = post.querySelector('[data-testid="User-Name"]');
-            if (usernameEl) {
-                const parent = usernameEl.parentElement;
-                if (parent && parent.parentNode) {
-                    parent.parentNode.insertBefore(btn, parent.nextSibling);
-                    return true;
-                }
+        const usernameEl = post.querySelector('[data-testid="User-Name"]');
+        if (usernameEl) {
+            const parent = usernameEl.parentElement;
+            if (parent && parent.parentNode) {
+                parent.parentNode.insertBefore(btn, parent.nextSibling || null);
+                return true;
             }
-        } else {
-            const timeEl = post.querySelector("time");
-            if (timeEl) {
-                const timeParent = timeEl.parentElement;
-                if (timeParent && timeParent.nextElementSibling && timeParent.parentNode) {
-                    timeParent.parentNode.insertBefore(btn, timeParent.nextElementSibling);
-                    return true;
-                }
-                if (timeParent && timeParent.parentNode) {
-                    timeParent.parentNode.insertBefore(btn, timeParent.nextSibling);
-                    return true;
-                }
+        }
+
+        const timeEl = post.querySelector("time");
+        if (timeEl) {
+            const timeParent = timeEl.parentElement;
+            if (timeParent && timeParent.parentNode) {
+                const beforeNode = timeParent.nextElementSibling || timeParent.nextSibling || null;
+                timeParent.parentNode.insertBefore(btn, beforeNode);
+                return true;
             }
         }
 
@@ -160,6 +277,7 @@ export function createXPlatform({ windowRef, log }) {
         isAvatarImage: () => false,
         getOriginalImageUrl,
         getXOriginalImageUrl: getOriginalImageUrl,
+        getDomMediaItems,
         findImagesInPost,
         resolvePostMediaItems,
         getPostSelectors,

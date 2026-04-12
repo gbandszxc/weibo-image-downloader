@@ -46,6 +46,13 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
     }
 
     function getFallbackMediaItems(container) {
+        if (typeof platform.getDomMediaItems === "function") {
+            const platformMediaItems = platform.getDomMediaItems(container);
+            if (Array.isArray(platformMediaItems)) {
+                return platformMediaItems;
+            }
+        }
+
         const images = findImagesInPost(container);
         const seen = new Set();
         const mediaItems = [];
