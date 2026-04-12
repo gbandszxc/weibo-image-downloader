@@ -139,6 +139,19 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         documentRef.head.appendChild(marker);
     }
 
+    function getSelectionItemLabel(item, typeCounters) {
+        const normalizedKind = item && item.kind ? item.kind : (item && item.videoUrl ? "livephoto" : "image");
+        const typeKey = normalizedKind === "livephoto" ? "livephoto" : (normalizedKind === "gif" ? "gif" : "image");
+        const labelPrefixMap = {
+            image: "p",
+            livephoto: "lp",
+            gif: "a"
+        };
+
+        typeCounters[typeKey] = (typeCounters[typeKey] || 0) + 1;
+        return `${labelPrefixMap[typeKey]}${typeCounters[typeKey]}`;
+    }
+
     function showImageSelectModal(mediaItems) {
         return new Promise((resolve) => {
             ensureImageSelectModalStyles();
@@ -164,6 +177,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
 
             const list = documentRef.createElement("div");
             list.className = "weibo-img-select-list";
+            const typeCounters = {};
             mediaItems.forEach((item, index) => {
                 const label = documentRef.createElement("label");
                 label.className = "weibo-img-select-item";
@@ -174,7 +188,9 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
                 input.value = String(index);
 
                 const text = documentRef.createElement("span");
-                text.textContent = item.label || (item.videoUrl ? `Live Photo ${index + 1}` : `图片 ${index + 1}`);
+                text.className = "weibo-img-select-item-text";
+                text.textContent = getSelectionItemLabel(item, typeCounters);
+                label.title = item && item.label ? item.label : text.textContent;
 
                 label.appendChild(input);
                 label.appendChild(text);

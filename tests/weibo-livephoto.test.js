@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { CONFIG } from "../src/config.js";
 import { createUtils } from "../src/utils.js";
@@ -116,6 +117,130 @@ function createUiForWeibo() {
         },
         addStyle() {}
     });
+}
+
+function createTestElement(tagName) {
+    return {
+        tagName,
+        id: "",
+        type: "",
+        value: "",
+        checked: false,
+        className: "",
+        textContent: "",
+        children: [],
+        parentNode: null,
+        style: {},
+        appendChild(child) {
+            child.parentNode = this;
+            this.children.push(child);
+        },
+        addEventListener() {},
+        removeEventListener() {},
+        remove() {
+            if (!this.parentNode) {
+                return;
+            }
+
+            this.parentNode.children = this.parentNode.children.filter((node) => node !== this);
+            this.parentNode = null;
+        },
+        querySelectorAll(selector) {
+            const results = [];
+            const visit = (node) => {
+                if (selector === 'input[type="checkbox"]' && node.tagName === "input" && node.type === "checkbox") {
+                    results.push(node);
+                }
+
+                if (
+                    selector === 'input[type="checkbox"]:checked' &&
+                    node.tagName === "input" &&
+                    node.type === "checkbox" &&
+                    node.checked
+                ) {
+                    results.push(node);
+                }
+
+                node.children.forEach(visit);
+            };
+
+            this.children.forEach(visit);
+            return results;
+        }
+    };
+}
+
+function findElementsByClassName(root, className) {
+    const results = [];
+    const visit = (node) => {
+        if (node.className === className) {
+            results.push(node);
+        }
+
+        node.children.forEach(visit);
+    };
+
+    visit(root);
+    return results;
+}
+
+function createUiForModalTests() {
+    const head = createTestElement("head");
+    const body = createTestElement("body");
+
+    const documentRef = {
+        getElementById() {
+            return null;
+        },
+        createElement(tagName) {
+            return createTestElement(tagName);
+        },
+        head,
+        body,
+        addEventListener() {},
+        removeEventListener() {}
+    };
+
+    const ui = createUi({
+        config: {
+            ...CONFIG,
+            DEBUG: false
+        },
+        utils: {
+            getOriginalImageUrl: (url) => url,
+            getFileExtensionFromUrl: () => ".jpg",
+            log() {},
+            getPlatformAdapter() {
+                return {
+                    findImagesInPost() {
+                        return [];
+                    },
+                    resolvePostMediaItems(_postContainer, fallbackItems) {
+                        return fallbackItems;
+                    },
+                    getPostId() {
+                        return "weibo_test";
+                    },
+                    getPostSelectors() {
+                        return [];
+                    },
+                    shouldSkipPost() {
+                        return false;
+                    },
+                    insertDownloadButton() {
+                        return false;
+                    },
+                    afterInjectDownloadButtons() {},
+                    initObservers() {}
+                };
+            }
+        },
+        windowRef: {},
+        documentRef,
+        addStyle() {}
+    });
+
+    return { ui, documentRef };
 }
 
 function createWeiboPlatformForTests() {
@@ -448,4 +573,28 @@ test("weibo video thumbnail image is filtered from fallback matching", () => {
     };
 
     assert.equal(ui.isVideoThumbnailImage(videoThumbImage), true);
+});
+
+test("image selection modal uses compact p lp a labels by media type", () => {
+    const { ui, documentRef } = createUiForModalTests();
+
+    ui.showImageSelectModal([
+        { id: "img-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null },
+        { id: "live-1", kind: "livephoto", imageUrl: "https://wx1.sinaimg.cn/large/b.jpg", videoUrl: "https://livephoto.us.sinaimg.cn/a.mov" },
+        { id: "gif-1", kind: "gif", imageUrl: "https://wx1.sinaimg.cn/large/c.gif", videoUrl: null }
+    ]);
+
+    const overlay = documentRef.body.children[0];
+    const textNodes = findElementsByClassName(overlay, "weibo-img-select-item-text");
+
+    assert.deepEqual(
+        textNodes.map((node) => node.textContent),
+        ["p1", "lp1", "a1"]
+    );
+});
+
+test("modal item text style keeps checkbox labels on a single line", () => {
+    const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+
+    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*white-space:\s*nowrap;/s);
 });
