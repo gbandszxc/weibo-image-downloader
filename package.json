@@ -7,6 +7,7 @@
     "build": "bun run scripts/build.mjs",
     "dev": "bun run scripts/build.mjs --watch",
     "test": "node --test",
+    "test:placement": "node --test tests/button-placement.test.js",
     "verify:dist": "bun run scripts/verify-dist.mjs"
   },
   "devDependencies": {
