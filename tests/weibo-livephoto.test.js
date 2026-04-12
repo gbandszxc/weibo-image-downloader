@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { CONFIG } from "../src/config.js";
 import { createUtils } from "../src/utils.js";
 import { createUi } from "../src/ui.js";
+import { createWeiboPlatform } from "../src/platforms/weibo.js";
 
 function createUtilsForWeibo() {
     return createUtils({
@@ -42,7 +43,52 @@ function createUiForWeibo() {
             DEBUG: false
         },
         utils: {
-            isWeibo: () => true
+            getOriginalImageUrl: (url) => url,
+            getFileExtensionFromUrl: () => ".jpg",
+            log() {},
+            getPlatformAdapter() {
+                return {
+                    findImagesInPost() {
+                        return [];
+                    },
+                    isVideoThumbnailImage(img) {
+                        if (!img || typeof img.closest !== "function") {
+                            return false;
+                        }
+
+                        const pictureMain = img.closest(".woo-picture-main");
+                        if (!pictureMain || typeof pictureMain.querySelector !== "function") {
+                            return false;
+                        }
+
+                        return !!pictureMain.querySelector('[class*="_videotime_"], [class*="_videobox_"], .woo-font--play');
+                    },
+                    selectPreferredMediaItems(fallbackItems, resolvedMediaItems, apiResolved) {
+                        return apiResolved ? resolvedMediaItems : fallbackItems;
+                    },
+                    resolvePostMediaItems(_postContainer, fallbackItems) {
+                        return fallbackItems;
+                    },
+                    getPostId() {
+                        return "weibo_test";
+                    },
+                    getPostSelectors() {
+                        return [];
+                    },
+                    shouldSkipPost() {
+                        return false;
+                    },
+                    insertDownloadButton() {
+                        return false;
+                    },
+                    getPostUrl() {
+                        return null;
+                    },
+                    injectGotoOriginalMenuItem() {},
+                    afterInjectDownloadButtons() {},
+                    initObservers() {}
+                };
+            }
         },
         windowRef: {},
         documentRef: {
@@ -69,6 +115,54 @@ function createUiForWeibo() {
             removeEventListener() {}
         },
         addStyle() {}
+    });
+}
+
+function createWeiboPlatformForTests() {
+    return createWeiboPlatform({
+        windowRef: {
+            location: {
+                hostname: "weibo.com"
+            },
+            open() {}
+        },
+        fetchRef: async () => {
+            throw new Error("fetch should not be called in unit tests");
+        },
+        log() {},
+        getFileBasenameFromUrl(url, fallback) {
+            if (!url || typeof url !== "string") {
+                return fallback;
+            }
+
+            try {
+                const pathname = new URL(url.startsWith("http") ? url : `https://${url}`).pathname;
+                const parts = pathname.split("/");
+                const lastSegment = parts[parts.length - 1] || "";
+                return lastSegment.replace(/\.[^.]+$/, "") || fallback;
+            } catch {
+                const cleanUrl = url.split("?")[0];
+                const parts = cleanUrl.split("/");
+                const lastSegment = parts[parts.length - 1] || "";
+                return lastSegment.replace(/\.[^.]+$/, "") || fallback;
+            }
+        },
+        getFileExtensionFromUrl(url, fallback = ".jpg") {
+            if (!url || typeof url !== "string") {
+                return fallback;
+            }
+
+            try {
+                const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+                const pathname = new URL(fullUrl).pathname;
+                const match = pathname.match(/(\.[a-z0-9]+)$/i);
+                return match ? match[1].toLowerCase() : fallback;
+            } catch {
+                const cleanUrl = url.split("?")[0];
+                const match = cleanUrl.match(/(\.[a-z0-9]+)$/i);
+                return match ? match[1].toLowerCase() : fallback;
+            }
+        }
     });
 }
 
@@ -231,8 +325,8 @@ const sampleMixMediaStatus = {
 };
 
 test("live photo status resolves full media list", () => {
-    const utils = createUtilsForWeibo();
-    const mediaItems = utils.getWeiboMediaItemsFromStatus(sampleStatus);
+    const platform = createWeiboPlatformForTests();
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleStatus);
 
     assert.equal(mediaItems.length, 3);
     assert.deepEqual(
@@ -244,7 +338,8 @@ test("live photo status resolves full media list", () => {
 
 test("live photo expands to stable jpg and mov jobs", () => {
     const utils = createUtilsForWeibo();
-    const mediaItems = utils.getWeiboMediaItemsFromStatus(sampleStatus);
+    const platform = createWeiboPlatformForTests();
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleStatus);
     const jobs = utils.buildMediaDownloadJobs(mediaItems, "5286555824429155");
 
     assert.equal(jobs.length, 6);
@@ -262,8 +357,8 @@ test("live photo expands to stable jpg and mov jobs", () => {
 });
 
 test("retweeted status resolves original media order", () => {
-    const utils = createUtilsForWeibo();
-    const retweetMediaItems = utils.getWeiboMediaItemsFromStatus(sampleRetweetStatus);
+    const platform = createWeiboPlatformForTests();
+    const retweetMediaItems = platform.getWeiboMediaItemsFromStatus(sampleRetweetStatus);
 
     assert.equal(retweetMediaItems.length, 9);
     assert.equal(retweetMediaItems[0].id, "006QzRougy1ibzk7pm7ecj32c0340b29");
@@ -271,7 +366,8 @@ test("retweeted status resolves original media order", () => {
 
 test("gif media only creates image download jobs", () => {
     const utils = createUtilsForWeibo();
-    const gifMediaItems = utils.getWeiboMediaItemsFromStatus(sampleGifStatus);
+    const platform = createWeiboPlatformForTests();
+    const gifMediaItems = platform.getWeiboMediaItemsFromStatus(sampleGifStatus);
     const gifJobs = utils.buildMediaDownloadJobs(gifMediaItems, "5280000000000001");
 
     assert.equal(gifMediaItems.length, 2);
@@ -289,7 +385,8 @@ test("gif media only creates image download jobs", () => {
 
 test("mixed media status keeps image items", () => {
     const utils = createUtilsForWeibo();
-    const mixMediaItems = utils.getWeiboMediaItemsFromStatus(sampleMixMediaStatus);
+    const platform = createWeiboPlatformForTests();
+    const mixMediaItems = platform.getWeiboMediaItemsFromStatus(sampleMixMediaStatus);
     const mixJobs = utils.buildMediaDownloadJobs(mixMediaItems, "5286590000000000");
 
     assert.equal(mixMediaItems.length, 1);
@@ -311,8 +408,8 @@ test("api result selection prefers authoritative empty list", () => {
         { id: "dom-2", kind: "image", imageUrl: "https://wx2.sinaimg.cn/large/b.jpg", videoUrl: null }
     ];
 
-    const authoritativeEmptyItems = ui.selectPreferredWeiboMediaItems(fallbackDomItems, [], true);
-    const fallbackOnErrorItems = ui.selectPreferredWeiboMediaItems(fallbackDomItems, [], false);
+    const authoritativeEmptyItems = ui.selectPreferredMediaItems(fallbackDomItems, [], true);
+    const fallbackOnErrorItems = ui.selectPreferredMediaItems(fallbackDomItems, [], false);
 
     assert.equal(authoritativeEmptyItems.length, 0);
     assert.equal(fallbackOnErrorItems.length, 2);
@@ -350,5 +447,5 @@ test("weibo video thumbnail image is filtered from fallback matching", () => {
         }
     };
 
-    assert.equal(ui.isWeiboVideoThumbnailImage(videoThumbImage), true);
+    assert.equal(ui.isVideoThumbnailImage(videoThumbImage), true);
 });

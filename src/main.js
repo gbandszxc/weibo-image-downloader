@@ -52,8 +52,6 @@ function init() {
     injectStyles();
     ui.ensureImageSelectModalStyles();
 
-    const platform = utils.getCurrentPlatform();
-
     setTimeout(() => {
         ui.injectDownloadButtons();
     }, 2000);
@@ -79,8 +77,8 @@ function init() {
         ui.injectDownloadButtons();
     }, 5000);
 
-    ui.initGotoOriginalMenuObserver();
-    utils.log(`${platform === "x" ? "X" : "微博"}图片批量下载器初始化完成！`);
+    ui.initPlatformObservers();
+    utils.log(`${utils.getCurrentPlatformDisplayName()}图片批量下载器初始化完成！`);
 }
 
 if (document.readyState === "loading") {

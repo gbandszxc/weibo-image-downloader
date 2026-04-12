@@ -121,6 +121,7 @@ bun run verify:dist
 ```
 
 - 源码位于 `src/`
+- 平台实现位于 `src/platforms/`，共享流程通过统一适配器调用
 - 发布产物位于 `dist/weibo-image-downloader.user.js`
 - 版本号以 `package.json` 为准，发布时需同步更新 Git tag、README 更新日志和最终 userscript `@version`
 - 发布前执行 `bun run verify:dist`，确认 `dist/` 产物已由当前源码重新生成且 metadata 一致
