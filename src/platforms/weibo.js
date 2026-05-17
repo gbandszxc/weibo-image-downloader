@@ -11,7 +11,13 @@ export function createWeiboPlatform({
         ".m3 img",
         'div[class^="m"] img'
     ];
+    const mobilePostSelectors = [
+        ".card.m-panel.card9.f-weibo",
+        ".card.m-panel.card9.weibo-member",
+        ".card.card11"
+    ];
     const postSelectors = [
+        ...mobilePostSelectors,
         "article",
         ".vue-feed-item",
         'div[action-type="feed_list_item"]'
@@ -27,6 +33,10 @@ export function createWeiboPlatform({
 
     function isSearchPage() {
         return windowRef.location.hostname === "s.weibo.com";
+    }
+
+    function isMobileWeiboPage() {
+        return windowRef.location.hostname === "m.weibo.cn";
     }
 
     function isAvatarImage(url) {
@@ -82,7 +92,8 @@ export function createWeiboPlatform({
             picInfo.original && picInfo.original.url,
             picInfo.large && picInfo.large.url,
             picInfo.bmiddle && picInfo.bmiddle.url,
-            picInfo.thumbnail && picInfo.thumbnail.url
+            picInfo.thumbnail && picInfo.thumbnail.url,
+            picInfo.url
         ];
 
         return candidates.find((url) => typeof url === "string" && url.length > 0) || null;
@@ -142,7 +153,10 @@ export function createWeiboPlatform({
         const mediaType = typeof picInfo.type === "string" ? picInfo.type.toLowerCase() : "pic";
         const isLivePhoto = mediaType === "livephoto";
         const isGif = mediaType === "gif" || getFileExtensionFromUrl(imageUrl, ".jpg") === ".gif";
-        const videoUrl = isLivePhoto && typeof picInfo.video === "string" ? picInfo.video : null;
+        const candidateVideoUrl = typeof picInfo.video === "string"
+            ? picInfo.video
+            : (typeof picInfo.videoSrc === "string" ? picInfo.videoSrc : null);
+        const videoUrl = isLivePhoto ? candidateVideoUrl : null;
         const kind = isLivePhoto ? "livephoto" : (isGif ? "gif" : "image");
         const label = isLivePhoto
             ? `Live Photo ${index + 1}`
@@ -159,12 +173,37 @@ export function createWeiboPlatform({
         };
     }
 
+    function getWeiboMobileMediaItems(status) {
+        const pics = Array.isArray(status && status.pics) ? status.pics : [];
+        if (pics.length === 0) {
+            return [];
+        }
+
+        return pics.map((pic, index) => {
+            if (!pic || typeof pic !== "object") {
+                return null;
+            }
+
+            const mediaType = typeof pic.type === "string" ? pic.type.toLowerCase() : "pic";
+            if (mediaType === "video") {
+                return null;
+            }
+
+            return createWeiboMediaItem(
+                pic.pid || getFileBasenameFromUrl(getBestWeiboImageUrl(pic) || pic.url, `pic-${index + 1}`),
+                pic,
+                index
+            );
+        }).filter(Boolean);
+    }
+
     function getWeiboMediaSourceStatus(status) {
         if (!status || typeof status !== "object") {
             return null;
         }
 
-        const hasPics = Array.isArray(status.pic_ids) && status.pic_ids.length > 0;
+        const hasPics = (Array.isArray(status.pic_ids) && status.pic_ids.length > 0) ||
+            (Array.isArray(status.pics) && status.pics.length > 0);
         const hasMixMedia = status.mix_media_info && Array.isArray(status.mix_media_info.items) && status.mix_media_info.items.length > 0;
         if (hasPics || hasMixMedia) {
             return status;
@@ -188,6 +227,11 @@ export function createWeiboPlatform({
         const directMediaItems = picIds.map((picId, index) => createWeiboMediaItem(picId, picInfos[picId], index)).filter(Boolean);
         if (directMediaItems.length > 0) {
             return directMediaItems;
+        }
+
+        const mobileMediaItems = getWeiboMobileMediaItems(mediaSourceStatus);
+        if (mobileMediaItems.length > 0) {
+            return mobileMediaItems;
         }
 
         return getWeiboMixMediaItems(mediaSourceStatus);
@@ -283,6 +327,42 @@ export function createWeiboPlatform({
         return images;
     }
 
+    function getVueStatusItem(postContainer) {
+        const candidateNodes = [
+            postContainer,
+            typeof postContainer.querySelector === "function" ? postContainer.querySelector(".card-wrap") : null,
+            typeof postContainer.querySelector === "function" ? postContainer.querySelector(".card-main") : null
+        ].filter(Boolean);
+
+        for (const node of candidateNodes) {
+            const vueInstance = node && node.__vue__;
+            const item = vueInstance && (
+                (vueInstance._props && vueInstance._props.item) ||
+                vueInstance.item ||
+                (vueInstance.$options && vueInstance.$options.propsData && vueInstance.$options.propsData.item)
+            );
+
+            if (item && typeof item === "object") {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    function getDomMediaItems(postContainer) {
+        if (!isMobileWeiboPage()) {
+            return null;
+        }
+
+        const status = getVueStatusItem(postContainer);
+        if (!status) {
+            return null;
+        }
+
+        return getWeiboMediaItemsFromStatus(status);
+    }
+
     function selectPreferredMediaItems(fallbackItems, resolvedMediaItems, apiResolved) {
         return apiResolved ? resolvedMediaItems : fallbackItems;
     }
@@ -306,6 +386,16 @@ export function createWeiboPlatform({
     }
 
     async function resolvePostMediaItems(postContainer, fallbackItems) {
+        if (isMobileWeiboPage()) {
+            const status = getVueStatusItem(postContainer);
+            if (!status) {
+                return fallbackItems;
+            }
+
+            const mediaItems = getWeiboMediaItemsFromStatus(status);
+            return selectPreferredMediaItems(fallbackItems, mediaItems, true);
+        }
+
         const statusId = getStatusLookupId(postContainer);
         if (!statusId) {
             return fallbackItems;
@@ -330,12 +420,39 @@ export function createWeiboPlatform({
     }
 
     function getPostId(postContainer) {
+        if (isMobileWeiboPage()) {
+            const status = getVueStatusItem(postContainer);
+            if (status && status.mid) {
+                return status.mid;
+            }
+        }
+
         return postContainer.getAttribute("mid") ||
             postContainer.getAttribute("data-mid") ||
             `weibo_${Date.now()}`;
     }
 
+    function insertMobileDownloadButton(post, btn) {
+        const headerEl = post.querySelector("header.weibo-top");
+        if (!headerEl) {
+            return false;
+        }
+
+        const trailingBox = headerEl.querySelector(".m-add-box.m-followBtn, .m-add-box.lite-reads");
+        if (trailingBox) {
+            headerEl.insertBefore(btn, trailingBox);
+            return true;
+        }
+
+        headerEl.appendChild(btn);
+        return true;
+    }
+
     function insertDownloadButton({ post, btn }) {
+        if (isMobileWeiboPage()) {
+            return insertMobileDownloadButton(post, btn);
+        }
+
         if (isSearchPage()) {
             const infoEl = post.querySelector(".content .info");
             if (infoEl) {
@@ -499,6 +616,7 @@ export function createWeiboPlatform({
         createWeiboMediaItem,
         getWeiboMediaSourceStatus,
         getWeiboMediaItemsFromStatus,
+        getDomMediaItems,
         fetchWeiboStatus,
         getWeiboMediaItemsById,
         isVideoThumbnailImage,

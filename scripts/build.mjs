@@ -27,6 +27,8 @@ const metadataLines = [
   "// @match        https://weibo.com/*",
   "// @match        https://www.weibo.com/*",
   "// @match        https://weibo.com.cn/*",
+  "// @match        https://m.weibo.cn/*",
+  "// @match        https://www.m.weibo.cn/*",
   "// @match        https://s.weibo.com/*",
   "// @match        https://x.com/*",
   "// @match        https://www.x.com/*",

@@ -247,7 +247,8 @@ function createWeiboPlatformForTests() {
     return createWeiboPlatform({
         windowRef: {
             location: {
-                hostname: "weibo.com"
+                hostname: "weibo.com",
+                pathname: "/"
             },
             open() {}
         },
@@ -449,6 +450,51 @@ const sampleMixMediaStatus = {
     }
 };
 
+const sampleMobilePicsStatus = {
+    mid: "5299112496859176",
+    pic_ids: [
+        "008vVtgily1id6q9sht56j30wr1dzk2k"
+    ],
+    pics: [
+        {
+            pid: "008vVtgily1id6q9sht56j30wr1dzk2k",
+            url: "https://wx3.sinaimg.cn/orj360/008vVtgily1id6q9sht56j30wr1dzk2k.jpg",
+            large: {
+                url: "https://wx3.sinaimg.cn/large/008vVtgily1id6q9sht56j30wr1dzk2k.jpg"
+            }
+        }
+    ]
+};
+
+const sampleMobileMixedPicsStatus = {
+    mid: "5299576766727808",
+    page_info: {
+        type: "video"
+    },
+    pic_ids: [
+        "6da17e26ly1id8h34rrpbj20k00zk0uu",
+        "6da17e26gy1id8h2xwky9j20xb188dud"
+    ],
+    pics: [
+        {
+            pid: "6da17e26ly1id8h34rrpbj20k00zk0uu",
+            type: "video",
+            url: "https://wx4.sinaimg.cn/orj360/6da17e26ly1id8h34rrpbj20k00zk0uu.jpg",
+            large: {
+                url: "https://wx4.sinaimg.cn/large/6da17e26ly1id8h34rrpbj20k00zk0uu.jpg"
+            },
+            videoSrc: "https://f.video.weibocdn.com/demo-video.mp4"
+        },
+        {
+            pid: "6da17e26gy1id8h2xwky9j20xb188dud",
+            url: "https://wx2.sinaimg.cn/orj360/6da17e26gy1id8h2xwky9j20xb188dud.jpg",
+            large: {
+                url: "https://wx2.sinaimg.cn/mw2000/6da17e26gy1id8h2xwky9j20xb188dud.jpg"
+            }
+        }
+    ]
+};
+
 test("live photo status resolves full media list", () => {
     const platform = createWeiboPlatformForTests();
     const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleStatus);
@@ -524,6 +570,77 @@ test("mixed media status keeps image items", () => {
         mixJobs.map((job) => job.filename),
         ["weibo_5286590000000000_1.jpg"]
     );
+});
+
+test("mobile weibo status resolves image items from pics array", () => {
+    const platform = createWeiboPlatformForTests();
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleMobilePicsStatus);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].id, "008vVtgily1id6q9sht56j30wr1dzk2k");
+    assert.equal(
+        mediaItems[0].imageUrl,
+        "https://wx3.sinaimg.cn/large/008vVtgily1id6q9sht56j30wr1dzk2k.jpg"
+    );
+    assert.equal(mediaItems[0].kind, "image");
+});
+
+test("mobile weibo mixed video and image pics skip the video cover", () => {
+    const platform = createWeiboPlatformForTests();
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleMobileMixedPicsStatus);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].id, "6da17e26gy1id8h2xwky9j20xb188dud");
+    assert.equal(
+        mediaItems[0].imageUrl,
+        "https://wx2.sinaimg.cn/mw2000/6da17e26gy1id8h2xwky9j20xb188dud.jpg"
+    );
+});
+
+test("mobile weibo card reads media items from vue item data without desktop fetch", () => {
+    const platform = createWeiboPlatform({
+        windowRef: {
+            location: {
+                hostname: "m.weibo.cn",
+                pathname: "/"
+            },
+            open() {}
+        },
+        fetchRef: async () => {
+            throw new Error("mobile cards should not fetch desktop status api");
+        },
+        log() {},
+        getFileBasenameFromUrl(url, fallback) {
+            if (!url || typeof url !== "string") {
+                return fallback;
+            }
+
+            const parts = url.split("/");
+            const lastSegment = parts[parts.length - 1] || "";
+            return lastSegment.replace(/\.[^.]+$/, "") || fallback;
+        },
+        getFileExtensionFromUrl(url, fallback = ".jpg") {
+            if (!url || typeof url !== "string") {
+                return fallback;
+            }
+
+            const match = url.split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        }
+    });
+
+    const postContainer = {
+        __vue__: {
+            _props: {
+                item: sampleMobilePicsStatus
+            }
+        }
+    };
+
+    const mediaItems = platform.getDomMediaItems(postContainer);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].id, "008vVtgily1id6q9sht56j30wr1dzk2k");
 });
 
 test("api result selection prefers authoritative empty list", () => {

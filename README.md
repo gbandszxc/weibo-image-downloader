@@ -41,7 +41,7 @@
 
 ### 微博
 
-1. 打开微博首页 https://weibo.com 或任意微博页面
+1. 打开微博首页 https://weibo.com、移动端 https://m.weibo.cn/ 或任意微博页面
 2. 浏览微博，找到包含图片的帖子
 3. 在每条微博的下方（点赞/评论/转发按钮旁边）会出现一个橙色的 **"↓N"** 按钮
 4. 点击按钮即可批量下载该条微博的所有图片
@@ -63,6 +63,9 @@
 - 用户主页
 - 微博搜索结果页（weibo.com 及 s.weibo.com）
 - 微博详情页
+- 微博移动端首页 `m.weibo.cn/`
+- 微博移动端用户主页 `m.weibo.cn/profile/...`
+- 微博移动端搜索页 `m.weibo.cn/search`
 
 ### X（原Twitter）
 - X首页 feed 流
