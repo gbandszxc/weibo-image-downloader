@@ -31,6 +31,7 @@ const utils = createUtils({
     windowRef: window,
     fetchRef: window.fetch.bind(window),
     gmDownload: typeof GM_download === "function" ? GM_download : null,
+    gmXmlhttpRequest: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
     ui: {
         showToast(message) {
             if (ui) {

@@ -8,3 +8,13 @@ test("userscript metadata includes mobile weibo match rules", () => {
     assert.match(buildScript, /@match\s+https:\/\/m\.weibo\.cn\/\*/);
     assert.match(buildScript, /@match\s+https:\/\/www\.m\.weibo\.cn\/\*/);
 });
+
+test("userscript metadata uses root-domain @connect rules for subdomain downloads", () => {
+    const buildScript = readFileSync(new URL("../scripts/build.mjs", import.meta.url), "utf8");
+
+    assert.match(buildScript, /@connect\s+sinaimg\.cn/);
+    assert.match(buildScript, /@connect\s+sina\.cn/);
+    assert.match(buildScript, /@connect\s+twimg\.com/);
+    assert.match(buildScript, /@connect\s+\*/);
+    assert.doesNotMatch(buildScript, /@connect\s+\*\.(sinaimg|sina|twimg)\.com?/);
+});
