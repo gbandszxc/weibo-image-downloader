@@ -194,27 +194,15 @@ test("button placement matches current weibo and x page rules", async (t) => {
         assert.deepEqual(parent.calls, [{ node: btn, before: retweetSpan.nextSibling }]);
     });
 
-    await t.test("mobile weibo timeline inserts before follow button in header", () => {
+    await t.test("mobile weibo timeline appends into the username row", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn" });
         const btn = { id: "btn" };
-        const header = createInsertRecorder("mobile-header");
-        const followBox = { id: "follow-box" };
+        const nameRow = createAppendRecorder("mobile-name-row");
 
         const post = {
             querySelector(selector) {
-                if (selector === "header.weibo-top") {
-                    return {
-                        querySelector(innerSelector) {
-                            if (innerSelector === ".m-add-box.m-followBtn, .m-add-box.lite-reads") {
-                                return followBox;
-                            }
-                            return null;
-                        },
-                        insertBefore(node, before) {
-                            header.insertBefore(node, before);
-                        },
-                        appendChild() {}
-                    };
+                if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
+                    return nameRow;
                 }
                 return null;
             },
@@ -226,26 +214,71 @@ test("button placement matches current weibo and x page rules", async (t) => {
         const inserted = platform.insertDownloadButton({ post, btn });
 
         assert.equal(inserted, true);
-        assert.deepEqual(header.calls, [{ node: btn, before: followBox }]);
+        assert.deepEqual(nameRow.appended, [btn]);
+        assert.equal(nameRow.style.display, "inline-flex");
+        assert.equal(nameRow.style.alignItems, "center");
+        assert.equal(nameRow.style.flexWrap, "nowrap");
+        assert.equal(nameRow.style.columnGap, "4px");
     });
 
-    await t.test("mobile weibo profile appends to header when follow area is absent", () => {
+    await t.test("mobile weibo profile appends to username row when there is no follow block", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/profile/7971151006" });
         const btn = { id: "btn" };
-        const header = createAppendRecorder("mobile-profile-header");
+        const nameRow = createAppendRecorder("mobile-profile-name-row");
 
         const post = {
             querySelector(selector) {
+                if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
+                    return nameRow;
+                }
+                return null;
+            },
+            querySelectorAll() {
+                return [];
+            }
+        };
+
+        const inserted = platform.insertDownloadButton({ post, btn });
+
+        assert.equal(inserted, true);
+        assert.deepEqual(nameRow.appended, [btn]);
+    });
+
+    await t.test("mobile weibo search uses the username row placement", () => {
+        const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/search" });
+        const btn = { id: "btn" };
+        const nameRow = createAppendRecorder("mobile-search-name-row");
+
+        const post = {
+            querySelector(selector) {
+                if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
+                    return nameRow;
+                }
+                return null;
+            },
+            querySelectorAll() {
+                return [];
+            }
+        };
+
+        const inserted = platform.insertDownloadButton({ post, btn });
+
+        assert.equal(inserted, true);
+        assert.deepEqual(nameRow.appended, [btn]);
+    });
+
+    await t.test("mobile weibo falls back to appending the whole header when the username row is unavailable", () => {
+        const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/search" });
+        const btn = { id: "btn" };
+        const header = createAppendRecorder("mobile-search-header");
+
+        const post = {
+            querySelector(selector) {
+                if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
+                    return null;
+                }
                 if (selector === "header.weibo-top") {
-                    return {
-                        querySelector() {
-                            return null;
-                        },
-                        insertBefore() {},
-                        appendChild(node) {
-                            header.appendChild(node);
-                        }
-                    };
+                    return header;
                 }
                 return null;
             },
@@ -260,39 +293,23 @@ test("button placement matches current weibo and x page rules", async (t) => {
         assert.deepEqual(header.appended, [btn]);
     });
 
-    await t.test("mobile weibo search uses the same header placement as other mobile pages", () => {
-        const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/search" });
-        const btn = { id: "btn" };
-        const header = createInsertRecorder("mobile-search-header");
-        const readBox = { id: "read-box" };
+    await t.test("mobile weibo skips nested article nodes to avoid duplicate buttons", () => {
+        const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/profile/7971151006" });
 
-        const post = {
-            querySelector(selector) {
-                if (selector === "header.weibo-top") {
-                    return {
-                        querySelector(innerSelector) {
-                            if (innerSelector === ".m-add-box.m-followBtn, .m-add-box.lite-reads") {
-                                return readBox;
-                            }
-                            return null;
-                        },
-                        insertBefore(node, before) {
-                            header.insertBefore(node, before);
-                        },
-                        appendChild() {}
-                    };
-                }
-                return null;
-            },
-            querySelectorAll() {
-                return [];
+        const nestedArticle = {
+            matches(selector) {
+                return selector === "article.weibo-main";
             }
         };
 
-        const inserted = platform.insertDownloadButton({ post, btn });
+        const rootCard = {
+            matches(selector) {
+                return selector === ".card.m-panel.card9";
+            }
+        };
 
-        assert.equal(inserted, true);
-        assert.deepEqual(header.calls, [{ node: btn, before: readBox }]);
+        assert.equal(platform.shouldSkipPost(nestedArticle), true);
+        assert.equal(platform.shouldSkipPost(rootCard), false);
     });
 
     await t.test("x timeline inserts into header row beside user name", () => {

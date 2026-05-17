@@ -12,9 +12,7 @@ export function createWeiboPlatform({
         'div[class^="m"] img'
     ];
     const mobilePostSelectors = [
-        ".card.m-panel.card9.f-weibo",
-        ".card.m-panel.card9.weibo-member",
-        ".card.card11"
+        ".card.m-panel.card9"
     ];
     const postSelectors = [
         ...mobilePostSelectors,
@@ -412,10 +410,18 @@ export function createWeiboPlatform({
     }
 
     function getPostSelectors() {
+        if (isMobileWeiboPage()) {
+            return mobilePostSelectors;
+        }
+
         return postSelectors;
     }
 
-    function shouldSkipPost() {
+    function shouldSkipPost(post) {
+        if (isMobileWeiboPage()) {
+            return !post || typeof post.matches !== "function" || !post.matches(".card.m-panel.card9");
+        }
+
         return false;
     }
 
@@ -433,19 +439,23 @@ export function createWeiboPlatform({
     }
 
     function insertMobileDownloadButton(post, btn) {
-        const headerEl = post.querySelector("header.weibo-top");
-        if (!headerEl) {
-            return false;
-        }
-
-        const trailingBox = headerEl.querySelector(".m-add-box.m-followBtn, .m-add-box.lite-reads");
-        if (trailingBox) {
-            headerEl.insertBefore(btn, trailingBox);
+        const nameRow = post.querySelector("header.weibo-top .m-text-box h3.m-text-cut");
+        if (nameRow) {
+            nameRow.style.display = "inline-flex";
+            nameRow.style.alignItems = "center";
+            nameRow.style.flexWrap = "nowrap";
+            nameRow.style.columnGap = "4px";
+            nameRow.appendChild(btn);
             return true;
         }
 
-        headerEl.appendChild(btn);
-        return true;
+        const headerEl = post.querySelector("header.weibo-top");
+        if (headerEl) {
+            headerEl.appendChild(btn);
+            return true;
+        }
+
+        return false;
     }
 
     function insertDownloadButton({ post, btn }) {
