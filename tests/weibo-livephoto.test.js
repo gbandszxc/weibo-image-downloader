@@ -593,7 +593,7 @@ test("mobile weibo mixed video and image pics skip the video cover", () => {
     assert.equal(mediaItems[0].id, "6da17e26gy1id8h2xwky9j20xb188dud");
     assert.equal(
         mediaItems[0].imageUrl,
-        "https://wx2.sinaimg.cn/mw2000/6da17e26gy1id8h2xwky9j20xb188dud.jpg"
+        "https://wx2.sinaimg.cn/large/6da17e26gy1id8h2xwky9j20xb188dud.jpg"
     );
 });
 

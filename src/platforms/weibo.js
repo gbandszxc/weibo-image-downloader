@@ -94,7 +94,8 @@ export function createWeiboPlatform({
             picInfo.url
         ];
 
-        return candidates.find((url) => typeof url === "string" && url.length > 0) || null;
+        const imageUrl = candidates.find((url) => typeof url === "string" && url.length > 0);
+        return getOriginalImageUrl(imageUrl) || imageUrl || null;
     }
 
     function getWeiboMixMediaItems(status) {

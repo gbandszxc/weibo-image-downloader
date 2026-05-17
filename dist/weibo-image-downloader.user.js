@@ -121,7 +121,8 @@
         picInfo.thumbnail && picInfo.thumbnail.url,
         picInfo.url
       ];
-      return candidates.find((url) => typeof url === "string" && url.length > 0) || null;
+      const imageUrl = candidates.find((url) => typeof url === "string" && url.length > 0);
+      return getOriginalImageUrl(imageUrl) || imageUrl || null;
     }
     function getWeiboMixMediaItems(status) {
       const mixMediaItems = status && status.mix_media_info && Array.isArray(status.mix_media_info.items) ? status.mix_media_info.items : [];
