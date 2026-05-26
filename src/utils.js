@@ -48,6 +48,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         config,
         windowRef,
         fetchRef,
+        gmXmlhttpRequest,
         log,
         getFileBasenameFromUrl,
         getFileExtensionFromUrl

@@ -50,6 +50,7 @@
     config = {},
     windowRef,
     fetchRef,
+    gmXmlhttpRequest,
     log,
     getFileBasenameFromUrl,
     getFileExtensionFromUrl
@@ -336,8 +337,50 @@
       if (weiboStatusCache.has(statusId)) {
         return weiboStatusCache.get(statusId);
       }
+      const statusUrl = `${isSearchPage() ? "https://weibo.com" : ""}/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`;
       const request = (async () => {
-        const response = await fetchRef(`/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`, {
+        if (isSearchPage() && typeof gmXmlhttpRequest === "function") {
+          return new Promise((resolve, reject) => {
+            try {
+              gmXmlhttpRequest({
+                method: "GET",
+                url: statusUrl,
+                anonymous: false,
+                withCredentials: true,
+                headers: {
+                  Accept: "application/json, text/plain, */*",
+                  "X-Requested-With": "XMLHttpRequest",
+                  Referer: "https://weibo.com/"
+                },
+                onload(response2) {
+                  if (response2.status < 200 || response2.status >= 300) {
+                    reject(new Error(`微博接口请求失败: ${response2.status}`));
+                    return;
+                  }
+                  try {
+                    const data = JSON.parse(response2.responseText);
+                    if (data && data.error) {
+                      reject(new Error(`微博接口请求失败: ${data.error}`));
+                      return;
+                    }
+                    resolve(data);
+                  } catch (error) {
+                    reject(error);
+                  }
+                },
+                onerror(error) {
+                  reject(new Error(error?.error || error?.message || "微博接口请求失败"));
+                },
+                ontimeout() {
+                  reject(new Error("微博接口请求超时"));
+                }
+              });
+            } catch (error) {
+              reject(error);
+            }
+          });
+        }
+        const response = await fetchRef(statusUrl, {
           credentials: "same-origin",
           headers: {
             Accept: "application/json, text/plain, */*",
@@ -1133,6 +1176,7 @@
       config,
       windowRef,
       fetchRef,
+      gmXmlhttpRequest,
       log,
       getFileBasenameFromUrl,
       getFileExtensionFromUrl

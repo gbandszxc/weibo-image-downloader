@@ -314,6 +314,81 @@ function createWeiboPlatformForTests(configOverrides = {}) {
     });
 }
 
+function createSearchWeiboPlatformWithGm({ configOverrides = {}, response }) {
+    let lastGmOptions = null;
+    const platform = createWeiboPlatform({
+        config: {
+            ...CONFIG,
+            DEBUG: false,
+            ...configOverrides
+        },
+        windowRef: {
+            location: {
+                hostname: "s.weibo.com",
+                pathname: "/weibo"
+            },
+            open() {}
+        },
+        fetchRef: async () => {
+            throw new Error("search page should use GM_xmlhttpRequest for cross-origin status fetch");
+        },
+        gmXmlhttpRequest(options) {
+            lastGmOptions = options;
+            options.onload({
+                status: 200,
+                responseText: JSON.stringify(response)
+            });
+        },
+        log() {},
+        getFileBasenameFromUrl(url, fallback) {
+            const parts = String(url || "").split("/");
+            const lastSegment = parts[parts.length - 1] || "";
+            return lastSegment.replace(/\.[^.]+$/, "") || fallback;
+        },
+        getFileExtensionFromUrl(url, fallback = ".jpg") {
+            const match = String(url || "").split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        }
+    });
+
+    platform.getLastGmOptions = () => lastGmOptions;
+    return platform;
+}
+
+function createSearchWeiboPlatformWithForbiddenGm() {
+    return createWeiboPlatform({
+        config: {
+            ...CONFIG,
+            DEBUG: false,
+            ENABLE_VIDEO_DOWNLOAD: true
+        },
+        windowRef: {
+            location: {
+                hostname: "s.weibo.com",
+                pathname: "/weibo"
+            },
+            open() {}
+        },
+        fetchRef: async () => {
+            throw new Error("search page should use GM_xmlhttpRequest for cross-origin status fetch");
+        },
+        gmXmlhttpRequest(options) {
+            options.onload({
+                status: 200,
+                responseText: JSON.stringify({ error: "Forbidden" })
+            });
+        },
+        log() {},
+        getFileBasenameFromUrl(url, fallback) {
+            return fallback || String(url || "");
+        },
+        getFileExtensionFromUrl(url, fallback = ".jpg") {
+            const match = String(url || "").split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        }
+    });
+}
+
 const sampleStatus = {
     pic_ids: [
         "ba6a4518gy1ic2xakxgvwj23b04eoe83",
@@ -664,6 +739,58 @@ test("video-enabled weibo status resolves highest quality video item", () => {
         "https://f.video.weibocdn.com/demo-1080.mp4?label=mp4_1080p"
     );
     assert.equal(mediaItems[0].videoExt, ".mp4");
+});
+
+test("search weibo video status resolves through GM cross-origin request", async () => {
+    const platform = createSearchWeiboPlatformWithGm({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        response: samplePureVideoStatus
+    });
+
+    const mediaItems = await platform.resolvePostMediaItems({
+        getAttribute(name) {
+            return name === "mid" ? "5302940270073103" : null;
+        },
+        querySelectorAll() {
+            return [];
+        }
+    }, []);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(
+        mediaItems[0].videoUrl,
+        "https://f.video.weibocdn.com/demo-1080.mp4?label=mp4_1080p"
+    );
+    assert.equal(platform.getLastGmOptions().url, "https://weibo.com/ajax/statuses/show?id=5302940270073103&locale=zh-CN&isGetLongText=true");
+    assert.equal(platform.getLastGmOptions().anonymous, false);
+    assert.equal(platform.getLastGmOptions().withCredentials, true);
+    assert.equal(platform.getLastGmOptions().headers.Referer, "https://weibo.com/");
+});
+
+test("search weibo forbidden GM response falls back instead of becoming authoritative empty media", async () => {
+    const platform = createSearchWeiboPlatformWithForbiddenGm();
+    const fallbackItems = [
+        {
+            id: "pending-video",
+            kind: "video",
+            label: "视频 1",
+            imageUrl: null,
+            videoUrl: "https://f.video.weibocdn.com/fallback.mp4",
+            videoExt: ".mp4"
+        }
+    ];
+
+    const mediaItems = await platform.resolvePostMediaItems({
+        getAttribute(name) {
+            return name === "mid" ? "5302940270073103" : null;
+        },
+        querySelectorAll() {
+            return [];
+        }
+    }, fallbackItems);
+
+    assert.equal(mediaItems, fallbackItems);
 });
 
 test("video-enabled mixed media status keeps images and appends videos", () => {
