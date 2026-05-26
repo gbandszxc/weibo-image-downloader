@@ -1,6 +1,52 @@
-export function createXPlatform({ config = {}, windowRef, log, getFileExtensionFromUrl }) {
+export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFileExtensionFromUrl }) {
     const imageSelectors = ['article img[src*="twimg.com"]'];
     const postSelectors = ['article[data-testid="tweet"]'];
+    const tweetResultOperationId = "SgZWKwvBiOKrSC0QeOGvXw";
+    const tweetResultFeatures = {
+        creator_subscriptions_tweet_preview_api_enabled: true,
+        premium_content_api_read_enabled: false,
+        communities_web_enable_tweet_community_results_fetch: true,
+        c9s_tweet_anatomy_moderator_badge_enabled: true,
+        responsive_web_grok_analyze_button_fetch_trends_enabled: false,
+        responsive_web_grok_analyze_post_followups_enabled: true,
+        rweb_cashtags_composer_attachment_enabled: true,
+        responsive_web_jetfuel_frame: true,
+        responsive_web_grok_share_attachment_enabled: true,
+        responsive_web_grok_annotations_enabled: true,
+        articles_preview_enabled: true,
+        responsive_web_edit_tweet_api_enabled: true,
+        rweb_conversational_replies_downvote_enabled: false,
+        graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+        view_counts_everywhere_api_enabled: true,
+        longform_notetweets_consumption_enabled: true,
+        responsive_web_twitter_article_tweet_consumption_enabled: true,
+        content_disclosure_indicator_enabled: true,
+        content_disclosure_ai_generated_indicator_enabled: true,
+        responsive_web_grok_show_grok_translated_post: true,
+        responsive_web_grok_analysis_button_from_backend: true,
+        post_ctas_fetch_enabled: false,
+        rweb_cashtags_enabled: true,
+        freedom_of_speech_not_reach_fetch_enabled: true,
+        standardized_nudges_misinfo: true,
+        tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+        longform_notetweets_rich_text_read_enabled: true,
+        longform_notetweets_inline_media_enabled: false,
+        profile_label_improvements_pcf_label_in_post_enabled: true,
+        responsive_web_profile_redirect_enabled: false,
+        rweb_tipjar_consumption_enabled: false,
+        verified_phone_label_enabled: false,
+        responsive_web_grok_image_annotation_enabled: true,
+        responsive_web_grok_imagine_annotation_enabled: true,
+        responsive_web_grok_community_note_auto_translation_is_enabled: true,
+        responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+        responsive_web_graphql_timeline_navigation_enabled: true
+    };
+    const tweetResultFieldToggles = {
+        withArticleRichContentState: true,
+        withArticlePlainText: false,
+        withArticleSummaryText: true,
+        withArticleVoiceOver: true
+    };
     function getOriginalImageUrl(url) {
         if (!url || typeof url !== "string") {
             return null;
@@ -76,6 +122,27 @@ export function createXPlatform({ config = {}, windowRef, log, getFileExtensionF
 
     function isVideoDownloadEnabled() {
         return !!config.ENABLE_VIDEO_DOWNLOAD;
+    }
+
+    function getCookieValue(name) {
+        const cookie = windowRef.document && windowRef.document.cookie;
+        if (!cookie || typeof cookie !== "string") {
+            return "";
+        }
+
+        const match = cookie.match(new RegExp(`(?:^|; )${name}=([^;]+)`));
+        return match ? decodeURIComponent(match[1]) : "";
+    }
+
+    function getBestXVideoVariant(variants) {
+        const candidates = (Array.isArray(variants) ? variants : [])
+            .filter((variant) => variant &&
+                variant.content_type === "video/mp4" &&
+                typeof variant.url === "string" &&
+                variant.url)
+            .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0));
+
+        return candidates.length > 0 ? candidates[0].url : null;
     }
 
     function findImagesInPost(container) {
@@ -222,7 +289,18 @@ export function createXPlatform({ config = {}, windowRef, log, getFileExtensionF
     }
 
     function resolvePostMediaItems(_postContainer, fallbackItems) {
-        return fallbackItems;
+        if (!isVideoDownloadEnabled() || fallbackItems.length > 0) {
+            return fallbackItems;
+        }
+
+        const statusId = getPostId(_postContainer);
+        if (!statusId) {
+            return fallbackItems;
+        }
+
+        return getXMediaItemsById(statusId).then((mediaItems) =>
+            mediaItems.length > 0 ? mediaItems : fallbackItems
+        );
     }
 
     function getPostSelectors() {
@@ -256,7 +334,103 @@ export function createXPlatform({ config = {}, windowRef, log, getFileExtensionF
             }
         }
 
-        return postId || `x_${Date.now()}`;
+        if (postId) {
+            return postId;
+        }
+
+        const links = typeof postContainer.querySelectorAll === "function"
+            ? postContainer.querySelectorAll('a[href*="/status/"]')
+            : [];
+        for (const link of links) {
+            const match = link.href && link.href.match(/\/status\/(\d+)/);
+            if (match) {
+                return match[1];
+            }
+        }
+
+        const currentPath = windowRef.location && (windowRef.location.pathname || windowRef.location.href || "");
+        const currentMatch = currentPath.match(/\/status\/(\d+)/);
+        return currentMatch ? currentMatch[1] : `x_${Date.now()}`;
+    }
+
+    function shouldResolveEmptyMediaItems(postContainer) {
+        return isVideoDownloadEnabled() && /^\d+$/.test(getPostId(postContainer));
+    }
+
+    function buildTweetResultUrl(tweetId) {
+        const variables = {
+            tweetId,
+            includePromotedContent: true,
+            withBirdwatchNotes: true,
+            withVoice: true,
+            withCommunity: true
+        };
+        return `/i/api/graphql/${tweetResultOperationId}/TweetResultByRestId?variables=${encodeURIComponent(JSON.stringify(variables))}&features=${encodeURIComponent(JSON.stringify(tweetResultFeatures))}&fieldToggles=${encodeURIComponent(JSON.stringify(tweetResultFieldToggles))}`;
+    }
+
+    async function fetchXStatus(tweetId) {
+        if (typeof fetchRef !== "function") {
+            return null;
+        }
+
+        const response = await fetchRef(buildTweetResultUrl(tweetId), {
+            credentials: "include",
+            headers: {
+                Accept: "*/*",
+                Authorization: "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
+                "X-Twitter-Active-User": "yes",
+                "X-Twitter-Client-Language": "zh-cn",
+                "X-CSRF-Token": getCookieValue("ct0")
+            }
+        });
+
+        if (!response || !response.ok) {
+            return null;
+        }
+
+        return response.json();
+    }
+
+    function getXMediaItemsFromStatus(status) {
+        const media = status &&
+            status.data &&
+            status.data.tweetResult &&
+            status.data.tweetResult.result &&
+            status.data.tweetResult.result.legacy &&
+            status.data.tweetResult.result.legacy.extended_entities &&
+            Array.isArray(status.data.tweetResult.result.legacy.extended_entities.media)
+            ? status.data.tweetResult.result.legacy.extended_entities.media
+            : [];
+
+        return media.map((item, index) => {
+            const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
+            if (mediaType !== "video" && mediaType !== "animated_gif") {
+                return null;
+            }
+
+            const url = getBestXVideoVariant(item.video_info && item.video_info.variants);
+            if (!url) {
+                return null;
+            }
+
+            return createMediaItem({
+                id: item.id_str || `graphql-video-${index + 1}`,
+                kind: mediaType === "animated_gif" ? "gif" : "video",
+                label: mediaType === "animated_gif" ? `GIF ${index + 1}` : `视频 ${index + 1}`,
+                url,
+                fallbackExt: ".mp4"
+            });
+        }).filter(Boolean);
+    }
+
+    async function getXMediaItemsById(tweetId) {
+        try {
+            const status = await fetchXStatus(tweetId);
+            return getXMediaItemsFromStatus(status);
+        } catch (error) {
+            log("X 接口解析失败:", error.message);
+            return [];
+        }
     }
 
     function insertDownloadButton({ post, btn }) {
@@ -297,9 +471,13 @@ export function createXPlatform({ config = {}, windowRef, log, getFileExtensionF
         getXOriginalImageUrl: getOriginalImageUrl,
         getDomMediaItems,
         findImagesInPost,
+        getBestXVideoVariant,
+        getXMediaItemsFromStatus,
+        getXMediaItemsById,
         resolvePostMediaItems,
         getPostSelectors,
         shouldSkipPost,
+        shouldResolveEmptyMediaItems,
         getPostId,
         insertDownloadButton,
         afterInjectDownloadButtons() {},

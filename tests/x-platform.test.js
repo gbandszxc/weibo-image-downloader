@@ -19,6 +19,9 @@ function createXPlatformForTests(configOverrides = {}) {
             }
         },
         log() {},
+        fetchRef: async () => {
+            throw new Error("fetch should not be called in unit tests");
+        },
         getFileExtensionFromUrl(url, fallback = ".jpg") {
             if (!url || typeof url !== "string") {
                 return fallback;
@@ -50,6 +53,32 @@ function createQueryContainer(selectorMap) {
             return value || null;
         }
     };
+}
+
+function createXPlatformWithFetch({ configOverrides = {}, response }) {
+    return createXPlatform({
+        config: {
+            ...CONFIG,
+            DEBUG: false,
+            ...configOverrides
+        },
+        windowRef: {
+            location: {
+                hostname: "x.com",
+                pathname: "/TimJayas/status/2058971197417914571",
+                href: "https://x.com/TimJayas/status/2058971197417914571"
+            }
+        },
+        log() {},
+        fetchRef: async () => ({
+            ok: true,
+            json: async () => response
+        }),
+        getFileExtensionFromUrl(url, fallback = ".jpg") {
+            const match = url.split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        }
+    });
 }
 
 function createButtonElement() {
@@ -149,6 +178,73 @@ test("video-enabled x platform includes regular videos when a direct source is a
     assert.equal(mediaItems[0].imageUrl, null);
     assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/VideoOne.mp4");
     assert.equal(mediaItems[0].videoExt, ".mp4");
+});
+
+test("video-enabled x platform resolves highest bitrate video from TweetResultByRestId", async () => {
+    const platform = createXPlatformWithFetch({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        response: {
+            data: {
+                tweetResult: {
+                    result: {
+                        legacy: {
+                            extended_entities: {
+                                media: [
+                                    {
+                                        id_str: "2058970349124136960",
+                                        type: "video",
+                                        video_info: {
+                                            variants: [
+                                                {
+                                                    content_type: "application/x-mpegURL",
+                                                    url: "https://video.twimg.com/amplify_video/demo/pl/list.m3u8"
+                                                },
+                                                {
+                                                    bitrate: 2176000,
+                                                    content_type: "video/mp4",
+                                                    url: "https://video.twimg.com/amplify_video/demo/720.mp4"
+                                                },
+                                                {
+                                                    bitrate: 10368000,
+                                                    content_type: "video/mp4",
+                                                    url: "https://video.twimg.com/amplify_video/demo/1080.mp4"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    const mediaItems = await platform.resolvePostMediaItems({
+        querySelector() {
+            return null;
+        }
+    }, []);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/demo/1080.mp4");
+});
+
+test("video-enabled x platform allows async resolution for video-only detail posts", () => {
+    const platform = createXPlatformWithFetch({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        response: {}
+    });
+    const post = {
+        querySelector() {
+            return null;
+        }
+    };
+
+    assert.equal(platform.shouldResolveEmptyMediaItems(post), true);
+    assert.equal(platform.getPostId(post), "2058971197417914571");
 });
 
 test("x platform inserts download button beside the time link on any tweet layout", () => {
