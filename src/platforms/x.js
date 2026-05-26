@@ -354,7 +354,17 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
     }
 
     function shouldResolveEmptyMediaItems(postContainer) {
-        return isVideoDownloadEnabled() && /^\d+$/.test(getPostId(postContainer));
+        if (!isVideoDownloadEnabled() || !/^\d+$/.test(getPostId(postContainer))) {
+            return false;
+        }
+
+        if (!postContainer || typeof postContainer.querySelector !== "function") {
+            return false;
+        }
+
+        return !!postContainer.querySelector(
+            'img[src*="video_thumb"], img[src*="amplify_video_thumb"], img[src*="ext_tw_video_thumb"], a[href*="/video/"], video'
+        );
     }
 
     function buildTweetResultUrl(tweetId) {

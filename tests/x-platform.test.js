@@ -238,13 +238,33 @@ test("video-enabled x platform allows async resolution for video-only detail pos
         response: {}
     });
     const post = {
-        querySelector() {
+        querySelector(selector) {
+            if (selector === 'img[src*="video_thumb"], img[src*="amplify_video_thumb"], img[src*="ext_tw_video_thumb"], a[href*="/video/"], video') {
+                return { src: "https://pbs.twimg.com/amplify_video_thumb/demo.jpg" };
+            }
             return null;
         }
     };
 
     assert.equal(platform.shouldResolveEmptyMediaItems(post), true);
     assert.equal(platform.getPostId(post), "2058971197417914571");
+});
+
+test("video-enabled x platform does not inject placeholder buttons for plain detail posts", () => {
+    const platform = createXPlatformWithFetch({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        response: {}
+    });
+    const post = {
+        querySelector() {
+            return null;
+        },
+        querySelectorAll() {
+            return [];
+        }
+    };
+
+    assert.equal(platform.shouldResolveEmptyMediaItems(post), false);
 });
 
 test("x platform inserts download button beside the time link on any tweet layout", () => {
