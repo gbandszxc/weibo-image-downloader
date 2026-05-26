@@ -1,7 +1,7 @@
 export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
-    const postMediaItemsCache = new WeakMap();
+    let postMediaItemsCache = new WeakMap();
     const platform = utils.getPlatformAdapter();
-    const resolvedMediaItemsCache = new WeakMap();
+    let resolvedMediaItemsCache = new WeakMap();
 
     function showToast(message, duration = 3000) {
         const existing = documentRef.getElementById("weibo-img-toast");
@@ -449,6 +449,17 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         }
     }
 
+    function refreshDownloadButtons() {
+        postMediaItemsCache = new WeakMap();
+        resolvedMediaItemsCache = new WeakMap();
+
+        documentRef.querySelectorAll(".weibo-img-download-btn").forEach((btn) => {
+            btn.remove();
+        });
+
+        injectDownloadButtons();
+    }
+
     function getPostUrl(article) {
         if (typeof platform.getPostUrl === "function") {
             return platform.getPostUrl(article);
@@ -481,6 +492,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         showImageSelectModal,
         showToast,
         syncDownloadButtonState,
+        refreshDownloadButtons,
         getImageUrls,
         getWeiboPostUrl: getPostUrl,
         initGotoOriginalMenuObserver: initPlatformObservers,

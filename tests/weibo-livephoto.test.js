@@ -997,6 +997,103 @@ test("ui creates a weibo button for video-only posts when async resolution is al
     assert.equal(btn.innerHTML, "↓1");
 });
 
+test("ui refreshDownloadButtons clears existing buttons and reinjects with fresh caches", () => {
+    const oldButton = {
+        removed: false,
+        remove() {
+            this.removed = true;
+        }
+    };
+    const post = {
+        querySelector() {
+            return null;
+        },
+        appendChild() {}
+    };
+    let insertedCount = 0;
+
+    const ui = createUi({
+        config: {
+            ...CONFIG,
+            DEBUG: false
+        },
+        utils: {
+            getOriginalImageUrl: (url) => url,
+            getFileExtensionFromUrl: () => ".jpg",
+            downloadMediaItems() {},
+            log() {},
+            getPlatformAdapter() {
+                return {
+                    getDomMediaItems() {
+                        return [
+                            {
+                                id: "img-1",
+                                kind: "image",
+                                label: "图片 1",
+                                imageUrl: "https://wx1.sinaimg.cn/large/a.jpg",
+                                videoUrl: null
+                            }
+                        ];
+                    },
+                    findImagesInPost() {
+                        return [];
+                    },
+                    resolvePostMediaItems(_postContainer, fallbackItems) {
+                        return fallbackItems;
+                    },
+                    getPostId() {
+                        return "weibo_test";
+                    },
+                    getPostSelectors() {
+                        return [".post"];
+                    },
+                    shouldSkipPost() {
+                        return false;
+                    },
+                    insertDownloadButton() {
+                        insertedCount++;
+                        return true;
+                    },
+                    afterInjectDownloadButtons() {},
+                    initObservers() {}
+                };
+            }
+        },
+        windowRef: {},
+        documentRef: {
+            getElementById() {
+                return null;
+            },
+            createElement() {
+                return createButtonElement();
+            },
+            querySelectorAll(selector) {
+                if (selector === ".weibo-img-download-btn") {
+                    return [oldButton];
+                }
+                if (selector === ".post") {
+                    return [post];
+                }
+                return [];
+            },
+            head: {
+                appendChild() {}
+            },
+            body: {
+                appendChild() {}
+            },
+            addEventListener() {},
+            removeEventListener() {}
+        },
+        addStyle() {}
+    });
+
+    ui.refreshDownloadButtons();
+
+    assert.equal(oldButton.removed, true);
+    assert.equal(insertedCount, 1);
+});
+
 test("weibo video thumbnail image is filtered from fallback matching", () => {
     const ui = createUiForWeibo();
     const videoThumbImage = {

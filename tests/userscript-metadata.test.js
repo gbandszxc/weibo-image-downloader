@@ -22,6 +22,8 @@ test("userscript metadata uses root-domain @connect rules for subdomain download
 test("userscript metadata grants persistent settings APIs", () => {
     const buildScript = readFileSync(new URL("../scripts/build.mjs", import.meta.url), "utf8");
 
+    assert.match(buildScript, /@grant\s+GM_registerMenuCommand/);
+    assert.match(buildScript, /@grant\s+GM_unregisterMenuCommand/);
     assert.match(buildScript, /@grant\s+GM_getValue/);
     assert.match(buildScript, /@grant\s+GM_setValue/);
 });

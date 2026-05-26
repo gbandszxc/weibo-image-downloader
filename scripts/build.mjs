@@ -42,6 +42,7 @@ const metadataLines = [
   "// @grant        GM_xmlhttpRequest",
   "// @grant        GM_addStyle",
   "// @grant        GM_registerMenuCommand",
+  "// @grant        GM_unregisterMenuCommand",
   "// @grant        GM_getValue",
   "// @grant        GM_setValue",
   "// @grant        GM_log",

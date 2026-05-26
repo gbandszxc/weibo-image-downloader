@@ -95,18 +95,40 @@ if (document.readyState === "loading") {
 }
 
 if (typeof GM_registerMenuCommand === "function") {
+    let videoDownloadMenuId = null;
+    let videoDownloadMenuRegistered = false;
+
+    function getVideoDownloadMenuText() {
+        return `视频下载：[${runtimeConfig.ENABLE_VIDEO_DOWNLOAD ? "开启" : "关闭"}]`;
+    }
+
+    function registerVideoDownloadMenu() {
+        if (videoDownloadMenuRegistered) {
+            if (videoDownloadMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
+                return;
+            }
+
+            GM_unregisterMenuCommand(videoDownloadMenuId);
+        }
+
+        videoDownloadMenuId = GM_registerMenuCommand(getVideoDownloadMenuText(), () => {
+            const nextValue = !runtimeConfig.ENABLE_VIDEO_DOWNLOAD;
+            if (typeof GM_setValue === "function") {
+                GM_setValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, nextValue);
+            }
+            runtimeConfig.ENABLE_VIDEO_DOWNLOAD = nextValue;
+            registerVideoDownloadMenu();
+            if (ui) {
+                ui.refreshDownloadButtons();
+                ui.showToast(`视频下载已${nextValue ? "开启" : "关闭"}，当前页面已更新`);
+            }
+        });
+        videoDownloadMenuRegistered = true;
+    }
+
     GM_registerMenuCommand("刷新按钮", () => {
-        ui.injectDownloadButtons();
+        ui.refreshDownloadButtons();
     });
 
-    GM_registerMenuCommand(`视频下载：${runtimeConfig.ENABLE_VIDEO_DOWNLOAD ? "开启" : "关闭"}`, () => {
-        const nextValue = !runtimeConfig.ENABLE_VIDEO_DOWNLOAD;
-        if (typeof GM_setValue === "function") {
-            GM_setValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, nextValue);
-        }
-        runtimeConfig.ENABLE_VIDEO_DOWNLOAD = nextValue;
-        if (ui) {
-            ui.showToast(`视频下载已${nextValue ? "开启" : "关闭"}，刷新页面后生效`);
-        }
-    });
+    registerVideoDownloadMenu();
 }

@@ -22,6 +22,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_log
@@ -1456,9 +1457,9 @@
 
   // src/ui.js
   function createUi({ config, utils: utils2, windowRef, documentRef, addStyle }) {
-    const postMediaItemsCache = /* @__PURE__ */ new WeakMap();
+    let postMediaItemsCache = /* @__PURE__ */ new WeakMap();
     const platform = utils2.getPlatformAdapter();
-    const resolvedMediaItemsCache = /* @__PURE__ */ new WeakMap();
+    let resolvedMediaItemsCache = /* @__PURE__ */ new WeakMap();
     function showToast(message, duration = 3e3) {
       const existing = documentRef.getElementById("weibo-img-toast");
       if (existing) {
@@ -1813,6 +1814,14 @@
         platform.afterInjectDownloadButtons({ documentRef, windowRef });
       }
     }
+    function refreshDownloadButtons() {
+      postMediaItemsCache = /* @__PURE__ */ new WeakMap();
+      resolvedMediaItemsCache = /* @__PURE__ */ new WeakMap();
+      documentRef.querySelectorAll(".weibo-img-download-btn").forEach((btn) => {
+        btn.remove();
+      });
+      injectDownloadButtons();
+    }
     function getPostUrl(article) {
       if (typeof platform.getPostUrl === "function") {
         return platform.getPostUrl(article);
@@ -1841,6 +1850,7 @@
       showImageSelectModal,
       showToast,
       syncDownloadButtonState,
+      refreshDownloadButtons,
       getImageUrls,
       getWeiboPostUrl: getPostUrl,
       initGotoOriginalMenuObserver: initPlatformObservers,
@@ -1926,18 +1936,34 @@
     init();
   }
   if (typeof GM_registerMenuCommand === "function") {
+    let getVideoDownloadMenuText = function() {
+      return `视频下载：[${runtimeConfig.ENABLE_VIDEO_DOWNLOAD ? "开启" : "关闭"}]`;
+    }, registerVideoDownloadMenu = function() {
+      if (videoDownloadMenuRegistered) {
+        if (videoDownloadMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
+          return;
+        }
+        GM_unregisterMenuCommand(videoDownloadMenuId);
+      }
+      videoDownloadMenuId = GM_registerMenuCommand(getVideoDownloadMenuText(), () => {
+        const nextValue = !runtimeConfig.ENABLE_VIDEO_DOWNLOAD;
+        if (typeof GM_setValue === "function") {
+          GM_setValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, nextValue);
+        }
+        runtimeConfig.ENABLE_VIDEO_DOWNLOAD = nextValue;
+        registerVideoDownloadMenu();
+        if (ui) {
+          ui.refreshDownloadButtons();
+          ui.showToast(`视频下载已${nextValue ? "开启" : "关闭"}，当前页面已更新`);
+        }
+      });
+      videoDownloadMenuRegistered = true;
+    };
+    let videoDownloadMenuId = null;
+    let videoDownloadMenuRegistered = false;
     GM_registerMenuCommand("刷新按钮", () => {
-      ui.injectDownloadButtons();
+      ui.refreshDownloadButtons();
     });
-    GM_registerMenuCommand(`视频下载：${runtimeConfig.ENABLE_VIDEO_DOWNLOAD ? "开启" : "关闭"}`, () => {
-      const nextValue = !runtimeConfig.ENABLE_VIDEO_DOWNLOAD;
-      if (typeof GM_setValue === "function") {
-        GM_setValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, nextValue);
-      }
-      runtimeConfig.ENABLE_VIDEO_DOWNLOAD = nextValue;
-      if (ui) {
-        ui.showToast(`视频下载已${nextValue ? "开启" : "关闭"}，刷新页面后生效`);
-      }
-    });
+    registerVideoDownloadMenu();
   }
 })();
