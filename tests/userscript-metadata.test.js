@@ -18,3 +18,10 @@ test("userscript metadata uses root-domain @connect rules for subdomain download
     assert.match(buildScript, /@connect\s+\*/);
     assert.doesNotMatch(buildScript, /@connect\s+\*\.(sinaimg|sina|twimg)\.com?/);
 });
+
+test("userscript metadata grants persistent settings APIs", () => {
+    const buildScript = readFileSync(new URL("../scripts/build.mjs", import.meta.url), "utf8");
+
+    assert.match(buildScript, /@grant\s+GM_getValue/);
+    assert.match(buildScript, /@grant\s+GM_setValue/);
+});

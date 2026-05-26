@@ -1,4 +1,5 @@
 export function createWeiboPlatform({
+    config = {},
     windowRef,
     fetchRef,
     log,
@@ -29,12 +30,16 @@ export function createWeiboPlatform({
     ];
     const weiboStatusCache = new Map();
 
+    function isVideoDownloadEnabled() {
+        return !!config.ENABLE_VIDEO_DOWNLOAD;
+    }
+
     function isSearchPage() {
         return windowRef.location.hostname === "s.weibo.com";
     }
 
     function isMobileWeiboPage() {
-        return windowRef.location.hostname === "m.weibo.cn";
+        return windowRef.location.hostname === "m.weibo.cn" || windowRef.location.hostname === "www.m.weibo.cn";
     }
 
     function isAvatarImage(url) {
@@ -98,6 +103,75 @@ export function createWeiboPlatform({
         return getOriginalImageUrl(imageUrl) || imageUrl || null;
     }
 
+    function getBestWeiboVideoUrl(mediaInfo) {
+        if (!mediaInfo || typeof mediaInfo !== "object") {
+            return null;
+        }
+
+        const playbackList = Array.isArray(mediaInfo.playback_list) ? mediaInfo.playback_list : [];
+        const playbackCandidates = playbackList
+            .map((item) => {
+                const playInfo = item && item.play_info;
+                const url = playInfo && playInfo.url;
+                if (typeof url !== "string" || !url) {
+                    return null;
+                }
+
+                const qualityIndex = Number(item.meta && item.meta.quality_index) || 0;
+                const bitrate = Number(playInfo.bitrate) || 0;
+                const pixels = (Number(playInfo.width) || 0) * (Number(playInfo.height) || 0);
+                return {
+                    url,
+                    score: qualityIndex * 1000000000 + pixels * 1000 + bitrate
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.score - a.score);
+
+        if (playbackCandidates.length > 0) {
+            return playbackCandidates[0].url;
+        }
+
+        const fallbackKeys = [
+            "mp4_2160p_mp4",
+            "mp4_1080p_mp4",
+            "mp4_720p_mp4",
+            "hevc_mp4_720p",
+            "h265_mp4_hd",
+            "inch_5_5_mp4_hd",
+            "inch_5_mp4_hd",
+            "inch_4_mp4_hd",
+            "mp4_hd_url",
+            "stream_url_hd",
+            "mp4_sd_url",
+            "stream_url"
+        ];
+
+        for (const key of fallbackKeys) {
+            if (typeof mediaInfo[key] === "string" && mediaInfo[key]) {
+                return mediaInfo[key];
+            }
+        }
+
+        return null;
+    }
+
+    function createWeiboVideoMediaItem({ id, videoUrl, index }) {
+        if (!videoUrl) {
+            return null;
+        }
+
+        return {
+            id,
+            kind: "video",
+            label: `视频 ${index + 1}`,
+            imageUrl: null,
+            videoUrl,
+            imageExt: ".jpg",
+            videoExt: getFileExtensionFromUrl(videoUrl, ".mp4")
+        };
+    }
+
     function getWeiboMixMediaItems(status) {
         const mixMediaItems = status && status.mix_media_info && Array.isArray(status.mix_media_info.items)
             ? status.mix_media_info.items
@@ -112,7 +186,15 @@ export function createWeiboPlatform({
             const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
             const objectType = typeof data.object_type === "string" ? data.object_type.toLowerCase() : "";
             if (mediaType === "video" || objectType === "video") {
-                return null;
+                if (!isVideoDownloadEnabled()) {
+                    return null;
+                }
+
+                return createWeiboVideoMediaItem({
+                    id: data.id || data.media_id || `mix-video-${index + 1}`,
+                    videoUrl: getBestWeiboVideoUrl(data.media_info) || data.videoSrc || data.stream_url_hd || data.stream_url,
+                    index
+                });
             }
 
             const picInfo = data.pic_info || data;
@@ -185,7 +267,15 @@ export function createWeiboPlatform({
 
             const mediaType = typeof pic.type === "string" ? pic.type.toLowerCase() : "pic";
             if (mediaType === "video") {
-                return null;
+                if (!isVideoDownloadEnabled()) {
+                    return null;
+                }
+
+                return createWeiboVideoMediaItem({
+                    id: pic.pid || `pic-video-${index + 1}`,
+                    videoUrl: getBestWeiboVideoUrl(pic.media_info) || pic.videoSrc || pic.video,
+                    index
+                });
             }
 
             return createWeiboMediaItem(
@@ -233,7 +323,28 @@ export function createWeiboPlatform({
             return mobileMediaItems;
         }
 
-        return getWeiboMixMediaItems(mediaSourceStatus);
+        const mixMediaItems = getWeiboMixMediaItems(mediaSourceStatus);
+        if (mixMediaItems.length > 0) {
+            return mixMediaItems;
+        }
+
+        if (!isVideoDownloadEnabled()) {
+            return [];
+        }
+
+        const pageInfo = mediaSourceStatus.page_info || {};
+        const pageInfoType = typeof pageInfo.type === "string" ? pageInfo.type.toLowerCase() : "";
+        const objectType = typeof pageInfo.object_type === "string" ? pageInfo.object_type.toLowerCase() : "";
+        if (pageInfoType === "video" || pageInfoType === "11" || objectType === "video") {
+            const videoItem = createWeiboVideoMediaItem({
+                id: mediaSourceStatus.mblogid || mediaSourceStatus.idstr || "video-1",
+                videoUrl: getBestWeiboVideoUrl(pageInfo.media_info),
+                index: 0
+            });
+            return videoItem ? [videoItem] : [];
+        }
+
+        return [];
     }
 
     async function fetchWeiboStatus(statusId) {
@@ -424,6 +535,10 @@ export function createWeiboPlatform({
         }
 
         return false;
+    }
+
+    function shouldResolveEmptyMediaItems(postContainer) {
+        return isVideoDownloadEnabled() && !!getStatusLookupId(postContainer);
     }
 
     function getPostId(postContainer) {
@@ -636,6 +751,7 @@ export function createWeiboPlatform({
         resolvePostMediaItems,
         getPostSelectors,
         shouldSkipPost,
+        shouldResolveEmptyMediaItems,
         getPostId,
         insertDownloadButton,
         getPostUrl,

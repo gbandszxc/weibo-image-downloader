@@ -5,8 +5,13 @@ import { CONFIG } from "../src/config.js";
 import { createUi } from "../src/ui.js";
 import { createXPlatform } from "../src/platforms/x.js";
 
-function createXPlatformForTests() {
+function createXPlatformForTests(configOverrides = {}) {
     return createXPlatform({
+        config: {
+            ...CONFIG,
+            DEBUG: false,
+            ...configOverrides
+        },
         windowRef: {
             location: {
                 hostname: "x.com",
@@ -115,6 +120,35 @@ test("x platform keeps photo items, converts GIF videos to downloadable media, a
     assert.equal(mediaItems[1].imageUrl, "https://video.twimg.com/tweet_video/GifOne.mp4");
     assert.equal(mediaItems[1].imageExt, ".mp4");
     assert.equal(mediaItems[1].videoUrl, null);
+});
+
+test("video-enabled x platform includes regular videos when a direct source is available", () => {
+    const platform = createXPlatformForTests({ ENABLE_VIDEO_DOWNLOAD: true });
+
+    const videoContainer = { textContent: "0:12" };
+    const post = createQueryContainer({
+        'article img[src*="twimg.com"]': [],
+        video: [
+            {
+                currentSrc: "https://video.twimg.com/amplify_video/VideoOne.mp4",
+                src: "https://video.twimg.com/amplify_video/VideoOne.mp4",
+                querySelectorAll() {
+                    return [];
+                },
+                closest() {
+                    return videoContainer;
+                }
+            }
+        ]
+    });
+
+    const mediaItems = platform.getDomMediaItems(post);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[0].imageUrl, null);
+    assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/VideoOne.mp4");
+    assert.equal(mediaItems[0].videoExt, ".mp4");
 });
 
 test("x platform inserts download button beside the time link on any tweet layout", () => {

@@ -4,6 +4,12 @@ import { createUtils } from "./utils.js";
 import { createUi } from "./ui.js";
 
 const styleId = "weibo-image-downloader-style";
+const runtimeConfig = {
+    ...CONFIG,
+    ENABLE_VIDEO_DOWNLOAD: typeof GM_getValue === "function"
+        ? Boolean(GM_getValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, CONFIG.ENABLE_VIDEO_DOWNLOAD))
+        : CONFIG.ENABLE_VIDEO_DOWNLOAD
+};
 
 function injectStyles() {
     if (document.getElementById(styleId)) {
@@ -27,7 +33,7 @@ function injectStyles() {
 
 let ui;
 const utils = createUtils({
-    config: CONFIG,
+    config: runtimeConfig,
     windowRef: window,
     fetchRef: window.fetch.bind(window),
     gmDownload: typeof GM_download === "function" ? GM_download : null,
@@ -42,7 +48,7 @@ const utils = createUtils({
 });
 
 ui = createUi({
-    config: CONFIG,
+    config: runtimeConfig,
     utils,
     windowRef: window,
     documentRef: document,
@@ -91,5 +97,16 @@ if (document.readyState === "loading") {
 if (typeof GM_registerMenuCommand === "function") {
     GM_registerMenuCommand("刷新按钮", () => {
         ui.injectDownloadButtons();
+    });
+
+    GM_registerMenuCommand(`视频下载：${runtimeConfig.ENABLE_VIDEO_DOWNLOAD ? "开启" : "关闭"}`, () => {
+        const nextValue = !runtimeConfig.ENABLE_VIDEO_DOWNLOAD;
+        if (typeof GM_setValue === "function") {
+            GM_setValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, nextValue);
+        }
+        runtimeConfig.ENABLE_VIDEO_DOWNLOAD = nextValue;
+        if (ui) {
+            ui.showToast(`视频下载已${nextValue ? "开启" : "关闭"}，刷新页面后生效`);
+        }
     });
 }

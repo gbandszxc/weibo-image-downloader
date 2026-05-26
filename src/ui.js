@@ -141,15 +141,21 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
 
     function getSelectionItemLabel(item, typeCounters) {
         const normalizedKind = item && item.kind ? item.kind : (item && item.videoUrl ? "livephoto" : "image");
-        const typeKey = normalizedKind === "livephoto" ? "livephoto" : (normalizedKind === "gif" ? "gif" : "image");
+        const typeKey = normalizedKind === "livephoto"
+            ? "livephoto"
+            : (normalizedKind === "gif" ? "gif" : (normalizedKind === "video" ? "video" : "image"));
         const labelPrefixMap = {
             image: "p",
             livephoto: "lp",
-            gif: "a"
+            gif: "a",
+            video: "v"
         };
 
         typeCounters[typeKey] = (typeCounters[typeKey] || 0) + 1;
-        return `${labelPrefixMap[typeKey]}${typeCounters[typeKey]}`;
+        return {
+            text: `${labelPrefixMap[typeKey]}${typeCounters[typeKey]}`,
+            typeKey
+        };
     }
 
     function showImageSelectModal(mediaItems) {
@@ -188,8 +194,14 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
                 input.value = String(index);
 
                 const text = documentRef.createElement("span");
-                text.className = "weibo-img-select-item-text";
-                text.textContent = getSelectionItemLabel(item, typeCounters);
+                const itemLabel = getSelectionItemLabel(item, typeCounters);
+                if (itemLabel.typeKey === "video") {
+                    label.className = "weibo-img-select-item weibo-img-select-item-video";
+                }
+                text.className = itemLabel.typeKey === "video"
+                    ? "weibo-img-select-item-text weibo-img-select-item-text-video"
+                    : "weibo-img-select-item-text";
+                text.textContent = itemLabel.text;
                 label.title = item && item.label ? item.label : text.textContent;
 
                 label.appendChild(input);
@@ -307,14 +319,16 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         }
 
         const initialMediaItems = getFallbackMediaItems(postContainer);
-        if (initialMediaItems.length === 0) {
+        const shouldResolveEmptyMediaItems = typeof platform.shouldResolveEmptyMediaItems === "function" &&
+            platform.shouldResolveEmptyMediaItems(postContainer);
+        if (initialMediaItems.length === 0 && !shouldResolveEmptyMediaItems) {
             return null;
         }
         postMediaItemsCache.set(postContainer, initialMediaItems);
 
         const btn = documentRef.createElement("span");
         btn.className = "weibo-img-download-btn";
-        btn.innerHTML = `↓${initialMediaItems.length}`;
+        btn.innerHTML = initialMediaItems.length > 0 ? `↓${initialMediaItems.length}` : "↓...";
         btn.title = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
 
         resolvePostMediaItems(postContainer, initialMediaItems).then((mediaItems) => {

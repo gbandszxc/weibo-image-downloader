@@ -1,4 +1,4 @@
-export function createXPlatform({ windowRef, log, getFileExtensionFromUrl }) {
+export function createXPlatform({ config = {}, windowRef, log, getFileExtensionFromUrl }) {
     const imageSelectors = ['article img[src*="twimg.com"]'];
     const postSelectors = ['article[data-testid="tweet"]'];
     function getOriginalImageUrl(url) {
@@ -74,6 +74,10 @@ export function createXPlatform({ windowRef, log, getFileExtensionFromUrl }) {
         return /\bGIF\b/i.test(text);
     }
 
+    function isVideoDownloadEnabled() {
+        return !!config.ENABLE_VIDEO_DOWNLOAD;
+    }
+
     function findImagesInPost(container) {
         const images = [];
         const seen = new Set();
@@ -126,6 +130,18 @@ export function createXPlatform({ windowRef, log, getFileExtensionFromUrl }) {
             return null;
         }
 
+        if (kind === "video") {
+            return {
+                id,
+                kind,
+                label,
+                imageUrl: null,
+                videoUrl: url,
+                imageExt: ".jpg",
+                videoExt: getFileExtensionFromUrl(url, fallbackExt)
+            };
+        }
+
         return {
             id,
             kind,
@@ -172,7 +188,8 @@ export function createXPlatform({ windowRef, log, getFileExtensionFromUrl }) {
 
         const videos = container.querySelectorAll("video");
         videos.forEach((video) => {
-            if (!isGifVideo(video)) {
+            const isGif = isGifVideo(video);
+            if (!isGif && !isVideoDownloadEnabled()) {
                 return;
             }
 
@@ -181,17 +198,18 @@ export function createXPlatform({ windowRef, log, getFileExtensionFromUrl }) {
                 return;
             }
 
-            const key = `gif:${url.split("?")[0]}`;
+            const kind = isGif ? "gif" : "video";
+            const key = `${kind}:${url.split("?")[0]}`;
             if (seen.has(key)) {
                 return;
             }
             seen.add(key);
 
-            const gifCount = mediaItems.filter((item) => item.kind === "gif").length + 1;
+            const mediaCount = mediaItems.filter((item) => item.kind === kind).length + 1;
             const item = createMediaItem({
-                id: `dom-gif-${gifCount}`,
-                kind: "gif",
-                label: `GIF ${gifCount}`,
+                id: `dom-${kind}-${mediaCount}`,
+                kind,
+                label: isGif ? `GIF ${mediaCount}` : `视频 ${mediaCount}`,
                 url,
                 fallbackExt: ".mp4"
             });

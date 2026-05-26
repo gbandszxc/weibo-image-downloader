@@ -91,10 +91,11 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             }
 
             if (item.videoUrl) {
+                const isStandaloneVideo = item.kind === "video";
                 jobs.push({
                     type: "video",
                     url: item.videoUrl,
-                    filename: `${baseName}_live${item.videoExt || getFileExtensionFromUrl(item.videoUrl, ".mov")}`
+                    filename: `${baseName}${isStandaloneVideo ? "" : "_live"}${item.videoExt || getFileExtensionFromUrl(item.videoUrl, ".mov")}`
                 });
             }
         });

@@ -170,10 +170,27 @@ function createTestElement(tagName) {
     };
 }
 
+function createButtonElement() {
+    return {
+        className: "",
+        innerHTML: "",
+        title: "",
+        style: {},
+        addEventListener() {},
+        remove() {}
+    };
+}
+
+function flushPromises() {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function findElementsByClassName(root, className) {
     const results = [];
+    const expectedClassNames = className.split(/\s+/).filter(Boolean);
     const visit = (node) => {
-        if (node.className === className) {
+        const actualClassNames = String(node.className || "").split(/\s+/).filter(Boolean);
+        if (expectedClassNames.every((name) => actualClassNames.includes(name))) {
             results.push(node);
         }
 
@@ -243,8 +260,13 @@ function createUiForModalTests() {
     return { ui, documentRef };
 }
 
-function createWeiboPlatformForTests() {
+function createWeiboPlatformForTests(configOverrides = {}) {
     return createWeiboPlatform({
+        config: {
+            ...CONFIG,
+            DEBUG: false,
+            ...configOverrides
+        },
         windowRef: {
             location: {
                 hostname: "weibo.com",
@@ -495,6 +517,39 @@ const sampleMobileMixedPicsStatus = {
     ]
 };
 
+const samplePureVideoStatus = {
+    mblogid: "R1c9AwALf",
+    page_info: {
+        type: "11",
+        object_type: "video",
+        media_info: {
+            playback_list: [
+                {
+                    meta: {
+                        label: "mp4_720p",
+                        quality_index: 720
+                    },
+                    play_info: {
+                        url: "https://f.video.weibocdn.com/demo-720.mp4?label=mp4_720p",
+                        quality_label: "720p"
+                    }
+                },
+                {
+                    meta: {
+                        label: "mp4_1080p",
+                        quality_index: 1080
+                    },
+                    play_info: {
+                        url: "https://f.video.weibocdn.com/demo-1080.mp4?label=mp4_1080p",
+                        quality_label: "1080p"
+                    }
+                }
+            ],
+            mp4_hd_url: "https://f.video.weibocdn.com/demo-hd.mp4"
+        }
+    }
+};
+
 test("live photo status resolves full media list", () => {
     const platform = createWeiboPlatformForTests();
     const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleStatus);
@@ -572,6 +627,55 @@ test("mixed media status keeps image items", () => {
     );
 });
 
+test("standalone video media creates a normal mp4 job without live suffix", () => {
+    const utils = createUtilsForWeibo();
+    const jobs = utils.buildMediaDownloadJobs([
+        {
+            id: "video-1",
+            kind: "video",
+            imageUrl: null,
+            videoUrl: "https://f.video.weibocdn.com/demo.mp4",
+            videoExt: ".mp4"
+        }
+    ], "5286555824429155");
+
+    assert.deepEqual(
+        jobs.map((job) => job.filename),
+        ["weibo_5286555824429155_1.mp4"]
+    );
+});
+
+test("pure video status is skipped while video download is disabled", () => {
+    const platform = createWeiboPlatformForTests();
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(samplePureVideoStatus);
+
+    assert.equal(mediaItems.length, 0);
+});
+
+test("video-enabled weibo status resolves highest quality video item", () => {
+    const platform = createWeiboPlatformForTests({ ENABLE_VIDEO_DOWNLOAD: true });
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(samplePureVideoStatus);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[0].imageUrl, null);
+    assert.equal(
+        mediaItems[0].videoUrl,
+        "https://f.video.weibocdn.com/demo-1080.mp4?label=mp4_1080p"
+    );
+    assert.equal(mediaItems[0].videoExt, ".mp4");
+});
+
+test("video-enabled mixed media status keeps images and appends videos", () => {
+    const platform = createWeiboPlatformForTests({ ENABLE_VIDEO_DOWNLOAD: true });
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleMixMediaStatus);
+
+    assert.equal(mediaItems.length, 2);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[1].kind, "image");
+    assert.equal(mediaItems[0].videoUrl, "https://video.weibo.com/media/play?livephoto=0");
+});
+
 test("mobile weibo status resolves image items from pics array", () => {
     const platform = createWeiboPlatformForTests();
     const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleMobilePicsStatus);
@@ -595,6 +699,17 @@ test("mobile weibo mixed video and image pics skip the video cover", () => {
         mediaItems[0].imageUrl,
         "https://wx2.sinaimg.cn/large/6da17e26gy1id8h2xwky9j20xb188dud.jpg"
     );
+});
+
+test("video-enabled mobile weibo mixed pics include video source without downloading the cover", () => {
+    const platform = createWeiboPlatformForTests({ ENABLE_VIDEO_DOWNLOAD: true });
+    const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleMobileMixedPicsStatus);
+
+    assert.equal(mediaItems.length, 2);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[0].imageUrl, null);
+    assert.equal(mediaItems[0].videoUrl, "https://f.video.weibocdn.com/demo-video.mp4");
+    assert.equal(mediaItems[1].kind, "image");
 });
 
 test("mobile weibo card reads media items from vue item data without desktop fetch", () => {
@@ -671,6 +786,90 @@ test("pure video result removes download button", () => {
     assert.equal(button.removed, true);
 });
 
+test("ui creates a weibo button for video-only posts when async resolution is allowed", async () => {
+    const videoItem = {
+        id: "video-1",
+        kind: "video",
+        label: "视频 1",
+        imageUrl: null,
+        videoUrl: "https://f.video.weibocdn.com/a.mp4",
+        videoExt: ".mp4"
+    };
+
+    const ui = createUi({
+        config: {
+            ...CONFIG,
+            DEBUG: false,
+            ENABLE_VIDEO_DOWNLOAD: true
+        },
+        utils: {
+            getOriginalImageUrl: (url) => url,
+            getFileExtensionFromUrl: () => ".jpg",
+            downloadMediaItems() {},
+            log() {},
+            getPlatformAdapter() {
+                return {
+                    getDomMediaItems() {
+                        return null;
+                    },
+                    findImagesInPost() {
+                        return [];
+                    },
+                    shouldResolveEmptyMediaItems() {
+                        return true;
+                    },
+                    resolvePostMediaItems() {
+                        return [videoItem];
+                    },
+                    getPostId() {
+                        return "weibo_video";
+                    },
+                    getPostSelectors() {
+                        return [];
+                    },
+                    shouldSkipPost() {
+                        return false;
+                    },
+                    insertDownloadButton() {
+                        return true;
+                    },
+                    afterInjectDownloadButtons() {},
+                    initObservers() {}
+                };
+            }
+        },
+        windowRef: {},
+        documentRef: {
+            getElementById() {
+                return null;
+            },
+            createElement() {
+                return createButtonElement();
+            },
+            head: {
+                appendChild() {}
+            },
+            body: {
+                appendChild() {}
+            },
+            addEventListener() {},
+            removeEventListener() {}
+        },
+        addStyle() {}
+    });
+
+    const btn = ui.createDownloadButton({
+        querySelector() {
+            return null;
+        }
+    });
+
+    assert.ok(btn);
+    assert.equal(btn.innerHTML, "↓...");
+    await flushPromises();
+    assert.equal(btn.innerHTML, "↓1");
+});
+
 test("weibo video thumbnail image is filtered from fallback matching", () => {
     const ui = createUiForWeibo();
     const videoThumbImage = {
@@ -710,8 +909,42 @@ test("image selection modal uses compact p lp a labels by media type", () => {
     );
 });
 
+test("image selection modal uses compact v labels and a video color class", () => {
+    const { ui, documentRef } = createUiForModalTests();
+
+    ui.showImageSelectModal([
+        { id: "img-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null },
+        { id: "video-1", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/a.mp4" },
+        { id: "video-2", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/b.mp4" }
+    ]);
+
+    const overlay = documentRef.body.children[0];
+    const textNodes = findElementsByClassName(overlay, "weibo-img-select-item-text");
+    const videoNodes = findElementsByClassName(overlay, "weibo-img-select-item-text weibo-img-select-item-text-video");
+    const videoItems = findElementsByClassName(overlay, "weibo-img-select-item weibo-img-select-item-video");
+
+    assert.deepEqual(
+        textNodes.map((node) => node.textContent),
+        ["p1", "v1", "v2"]
+    );
+    assert.equal(videoNodes.length, 2);
+    assert.equal(videoItems.length, 2);
+});
+
 test("modal item text style keeps checkbox labels on a single line", () => {
     const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
 
     assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*white-space:\s*nowrap;/s);
+});
+
+test("modal media item controls have stable center alignment", () => {
+    const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+
+    assert.match(css, /\.weibo-img-select-item\s*\{[^}]*height:\s*48px;/s);
+    assert.match(css, /\.weibo-img-select-item\s*\{[^}]*box-sizing:\s*border-box;/s);
+    assert.match(css, /\.weibo-img-select-item input\s*\{[^}]*width:\s*16px;/s);
+    assert.match(css, /\.weibo-img-select-item input\s*\{[^}]*height:\s*16px;/s);
+    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*display:\s*inline-flex;/s);
+    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*align-items:\s*center;/s);
+    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*line-height:\s*16px;/s);
 });

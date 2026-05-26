@@ -2,7 +2,7 @@
 // @name         微博/X图片批量下载器
 // @namespace    http://tampermonkey.net/
 // @version      1.4.2
-// @description  一键下载微博和X帖子中的所有图片为原图
+// @description  一键下载微博和X帖子中的所有图片为原图，可选开启视频下载
 // @author       gbandszxc
 // @match        https://weibo.com/*
 // @match        https://www.weibo.com/*
@@ -22,6 +22,8 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @grant        GM_log
 // @grant        GM_addElement
 // @updateURL    https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/dist/weibo-image-downloader.user.js
@@ -32,17 +34,20 @@
 
 (() => {
   // src/style.css
-  var style_default = '#weibo-img-toast {\r\n    position: fixed;\r\n    top: 20px;\r\n    left: 50%;\r\n    transform: translateX(-50%);\r\n    background: rgba(0, 0, 0, 0.75);\r\n    color: #fff;\r\n    padding: 10px 20px;\r\n    border-radius: 4px;\r\n    font-size: 14px;\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 10px;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);\r\n}\r\n\r\n#weibo-img-toast .close-btn {\r\n    font-size: 18px;\r\n    cursor: pointer;\r\n    opacity: 0.7;\r\n    line-height: 1;\r\n}\r\n\r\n#weibo-img-toast .close-btn:hover {\r\n    opacity: 1;\r\n}\r\n\r\n.weibo-img-select-overlay {\r\n    position: fixed;\r\n    inset: 0;\r\n    background: rgba(15, 23, 42, 0.24);\r\n    backdrop-filter: blur(10px);\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    padding: 16px;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal {\r\n    width: 100%;\r\n    max-width: 448px;\r\n    max-height: 80vh;\r\n    background: linear-gradient(180deg, #fffdf9 0%, #ffffff 100%);\r\n    border: 1px solid rgba(255, 130, 0, 0.12);\r\n    border-radius: 16px;\r\n    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);\r\n    display: flex;\r\n    flex-direction: column;\r\n    overflow: hidden;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n}\r\n\r\n.weibo-img-select-header {\r\n    padding: 16px 18px 14px;\r\n    border-bottom: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: space-between;\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-header-title {\r\n    font-size: 15px;\r\n    font-weight: 600;\r\n    color: #1f2937;\r\n}\r\n\r\n.weibo-img-select-toggle-btn {\r\n    height: 30px;\r\n    padding: 0 12px;\r\n    border: 1px solid rgba(255, 130, 0, 0.18);\r\n    border-radius: 999px;\r\n    background: #fff7ed;\r\n    color: #c2410c;\r\n    font-size: 12px;\r\n    font-weight: 600;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    cursor: pointer;\r\n    box-sizing: border-box;\r\n    white-space: nowrap;\r\n}\r\n\r\n.weibo-img-select-list {\r\n    padding: 14px 18px 18px;\r\n    overflow: auto;\r\n    display: grid;\r\n    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-item {\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 8px;\r\n    min-width: 0;\r\n    padding: 10px 12px;\r\n    border: 1px solid rgba(255, 130, 0, 0.14);\r\n    border-radius: 12px;\r\n    background: linear-gradient(180deg, #fffaf3 0%, #ffffff 100%);\r\n    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);\r\n    user-select: none;\r\n    font-size: 14px;\r\n    color: #374151;\r\n    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;\r\n}\r\n\r\n.weibo-img-select-item:hover {\r\n    border-color: rgba(255, 130, 0, 0.32);\r\n    box-shadow: 0 8px 18px rgba(255, 130, 0, 0.1);\r\n    transform: translateY(-1px);\r\n}\r\n\r\n.weibo-img-select-item input {\r\n    flex: 0 0 auto;\r\n    margin: 0;\r\n    accent-color: #ff8200;\r\n}\r\n\r\n.weibo-img-select-item-text {\r\n    min-width: 0;\r\n    white-space: nowrap;\r\n    overflow: hidden;\r\n    text-overflow: ellipsis;\r\n    font-weight: 600;\r\n    letter-spacing: 0.01em;\r\n}\r\n\r\n.weibo-img-select-actions {\r\n    padding: 14px 18px 18px;\r\n    border-top: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    justify-content: flex-end;\r\n    gap: 8px;\r\n}\r\n\r\n.weibo-img-select-btn {\r\n    min-width: 90px;\r\n    height: 34px;\r\n    padding: 0 14px;\r\n    border-radius: 999px;\r\n    border: 1px solid transparent;\r\n    font-size: 13px;\r\n    font-weight: 600;\r\n    cursor: pointer;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal button {\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    vertical-align: middle;\r\n}\r\n\r\n.weibo-img-select-btn-cancel {\r\n    background: #fff;\r\n    border-color: rgba(148, 163, 184, 0.35);\r\n    color: #475569;\r\n}\r\n\r\n.weibo-img-select-btn-confirm {\r\n    background: linear-gradient(135deg, #ff8200 0%, #ff6a00 100%);\r\n    color: #fff;\r\n    box-shadow: 0 10px 22px rgba(255, 130, 0, 0.26);\r\n}\r\n\r\n.weibo-img-download-btn {\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    width: auto !important;\r\n    height: 20px;\r\n    padding: 0 6px !important;\r\n    margin-left: 8px;\r\n    background: #ff8200;\r\n    color: white;\r\n    border-radius: 3px;\r\n    font-size: 11px;\r\n    font-weight: bold;\r\n    cursor: pointer;\r\n    vertical-align: middle;\r\n    white-space: nowrap;\r\n    box-sizing: content-box;\r\n}\r\n\r\n.weibo-img-download-btn:hover {\r\n    background: #ff6a00;\r\n}\r\n';
+  var style_default = '#weibo-img-toast {\r\n    position: fixed;\r\n    top: 20px;\r\n    left: 50%;\r\n    transform: translateX(-50%);\r\n    background: rgba(0, 0, 0, 0.75);\r\n    color: #fff;\r\n    padding: 10px 20px;\r\n    border-radius: 4px;\r\n    font-size: 14px;\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 10px;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);\r\n}\r\n\r\n#weibo-img-toast .close-btn {\r\n    font-size: 18px;\r\n    cursor: pointer;\r\n    opacity: 0.7;\r\n    line-height: 1;\r\n}\r\n\r\n#weibo-img-toast .close-btn:hover {\r\n    opacity: 1;\r\n}\r\n\r\n.weibo-img-select-overlay {\r\n    position: fixed;\r\n    inset: 0;\r\n    background: rgba(15, 23, 42, 0.24);\r\n    backdrop-filter: blur(10px);\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    padding: 16px;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal {\r\n    width: 100%;\r\n    max-width: 448px;\r\n    max-height: 80vh;\r\n    background: linear-gradient(180deg, #fffdf9 0%, #ffffff 100%);\r\n    border: 1px solid rgba(255, 130, 0, 0.12);\r\n    border-radius: 16px;\r\n    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);\r\n    display: flex;\r\n    flex-direction: column;\r\n    overflow: hidden;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n}\r\n\r\n.weibo-img-select-header {\r\n    padding: 16px 18px 14px;\r\n    border-bottom: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: space-between;\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-header-title {\r\n    font-size: 15px;\r\n    font-weight: 600;\r\n    color: #1f2937;\r\n}\r\n\r\n.weibo-img-select-toggle-btn {\r\n    height: 30px;\r\n    padding: 0 12px;\r\n    border: 1px solid rgba(255, 130, 0, 0.18);\r\n    border-radius: 999px;\r\n    background: #fff7ed;\r\n    color: #c2410c;\r\n    font-size: 12px;\r\n    font-weight: 600;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    cursor: pointer;\r\n    box-sizing: border-box;\r\n    white-space: nowrap;\r\n}\r\n\r\n.weibo-img-select-list {\r\n    padding: 14px 18px 18px;\r\n    overflow: auto;\r\n    display: grid;\r\n    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n    height: 48px;\n    padding: 10px 12px;\n    border: 1px solid rgba(255, 130, 0, 0.14);\n    border-radius: 12px;\n    background: linear-gradient(180deg, #fffaf3 0%, #ffffff 100%);\n    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);\n    user-select: none;\r\n    font-size: 14px;\n    color: #374151;\n    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;\n    box-sizing: border-box;\n}\n\r\n.weibo-img-select-item:hover {\n    border-color: rgba(255, 130, 0, 0.32);\n    box-shadow: 0 8px 18px rgba(255, 130, 0, 0.1);\n    transform: translateY(-1px);\n}\n\n.weibo-img-select-item-video {\n    border-color: rgba(59, 130, 246, 0.28);\n    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);\n}\n\n.weibo-img-select-item-video:hover {\n    border-color: rgba(59, 130, 246, 0.42);\n    box-shadow: 0 8px 18px rgba(59, 130, 246, 0.12);\n}\n\n.weibo-img-select-item input {\n    flex: 0 0 auto;\n    width: 16px;\n    height: 16px;\n    margin: 0;\n    display: block;\n    accent-color: #ff8200;\n}\n\n.weibo-img-select-item-video input {\n    accent-color: #2563eb;\n}\n\r\n.weibo-img-select-item-text {\n    display: inline-flex;\n    align-items: center;\n    min-width: 0;\n    min-height: 16px;\n    line-height: 16px;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n    font-weight: 600;\n    letter-spacing: 0.01em;\n}\n\n.weibo-img-select-item-text-video {\n    color: #1d4ed8;\n}\n\r\n.weibo-img-select-actions {\r\n    padding: 14px 18px 18px;\r\n    border-top: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    justify-content: flex-end;\r\n    gap: 8px;\r\n}\r\n\r\n.weibo-img-select-btn {\r\n    min-width: 90px;\r\n    height: 34px;\r\n    padding: 0 14px;\r\n    border-radius: 999px;\r\n    border: 1px solid transparent;\r\n    font-size: 13px;\r\n    font-weight: 600;\r\n    cursor: pointer;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal button {\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    vertical-align: middle;\r\n}\r\n\r\n.weibo-img-select-btn-cancel {\r\n    background: #fff;\r\n    border-color: rgba(148, 163, 184, 0.35);\r\n    color: #475569;\r\n}\r\n\r\n.weibo-img-select-btn-confirm {\r\n    background: linear-gradient(135deg, #ff8200 0%, #ff6a00 100%);\r\n    color: #fff;\r\n    box-shadow: 0 10px 22px rgba(255, 130, 0, 0.26);\r\n}\r\n\r\n.weibo-img-download-btn {\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    width: auto !important;\r\n    height: 20px;\r\n    padding: 0 6px !important;\r\n    margin-left: 8px;\r\n    background: #ff8200;\r\n    color: white;\r\n    border-radius: 3px;\r\n    font-size: 11px;\r\n    font-weight: bold;\r\n    cursor: pointer;\r\n    vertical-align: middle;\r\n    white-space: nowrap;\r\n    box-sizing: content-box;\r\n}\r\n\r\n.weibo-img-download-btn:hover {\r\n    background: #ff6a00;\r\n}\r\n';
 
   // src/config.js
   var CONFIG = {
     DELAY_MS: 300,
     LONG_PRESS_MS: 500,
+    VIDEO_DOWNLOAD_SETTING_KEY: "weiboImageDownloader.enableVideoDownload",
+    ENABLE_VIDEO_DOWNLOAD: false,
     DEBUG: true
   };
 
   // src/platforms/weibo.js
   function createWeiboPlatform({
+    config = {},
     windowRef,
     fetchRef,
     log,
@@ -72,11 +77,14 @@
       ".name"
     ];
     const weiboStatusCache = /* @__PURE__ */ new Map();
+    function isVideoDownloadEnabled() {
+      return !!config.ENABLE_VIDEO_DOWNLOAD;
+    }
     function isSearchPage() {
       return windowRef.location.hostname === "s.weibo.com";
     }
     function isMobileWeiboPage() {
-      return windowRef.location.hostname === "m.weibo.cn";
+      return windowRef.location.hostname === "m.weibo.cn" || windowRef.location.hostname === "www.m.weibo.cn";
     }
     function isAvatarImage(url) {
       if (!url) {
@@ -124,6 +132,63 @@
       const imageUrl = candidates.find((url) => typeof url === "string" && url.length > 0);
       return getOriginalImageUrl(imageUrl) || imageUrl || null;
     }
+    function getBestWeiboVideoUrl(mediaInfo) {
+      if (!mediaInfo || typeof mediaInfo !== "object") {
+        return null;
+      }
+      const playbackList = Array.isArray(mediaInfo.playback_list) ? mediaInfo.playback_list : [];
+      const playbackCandidates = playbackList.map((item) => {
+        const playInfo = item && item.play_info;
+        const url = playInfo && playInfo.url;
+        if (typeof url !== "string" || !url) {
+          return null;
+        }
+        const qualityIndex = Number(item.meta && item.meta.quality_index) || 0;
+        const bitrate = Number(playInfo.bitrate) || 0;
+        const pixels = (Number(playInfo.width) || 0) * (Number(playInfo.height) || 0);
+        return {
+          url,
+          score: qualityIndex * 1e9 + pixels * 1e3 + bitrate
+        };
+      }).filter(Boolean).sort((a, b) => b.score - a.score);
+      if (playbackCandidates.length > 0) {
+        return playbackCandidates[0].url;
+      }
+      const fallbackKeys = [
+        "mp4_2160p_mp4",
+        "mp4_1080p_mp4",
+        "mp4_720p_mp4",
+        "hevc_mp4_720p",
+        "h265_mp4_hd",
+        "inch_5_5_mp4_hd",
+        "inch_5_mp4_hd",
+        "inch_4_mp4_hd",
+        "mp4_hd_url",
+        "stream_url_hd",
+        "mp4_sd_url",
+        "stream_url"
+      ];
+      for (const key of fallbackKeys) {
+        if (typeof mediaInfo[key] === "string" && mediaInfo[key]) {
+          return mediaInfo[key];
+        }
+      }
+      return null;
+    }
+    function createWeiboVideoMediaItem({ id, videoUrl, index }) {
+      if (!videoUrl) {
+        return null;
+      }
+      return {
+        id,
+        kind: "video",
+        label: `视频 ${index + 1}`,
+        imageUrl: null,
+        videoUrl,
+        imageExt: ".jpg",
+        videoExt: getFileExtensionFromUrl(videoUrl, ".mp4")
+      };
+    }
     function getWeiboMixMediaItems(status) {
       const mixMediaItems = status && status.mix_media_info && Array.isArray(status.mix_media_info.items) ? status.mix_media_info.items : [];
       return mixMediaItems.map((item, index) => {
@@ -134,7 +199,14 @@
         const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
         const objectType = typeof data.object_type === "string" ? data.object_type.toLowerCase() : "";
         if (mediaType === "video" || objectType === "video") {
-          return null;
+          if (!isVideoDownloadEnabled()) {
+            return null;
+          }
+          return createWeiboVideoMediaItem({
+            id: data.id || data.media_id || `mix-video-${index + 1}`,
+            videoUrl: getBestWeiboVideoUrl(data.media_info) || data.videoSrc || data.stream_url_hd || data.stream_url,
+            index
+          });
         }
         const picInfo = data.pic_info || data;
         const imageUrl = getBestWeiboImageUrl(picInfo) || getBestWeiboImageUrl({
@@ -192,7 +264,14 @@
         }
         const mediaType = typeof pic.type === "string" ? pic.type.toLowerCase() : "pic";
         if (mediaType === "video") {
-          return null;
+          if (!isVideoDownloadEnabled()) {
+            return null;
+          }
+          return createWeiboVideoMediaItem({
+            id: pic.pid || `pic-video-${index + 1}`,
+            videoUrl: getBestWeiboVideoUrl(pic.media_info) || pic.videoSrc || pic.video,
+            index
+          });
         }
         return createWeiboMediaItem(
           pic.pid || getFileBasenameFromUrl(getBestWeiboImageUrl(pic) || pic.url, `pic-${index + 1}`),
@@ -230,7 +309,25 @@
       if (mobileMediaItems.length > 0) {
         return mobileMediaItems;
       }
-      return getWeiboMixMediaItems(mediaSourceStatus);
+      const mixMediaItems = getWeiboMixMediaItems(mediaSourceStatus);
+      if (mixMediaItems.length > 0) {
+        return mixMediaItems;
+      }
+      if (!isVideoDownloadEnabled()) {
+        return [];
+      }
+      const pageInfo = mediaSourceStatus.page_info || {};
+      const pageInfoType = typeof pageInfo.type === "string" ? pageInfo.type.toLowerCase() : "";
+      const objectType = typeof pageInfo.object_type === "string" ? pageInfo.object_type.toLowerCase() : "";
+      if (pageInfoType === "video" || pageInfoType === "11" || objectType === "video") {
+        const videoItem = createWeiboVideoMediaItem({
+          id: mediaSourceStatus.mblogid || mediaSourceStatus.idstr || "video-1",
+          videoUrl: getBestWeiboVideoUrl(pageInfo.media_info),
+          index: 0
+        });
+        return videoItem ? [videoItem] : [];
+      }
+      return [];
     }
     async function fetchWeiboStatus(statusId) {
       if (!statusId) {
@@ -381,6 +478,9 @@
         return !post || typeof post.matches !== "function" || !post.matches(".card.m-panel.card9");
       }
       return false;
+    }
+    function shouldResolveEmptyMediaItems(postContainer) {
+      return isVideoDownloadEnabled() && !!getStatusLookupId(postContainer);
     }
     function getPostId(postContainer) {
       if (isMobileWeiboPage()) {
@@ -560,6 +660,7 @@
       resolvePostMediaItems,
       getPostSelectors,
       shouldSkipPost,
+      shouldResolveEmptyMediaItems,
       getPostId,
       insertDownloadButton,
       getPostUrl,
@@ -570,7 +671,7 @@
   }
 
   // src/platforms/x.js
-  function createXPlatform({ windowRef, log, getFileExtensionFromUrl }) {
+  function createXPlatform({ config = {}, windowRef, log, getFileExtensionFromUrl }) {
     const imageSelectors = ['article img[src*="twimg.com"]'];
     const postSelectors = ['article[data-testid="tweet"]'];
     function getOriginalImageUrl(url) {
@@ -633,6 +734,9 @@
       const text = container?.textContent || "";
       return /\bGIF\b/i.test(text);
     }
+    function isVideoDownloadEnabled() {
+      return !!config.ENABLE_VIDEO_DOWNLOAD;
+    }
     function findImagesInPost(container) {
       const images = [];
       const seen = /* @__PURE__ */ new Set();
@@ -677,6 +781,17 @@
       if (!url) {
         return null;
       }
+      if (kind === "video") {
+        return {
+          id,
+          kind,
+          label,
+          imageUrl: null,
+          videoUrl: url,
+          imageExt: ".jpg",
+          videoExt: getFileExtensionFromUrl(url, fallbackExt)
+        };
+      }
       return {
         id,
         kind,
@@ -717,23 +832,25 @@
       }
       const videos = container.querySelectorAll("video");
       videos.forEach((video) => {
-        if (!isGifVideo(video)) {
+        const isGif = isGifVideo(video);
+        if (!isGif && !isVideoDownloadEnabled()) {
           return;
         }
         const url = getVideoSourceUrl(video);
         if (!url) {
           return;
         }
-        const key = `gif:${url.split("?")[0]}`;
+        const kind = isGif ? "gif" : "video";
+        const key = `${kind}:${url.split("?")[0]}`;
         if (seen.has(key)) {
           return;
         }
         seen.add(key);
-        const gifCount = mediaItems.filter((item2) => item2.kind === "gif").length + 1;
+        const mediaCount = mediaItems.filter((item2) => item2.kind === kind).length + 1;
         const item = createMediaItem({
-          id: `dom-gif-${gifCount}`,
-          kind: "gif",
-          label: `GIF ${gifCount}`,
+          id: `dom-${kind}-${mediaCount}`,
+          kind,
+          label: isGif ? `GIF ${mediaCount}` : `视频 ${mediaCount}`,
           url,
           fallbackExt: ".mp4"
         });
@@ -906,10 +1023,11 @@
           });
         }
         if (item.videoUrl) {
+          const isStandaloneVideo = item.kind === "video";
           jobs.push({
             type: "video",
             url: item.videoUrl,
-            filename: `${baseName}_live${item.videoExt || getFileExtensionFromUrl(item.videoUrl, ".mov")}`
+            filename: `${baseName}${isStandaloneVideo ? "" : "_live"}${item.videoExt || getFileExtensionFromUrl(item.videoUrl, ".mov")}`
           });
         }
       });
@@ -1255,14 +1373,18 @@
     }
     function getSelectionItemLabel(item, typeCounters) {
       const normalizedKind = item && item.kind ? item.kind : item && item.videoUrl ? "livephoto" : "image";
-      const typeKey = normalizedKind === "livephoto" ? "livephoto" : normalizedKind === "gif" ? "gif" : "image";
+      const typeKey = normalizedKind === "livephoto" ? "livephoto" : normalizedKind === "gif" ? "gif" : normalizedKind === "video" ? "video" : "image";
       const labelPrefixMap = {
         image: "p",
         livephoto: "lp",
-        gif: "a"
+        gif: "a",
+        video: "v"
       };
       typeCounters[typeKey] = (typeCounters[typeKey] || 0) + 1;
-      return `${labelPrefixMap[typeKey]}${typeCounters[typeKey]}`;
+      return {
+        text: `${labelPrefixMap[typeKey]}${typeCounters[typeKey]}`,
+        typeKey
+      };
     }
     function showImageSelectModal(mediaItems) {
       return new Promise((resolve) => {
@@ -1292,8 +1414,12 @@
           input.checked = true;
           input.value = String(index);
           const text = documentRef.createElement("span");
-          text.className = "weibo-img-select-item-text";
-          text.textContent = getSelectionItemLabel(item, typeCounters);
+          const itemLabel = getSelectionItemLabel(item, typeCounters);
+          if (itemLabel.typeKey === "video") {
+            label.className = "weibo-img-select-item weibo-img-select-item-video";
+          }
+          text.className = itemLabel.typeKey === "video" ? "weibo-img-select-item-text weibo-img-select-item-text-video" : "weibo-img-select-item-text";
+          text.textContent = itemLabel.text;
           label.title = item && item.label ? item.label : text.textContent;
           label.appendChild(input);
           label.appendChild(text);
@@ -1385,13 +1511,14 @@
         return null;
       }
       const initialMediaItems = getFallbackMediaItems(postContainer);
-      if (initialMediaItems.length === 0) {
+      const shouldResolveEmptyMediaItems = typeof platform.shouldResolveEmptyMediaItems === "function" && platform.shouldResolveEmptyMediaItems(postContainer);
+      if (initialMediaItems.length === 0 && !shouldResolveEmptyMediaItems) {
         return null;
       }
       postMediaItemsCache.set(postContainer, initialMediaItems);
       const btn = documentRef.createElement("span");
       btn.className = "weibo-img-download-btn";
-      btn.innerHTML = `↓${initialMediaItems.length}`;
+      btn.innerHTML = initialMediaItems.length > 0 ? `↓${initialMediaItems.length}` : "↓...";
       btn.title = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
       resolvePostMediaItems(postContainer, initialMediaItems).then((mediaItems) => {
         syncDownloadButtonState(btn, mediaItems);
@@ -1528,6 +1655,10 @@
 
   // src/main.js
   var styleId = "weibo-image-downloader-style";
+  var runtimeConfig = {
+    ...CONFIG,
+    ENABLE_VIDEO_DOWNLOAD: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, CONFIG.ENABLE_VIDEO_DOWNLOAD)) : CONFIG.ENABLE_VIDEO_DOWNLOAD
+  };
   function injectStyles() {
     if (document.getElementById(styleId)) {
       return;
@@ -1547,7 +1678,7 @@
   }
   var ui;
   var utils = createUtils({
-    config: CONFIG,
+    config: runtimeConfig,
     windowRef: window,
     fetchRef: window.fetch.bind(window),
     gmDownload: typeof GM_download === "function" ? GM_download : null,
@@ -1561,7 +1692,7 @@
     }
   });
   ui = createUi({
-    config: CONFIG,
+    config: runtimeConfig,
     utils,
     windowRef: window,
     documentRef: document,
@@ -1601,6 +1732,16 @@
   if (typeof GM_registerMenuCommand === "function") {
     GM_registerMenuCommand("刷新按钮", () => {
       ui.injectDownloadButtons();
+    });
+    GM_registerMenuCommand(`视频下载：${runtimeConfig.ENABLE_VIDEO_DOWNLOAD ? "开启" : "关闭"}`, () => {
+      const nextValue = !runtimeConfig.ENABLE_VIDEO_DOWNLOAD;
+      if (typeof GM_setValue === "function") {
+        GM_setValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, nextValue);
+      }
+      runtimeConfig.ENABLE_VIDEO_DOWNLOAD = nextValue;
+      if (ui) {
+        ui.showToast(`视频下载已${nextValue ? "开启" : "关闭"}，刷新页面后生效`);
+      }
     });
   }
 })();
