@@ -44,10 +44,10 @@
     width: 100%;
     max-width: 448px;
     max-height: 80vh;
-    background: linear-gradient(180deg, #fffdf9 0%, #ffffff 100%);
+    background: #ffffff;
     border: 1px solid rgba(255, 130, 0, 0.12);
     border-radius: 16px;
-    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+    box-shadow: none;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -72,9 +72,9 @@
 .weibo-img-select-toggle-btn {
     height: 30px;
     padding: 0 12px;
-    border: 1px solid rgba(255, 130, 0, 0.18);
+    border: 1px solid rgba(148, 163, 184, 0.35);
     border-radius: 999px;
-    background: #fff7ed;
+    background: #ffffff;
     color: #c2410c;
     font-size: 12px;
     font-weight: 600;
@@ -86,6 +86,11 @@
     cursor: pointer;
     box-sizing: border-box;
     white-space: nowrap;
+    transition: background-color 0.2s ease;
+}
+
+.weibo-img-select-toggle-btn:hover {
+    background: #f8fafc;
 }
 
 .weibo-img-select-list {
@@ -105,29 +110,29 @@
     padding: 10px 12px;
     border: 1px solid rgba(255, 130, 0, 0.14);
     border-radius: 12px;
-    background: linear-gradient(180deg, #fffaf3 0%, #ffffff 100%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    background: #ffffff;
+    box-shadow: none;
     user-select: none;
     font-size: 14px;
     color: #374151;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    transition: border-color 0.2s ease, transform 0.2s ease;
     box-sizing: border-box;
 }
 
 .weibo-img-select-item:hover {
     border-color: rgba(255, 130, 0, 0.32);
-    box-shadow: 0 8px 18px rgba(255, 130, 0, 0.1);
+    box-shadow: none;
     transform: translateY(-1px);
 }
 
 .weibo-img-select-item-video {
     border-color: rgba(59, 130, 246, 0.28);
-    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+    background: #ffffff;
 }
 
 .weibo-img-select-item-video:hover {
     border-color: rgba(59, 130, 246, 0.42);
-    box-shadow: 0 8px 18px rgba(59, 130, 246, 0.12);
+    box-shadow: none;
 }
 
 .weibo-img-select-item input {
@@ -183,6 +188,7 @@
     text-align: center;
     line-height: 1;
     box-sizing: border-box;
+    transition: background-color 0.2s ease;
 }
 
 .weibo-img-select-modal button {
@@ -196,10 +202,18 @@
     color: #475569;
 }
 
+.weibo-img-select-btn-cancel:hover {
+    background: #f8fafc;
+}
+
 .weibo-img-select-btn-confirm {
-    background: linear-gradient(135deg, #ff8200 0%, #ff6a00 100%);
+    background: #ff8200;
     color: #fff;
-    box-shadow: 0 10px 22px rgba(255, 130, 0, 0.26);
+    box-shadow: none;
+}
+
+.weibo-img-select-btn-confirm:hover {
+    background: #ff7600;
 }
 
 .weibo-img-download-btn {
