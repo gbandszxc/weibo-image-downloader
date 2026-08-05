@@ -27,3 +27,9 @@ test("userscript metadata grants persistent settings APIs", () => {
     assert.match(buildScript, /@grant\s+GM_getValue/);
     assert.match(buildScript, /@grant\s+GM_setValue/);
 });
+
+test("userscript metadata omits unused privileged APIs", () => {
+    const buildScript = readFileSync(new URL("../scripts/build.mjs", import.meta.url), "utf8");
+
+    assert.doesNotMatch(buildScript, /@grant\s+GM_(?:log|addElement)/);
+});

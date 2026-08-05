@@ -1,3 +1,19 @@
+const IMAGE_SIZE_PATTERNS = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"];
+const VIDEO_FALLBACK_KEYS = [
+    "mp4_2160p_mp4",
+    "mp4_1080p_mp4",
+    "mp4_720p_mp4",
+    "hevc_mp4_720p",
+    "h265_mp4_hd",
+    "inch_5_5_mp4_hd",
+    "inch_5_mp4_hd",
+    "inch_4_mp4_hd",
+    "mp4_hd_url",
+    "stream_url_hd",
+    "mp4_sd_url",
+    "stream_url"
+];
+
 export function createWeiboPlatform({
     config = {},
     windowRef,
@@ -71,8 +87,7 @@ export function createWeiboPlatform({
             return url;
         }
 
-        const sizePatterns = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"];
-        for (const size of sizePatterns) {
+        for (const size of IMAGE_SIZE_PATTERNS) {
             if (url.includes(`/${size}/`)) {
                 return url.replace(`/${size}/`, "/large/");
             }
@@ -133,22 +148,7 @@ export function createWeiboPlatform({
             return playbackCandidates[0].url;
         }
 
-        const fallbackKeys = [
-            "mp4_2160p_mp4",
-            "mp4_1080p_mp4",
-            "mp4_720p_mp4",
-            "hevc_mp4_720p",
-            "h265_mp4_hd",
-            "inch_5_5_mp4_hd",
-            "inch_5_mp4_hd",
-            "inch_4_mp4_hd",
-            "mp4_hd_url",
-            "stream_url_hd",
-            "mp4_sd_url",
-            "stream_url"
-        ];
-
-        for (const key of fallbackKeys) {
+        for (const key of VIDEO_FALLBACK_KEYS) {
             if (typeof mediaInfo[key] === "string" && mediaInfo[key]) {
                 return mediaInfo[key];
             }

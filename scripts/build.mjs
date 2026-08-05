@@ -45,8 +45,6 @@ const metadataLines = [
   "// @grant        GM_unregisterMenuCommand",
   "// @grant        GM_getValue",
   "// @grant        GM_setValue",
-  "// @grant        GM_log",
-  "// @grant        GM_addElement",
   `// @updateURL    ${rawDistUrl}`,
   `// @downloadURL  ${rawDistUrl}`,
   "// @supportURL   https://github.com/gbandszxc/weibo-image-downloader/issues",

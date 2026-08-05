@@ -25,8 +25,6 @@
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        GM_log
-// @grant        GM_addElement
 // @updateURL    https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/dist/weibo-image-downloader.user.js
 // @downloadURL  https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/dist/weibo-image-downloader.user.js
 // @supportURL   https://github.com/gbandszxc/weibo-image-downloader/issues
@@ -47,6 +45,21 @@
   };
 
   // src/platforms/weibo.js
+  var IMAGE_SIZE_PATTERNS = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"];
+  var VIDEO_FALLBACK_KEYS = [
+    "mp4_2160p_mp4",
+    "mp4_1080p_mp4",
+    "mp4_720p_mp4",
+    "hevc_mp4_720p",
+    "h265_mp4_hd",
+    "inch_5_5_mp4_hd",
+    "inch_5_mp4_hd",
+    "inch_4_mp4_hd",
+    "mp4_hd_url",
+    "stream_url_hd",
+    "mp4_sd_url",
+    "stream_url"
+  ];
   function createWeiboPlatform({
     config = {},
     windowRef,
@@ -107,8 +120,7 @@
       if (url.includes("/large/")) {
         return url;
       }
-      const sizePatterns = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"];
-      for (const size of sizePatterns) {
+      for (const size of IMAGE_SIZE_PATTERNS) {
         if (url.includes(`/${size}/`)) {
           return url.replace(`/${size}/`, "/large/");
         }
@@ -156,21 +168,7 @@
       if (playbackCandidates.length > 0) {
         return playbackCandidates[0].url;
       }
-      const fallbackKeys = [
-        "mp4_2160p_mp4",
-        "mp4_1080p_mp4",
-        "mp4_720p_mp4",
-        "hevc_mp4_720p",
-        "h265_mp4_hd",
-        "inch_5_5_mp4_hd",
-        "inch_5_mp4_hd",
-        "inch_4_mp4_hd",
-        "mp4_hd_url",
-        "stream_url_hd",
-        "mp4_sd_url",
-        "stream_url"
-      ];
-      for (const key of fallbackKeys) {
+      for (const key of VIDEO_FALLBACK_KEYS) {
         if (typeof mediaInfo[key] === "string" && mediaInfo[key]) {
           return mediaInfo[key];
         }
@@ -1456,8 +1454,13 @@
   }
 
   // src/ui.js
+  var SELECTION_LABEL_PREFIXES = {
+    image: "p",
+    livephoto: "lp",
+    gif: "a",
+    video: "v"
+  };
   function createUi({ config, utils: utils2, windowRef, documentRef, addStyle }) {
-    let postMediaItemsCache = /* @__PURE__ */ new WeakMap();
     const platform = utils2.getPlatformAdapter();
     let resolvedMediaItemsCache = /* @__PURE__ */ new WeakMap();
     function showToast(message, duration = 3e3) {
@@ -1571,15 +1574,9 @@
     function getSelectionItemLabel(item, typeCounters) {
       const normalizedKind = item && item.kind ? item.kind : item && item.videoUrl ? "livephoto" : "image";
       const typeKey = normalizedKind === "livephoto" ? "livephoto" : normalizedKind === "gif" ? "gif" : normalizedKind === "video" ? "video" : "image";
-      const labelPrefixMap = {
-        image: "p",
-        livephoto: "lp",
-        gif: "a",
-        video: "v"
-      };
       typeCounters[typeKey] = (typeCounters[typeKey] || 0) + 1;
       return {
-        text: `${labelPrefixMap[typeKey]}${typeCounters[typeKey]}`,
+        text: `${SELECTION_LABEL_PREFIXES[typeKey]}${typeCounters[typeKey]}`,
         typeKey
       };
     }
@@ -1712,7 +1709,6 @@
       if (initialMediaItems.length === 0 && !shouldResolveEmptyMediaItems) {
         return null;
       }
-      postMediaItemsCache.set(postContainer, initialMediaItems);
       const btn = documentRef.createElement("span");
       btn.className = "weibo-img-download-btn";
       btn.innerHTML = initialMediaItems.length > 0 ? `↓${initialMediaItems.length}` : "↓...";
@@ -1722,7 +1718,6 @@
       });
       let longPressTimer = null;
       let longPressTriggered = false;
-      let suppressNextClick = false;
       const clearLongPressTimer = () => {
         if (longPressTimer) {
           clearTimeout(longPressTimer);
@@ -1740,9 +1735,6 @@
       btn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (suppressNextClick) {
-          suppressNextClick = false;
-        }
       });
       btn.addEventListener("pointerdown", (event) => {
         if (event.pointerType === "mouse" && event.button !== 0) {
@@ -1754,11 +1746,10 @@
         clearLongPressTimer();
         longPressTimer = setTimeout(async () => {
           longPressTriggered = true;
-          suppressNextClick = true;
           clearLongPressTimer();
           const mediaItems = await resolvePostMediaItems(
             postContainer,
-            postMediaItemsCache.get(postContainer) || initialMediaItems
+            initialMediaItems
           );
           const selectedMediaItems = await showImageSelectModal(mediaItems);
           if (selectedMediaItems && selectedMediaItems.length > 0) {
@@ -1778,7 +1769,7 @@
         if (!wasLongPress) {
           const mediaItems = await resolvePostMediaItems(
             postContainer,
-            postMediaItemsCache.get(postContainer) || initialMediaItems
+            initialMediaItems
           );
           await startDownload(mediaItems);
         }
@@ -1788,7 +1779,6 @@
       return btn;
     }
     function injectDownloadButtons() {
-      let postsAdded = 0;
       const selectors = platform.getPostSelectors();
       for (const selector of selectors) {
         const posts = documentRef.querySelectorAll(selector);
@@ -1807,7 +1797,6 @@
           if (!inserted) {
             post.appendChild(btn);
           }
-          postsAdded++;
         });
       }
       if (typeof platform.afterInjectDownloadButtons === "function") {
@@ -1815,7 +1804,6 @@
       }
     }
     function refreshDownloadButtons() {
-      postMediaItemsCache = /* @__PURE__ */ new WeakMap();
       resolvedMediaItemsCache = /* @__PURE__ */ new WeakMap();
       documentRef.querySelectorAll(".weibo-img-download-btn").forEach((btn) => {
         btn.remove();

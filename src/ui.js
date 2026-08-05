@@ -1,5 +1,11 @@
+const SELECTION_LABEL_PREFIXES = {
+    image: "p",
+    livephoto: "lp",
+    gif: "a",
+    video: "v"
+};
+
 export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
-    let postMediaItemsCache = new WeakMap();
     const platform = utils.getPlatformAdapter();
     let resolvedMediaItemsCache = new WeakMap();
 
@@ -144,16 +150,9 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         const typeKey = normalizedKind === "livephoto"
             ? "livephoto"
             : (normalizedKind === "gif" ? "gif" : (normalizedKind === "video" ? "video" : "image"));
-        const labelPrefixMap = {
-            image: "p",
-            livephoto: "lp",
-            gif: "a",
-            video: "v"
-        };
-
         typeCounters[typeKey] = (typeCounters[typeKey] || 0) + 1;
         return {
-            text: `${labelPrefixMap[typeKey]}${typeCounters[typeKey]}`,
+            text: `${SELECTION_LABEL_PREFIXES[typeKey]}${typeCounters[typeKey]}`,
             typeKey
         };
     }
@@ -324,8 +323,6 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         if (initialMediaItems.length === 0 && !shouldResolveEmptyMediaItems) {
             return null;
         }
-        postMediaItemsCache.set(postContainer, initialMediaItems);
-
         const btn = documentRef.createElement("span");
         btn.className = "weibo-img-download-btn";
         btn.innerHTML = initialMediaItems.length > 0 ? `↓${initialMediaItems.length}` : "↓...";
@@ -337,7 +334,6 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
 
         let longPressTimer = null;
         let longPressTriggered = false;
-        let suppressNextClick = false;
 
         const clearLongPressTimer = () => {
             if (longPressTimer) {
@@ -359,9 +355,6 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         btn.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (suppressNextClick) {
-                suppressNextClick = false;
-            }
         });
 
         btn.addEventListener("pointerdown", (event) => {
@@ -375,11 +368,10 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
             clearLongPressTimer();
             longPressTimer = setTimeout(async () => {
                 longPressTriggered = true;
-                suppressNextClick = true;
                 clearLongPressTimer();
                 const mediaItems = await resolvePostMediaItems(
                     postContainer,
-                    postMediaItemsCache.get(postContainer) || initialMediaItems
+                    initialMediaItems
                 );
                 const selectedMediaItems = await showImageSelectModal(mediaItems);
                 if (selectedMediaItems && selectedMediaItems.length > 0) {
@@ -403,7 +395,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
             if (!wasLongPress) {
                 const mediaItems = await resolvePostMediaItems(
                     postContainer,
-                    postMediaItemsCache.get(postContainer) || initialMediaItems
+                    initialMediaItems
                 );
                 await startDownload(mediaItems);
             }
@@ -416,7 +408,6 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
     }
 
     function injectDownloadButtons() {
-        let postsAdded = 0;
         const selectors = platform.getPostSelectors();
 
         for (const selector of selectors) {
@@ -439,8 +430,6 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
                 if (!inserted) {
                     post.appendChild(btn);
                 }
-
-                postsAdded++;
             });
         }
 
@@ -450,7 +439,6 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
     }
 
     function refreshDownloadButtons() {
-        postMediaItemsCache = new WeakMap();
         resolvedMediaItemsCache = new WeakMap();
 
         documentRef.querySelectorAll(".weibo-img-download-btn").forEach((btn) => {
