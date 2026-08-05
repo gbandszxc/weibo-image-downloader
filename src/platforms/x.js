@@ -145,6 +145,19 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return candidates.length > 0 ? candidates[0].url : null;
     }
 
+    function isVideoCoverImage(img) {
+        if (!img || typeof img.closest !== "function") {
+            return false;
+        }
+
+        if (img.closest('[data-testid="previewInterstitial"], [data-testid="videoComponent"], [data-testid="videoPlayer"]')) {
+            return true;
+        }
+
+        const alt = typeof img.alt === "string" ? img.alt.toLowerCase() : "";
+        return alt.includes("视频") || alt.includes("video");
+    }
+
     function findImagesInPost(container) {
         const images = [];
         const seen = new Set();
@@ -179,6 +192,10 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
 
                     const alt = img.alt || "";
                     if (alt.toLowerCase().includes("avatar") || alt.toLowerCase().includes("profile")) {
+                        return;
+                    }
+
+                    if (isVideoCoverImage(img)) {
                         return;
                     }
 
@@ -363,7 +380,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         }
 
         return !!postContainer.querySelector(
-            'img[src*="video_thumb"], img[src*="amplify_video_thumb"], img[src*="ext_tw_video_thumb"], a[href*="/video/"], video'
+            'img[src*="video_thumb"], img[src*="amplify_video_thumb"], img[src*="ext_tw_video_thumb"], a[href*="/video/"], video, [data-testid="previewInterstitial"]'
         );
     }
 

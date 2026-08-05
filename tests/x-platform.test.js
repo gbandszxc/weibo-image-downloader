@@ -180,6 +180,27 @@ test("video-enabled x platform includes regular videos when a direct source is a
     assert.equal(mediaItems[0].videoExt, ".mp4");
 });
 
+test("x platform skips video cover images inside previewInterstitial containers", () => {
+    const platform = createXPlatformForTests();
+
+    const post = createQueryContainer({
+        'article img[src*="twimg.com"]': [
+            {
+                src: "https://pbs.twimg.com/media/HO5QDQfbQAA3Rcq?format=jpg&name=360x360",
+                alt: "嵌入式视频",
+                closest(selector) {
+                    return selector.includes("previewInterstitial") ? {} : null;
+                }
+            }
+        ],
+        video: []
+    });
+
+    const mediaItems = platform.getDomMediaItems(post);
+
+    assert.equal(mediaItems.length, 0);
+});
+
 test("video-enabled x platform resolves highest bitrate video from TweetResultByRestId", async () => {
     const platform = createXPlatformWithFetch({
         configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
@@ -239,7 +260,7 @@ test("video-enabled x platform allows async resolution for video-only detail pos
     });
     const post = {
         querySelector(selector) {
-            if (selector === 'img[src*="video_thumb"], img[src*="amplify_video_thumb"], img[src*="ext_tw_video_thumb"], a[href*="/video/"], video') {
+            if (selector === 'img[src*="video_thumb"], img[src*="amplify_video_thumb"], img[src*="ext_tw_video_thumb"], a[href*="/video/"], video, [data-testid="previewInterstitial"]') {
                 return { src: "https://pbs.twimg.com/amplify_video_thumb/demo.jpg" };
             }
             return null;
