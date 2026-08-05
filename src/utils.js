@@ -333,8 +333,9 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
 
         let message = "";
         if (failedCount === 0) {
+            const allVideos = mediaItems.length > 0 && mediaItems.every((item) => item.kind === "video");
             message = jobs.length === mediaItems.length
-                ? `已下载 ${jobs.length} 张图片`
+                ? (allVideos ? `已下载 ${jobs.length} 个视频` : `已下载 ${jobs.length} 张图片`)
                 : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
         } else if (successCount === 0) {
             message = `下载失败，共 ${failedCount} 个文件未完成`;
