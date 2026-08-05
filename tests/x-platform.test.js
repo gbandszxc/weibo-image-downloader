@@ -243,7 +243,10 @@ test("video-enabled x platform resolves highest bitrate video from TweetResultBy
     });
 
     const mediaItems = await platform.resolvePostMediaItems({
-        querySelector() {
+        querySelector(selector) {
+            if (selector.includes("previewInterstitial")) {
+                return {};
+            }
             return null;
         }
     }, []);
@@ -251,6 +254,176 @@ test("video-enabled x platform resolves highest bitrate video from TweetResultBy
     assert.equal(mediaItems.length, 1);
     assert.equal(mediaItems[0].kind, "video");
     assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/demo/1080.mp4");
+});
+
+test("video-enabled x platform merges GraphQL videos with DOM photos for mixed posts", async () => {
+    const platform = createXPlatformWithFetch({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        response: {
+            data: {
+                tweetResult: {
+                    result: {
+                        legacy: {
+                            extended_entities: {
+                                media: [
+                                    {
+                                        id_str: "2084954783560146944",
+                                        type: "video",
+                                        video_info: {
+                                            variants: [
+                                                {
+                                                    bitrate: 832000,
+                                                    content_type: "video/mp4",
+                                                    url: "https://video.twimg.com/amplify_video/demo/832.mp4"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    const post = {
+        querySelector(selector) {
+            if (selector.includes("previewInterstitial")) {
+                return {};
+            }
+            return null;
+        }
+    };
+    const photoItem = {
+        id: "p1",
+        kind: "image",
+        label: "图片 1",
+        imageUrl: "https://pbs.twimg.com/media/PhotoOne?format=jpg&name=orig",
+        videoUrl: null,
+        imageExt: ".jpg",
+        videoExt: ".mov"
+    };
+
+    const mediaItems = await platform.resolvePostMediaItems(post, [photoItem]);
+
+    assert.equal(mediaItems.length, 2);
+    assert.equal(mediaItems[0].kind, "image");
+    assert.equal(mediaItems[1].kind, "video");
+    assert.equal(mediaItems[1].videoUrl, "https://video.twimg.com/amplify_video/demo/832.mp4");
+});
+
+test("video-enabled x platform resolves quoted photos when their DOM has not loaded", async () => {
+    const platform = createXPlatformWithFetch({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        response: {
+            data: {
+                tweetResult: {
+                    result: {
+                        legacy: {
+                            extended_entities: {
+                                media: [{
+                                    type: "video",
+                                    video_info: {
+                                        variants: [{
+                                            bitrate: 832000,
+                                            content_type: "video/mp4",
+                                            url: "https://video.twimg.com/amplify_video/demo/832.mp4"
+                                        }]
+                                    }
+                                }]
+                            }
+                        },
+                        quoted_status_result: {
+                            result: {
+                                legacy: {
+                                    extended_entities: {
+                                        media: [{
+                                            id_str: "2083542370659004416",
+                                            type: "photo",
+                                            media_url_https: "https://pbs.twimg.com/media/HOo6vz2a8AAtgUx.jpg"
+                                        }]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    const post = {
+        querySelector(selector) {
+            return selector.includes("previewInterstitial") ? {} : null;
+        }
+    };
+
+    const mediaItems = await platform.resolvePostMediaItems(post, []);
+
+    assert.equal(mediaItems.length, 2);
+    assert.equal(mediaItems[0].imageUrl, "https://pbs.twimg.com/media/HOo6vz2a8AAtgUx.jpg?name=orig");
+    assert.equal(mediaItems[1].videoUrl, "https://video.twimg.com/amplify_video/demo/832.mp4");
+});
+
+test("video-enabled x platform skips API fetch when DOM already has video items", async () => {
+    let fetchCalled = false;
+    const platform = createXPlatform({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        fetchRef: async () => {
+            fetchCalled = true;
+            throw new Error("fetch should not be called");
+        }
+    });
+    const post = {
+        querySelector() {
+            return {};
+        }
+    };
+    const videoItem = {
+        id: "v1",
+        kind: "video",
+        label: "视频 1",
+        imageUrl: null,
+        videoUrl: "https://video.twimg.com/amplify_video/demo/direct.mp4",
+        imageExt: ".jpg",
+        videoExt: ".mp4"
+    };
+
+    const mediaItems = await platform.resolvePostMediaItems(post, [videoItem]);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(fetchCalled, false);
+});
+
+test("x platform with video disabled resolves only DOM photos for mixed posts", async () => {
+    let fetchCalled = false;
+    const platform = createXPlatform({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: false },
+        fetchRef: async () => {
+            fetchCalled = true;
+            throw new Error("fetch should not be called");
+        }
+    });
+    const post = {
+        querySelector() {
+            return {};
+        }
+    };
+    const photoItem = {
+        id: "p1",
+        kind: "image",
+        label: "图片 1",
+        imageUrl: "https://pbs.twimg.com/media/PhotoOne?format=jpg&name=orig",
+        videoUrl: null,
+        imageExt: ".jpg",
+        videoExt: ".mov"
+    };
+
+    const mediaItems = await platform.resolvePostMediaItems(post, [photoItem]);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "image");
+    assert.equal(fetchCalled, false);
 });
 
 test("video-enabled x platform allows async resolution for video-only detail posts", () => {
@@ -269,6 +442,41 @@ test("video-enabled x platform allows async resolution for video-only detail pos
 
     assert.equal(platform.shouldResolveEmptyMediaItems(post), true);
     assert.equal(platform.getPostId(post), "2058971197417914571");
+});
+
+test("x platform uses the timestamp link instead of a quoted post link", () => {
+    const platform = createXPlatformForTests();
+    const quotedTime = {
+        closest() {
+            return null;
+        },
+        parentElement: {
+            querySelector() {
+                return { href: "https://x.com/XaiabP/status/2083542379030835397/photo/1" };
+            }
+        }
+    };
+    const mainTime = {
+        closest() {
+            return { href: "https://x.com/XaiabP/status/2084954812937117767" };
+        }
+    };
+    const post = {
+        querySelector(selector) {
+            return selector === "time" ? quotedTime : null;
+        },
+        querySelectorAll(selector) {
+            if (selector === "time") {
+                return [quotedTime, mainTime];
+            }
+            return [
+                { href: "https://x.com/XaiabP/status/2083542379030835397/photo/1" },
+                { href: "https://x.com/XaiabP/status/2084954812937117767" }
+            ];
+        }
+    };
+
+    assert.equal(platform.getPostId(post), "2084954812937117767");
 });
 
 test("video-enabled x platform does not inject placeholder buttons for plain detail posts", () => {

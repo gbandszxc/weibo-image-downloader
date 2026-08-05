@@ -1,6 +1,6 @@
 {
   "name": "weibo-image-downloader",
-  "version": "1.4.3",
+  "version": "1.4.7",
   "private": true,
   "type": "module",
   "scripts": {

@@ -334,9 +334,15 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         let message = "";
         if (failedCount === 0) {
             const allVideos = mediaItems.length > 0 && mediaItems.every((item) => item.kind === "video");
-            message = jobs.length === mediaItems.length
-                ? (allVideos ? `已下载 ${jobs.length} 个视频` : `已下载 ${jobs.length} 张图片`)
-                : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
+            const imageCount = jobs.filter((job) => job.type === "image").length;
+            const videoCount = jobs.filter((job) => job.type === "video").length;
+            if (jobs.length === mediaItems.length && imageCount > 0 && videoCount > 0) {
+                message = `已下载 ${imageCount} 张图片和 ${videoCount} 个视频`;
+            } else {
+                message = jobs.length === mediaItems.length
+                    ? (allVideos ? `已下载 ${jobs.length} 个视频` : `已下载 ${jobs.length} 张图片`)
+                    : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
+            }
         } else if (successCount === 0) {
             message = `下载失败，共 ${failedCount} 个文件未完成`;
         } else {

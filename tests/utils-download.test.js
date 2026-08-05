@@ -155,6 +155,30 @@ test("downloadMediaItems reports failures instead of opening fallback tabs", asy
     assert.deepEqual(toastMessages, ["下载失败，共 1 个文件未完成"]);
 });
 
+test("downloadMediaItems reports image and video counts separately", async () => {
+    const { utils, toastMessages } = createTestUtils({
+        gmDownload(details) {
+            queueMicrotask(details.onload);
+            return { abort() {} };
+        }
+    });
+
+    await utils.downloadMediaItems([
+        {
+            kind: "image",
+            imageUrl: "https://pbs.twimg.com/media/demo.jpg?name=orig",
+            imageExt: ".jpg"
+        },
+        {
+            kind: "video",
+            videoUrl: "https://video.twimg.com/amplify_video/demo.mp4",
+            videoExt: ".mp4"
+        }
+    ], "2084954812937117767");
+
+    assert.deepEqual(toastMessages, ["已下载 1 张图片和 1 个视频"]);
+});
+
 test("downloadImage uses GM_xmlhttpRequest blob fallback when direct download fails", async () => {
     const gmCalls = [];
     const xhrCalls = [];

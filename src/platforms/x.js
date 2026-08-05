@@ -305,19 +305,40 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return mediaItems;
     }
 
-    function resolvePostMediaItems(_postContainer, fallbackItems) {
-        if (!isVideoDownloadEnabled() || fallbackItems.length > 0) {
+    function resolvePostMediaItems(postContainer, fallbackItems) {
+        if (!isVideoDownloadEnabled()) {
             return fallbackItems;
         }
 
-        const statusId = getPostId(_postContainer);
+        const statusId = getPostId(postContainer);
         if (!statusId) {
             return fallbackItems;
         }
 
-        return getXMediaItemsById(statusId).then((mediaItems) =>
-            mediaItems.length > 0 ? mediaItems : fallbackItems
-        );
+        // DOM 已解析出视频/GIF 直链，无需再调接口
+        if (fallbackItems.some((item) => item.kind === "video" || item.kind === "gif")) {
+            return fallbackItems;
+        }
+
+        // 无视频迹象（封面/播放器）的帖子不需要接口
+        if (!shouldResolveEmptyMediaItems(postContainer)) {
+            return fallbackItems;
+        }
+
+        return getXMediaItemsById(statusId).then((mediaItems) => {
+            if (mediaItems.length === 0) {
+                return fallbackItems;
+            }
+
+            // 混合帖：保留 DOM 图片，附加接口解析出的视频/GIF
+            const existingKeys = new Set(
+                fallbackItems.map((item) => (item.videoUrl || item.imageUrl || "").split("?")[0])
+            );
+            const merged = fallbackItems.concat(
+                mediaItems.filter((item) => !existingKeys.has((item.videoUrl || item.imageUrl || "").split("?")[0]))
+            );
+            return merged;
+        });
     }
 
     function getPostSelectors() {
@@ -339,20 +360,29 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
     }
 
     function getPostId(postContainer) {
-        let postId;
-        const timeEl = postContainer.querySelector("time");
-        if (timeEl && timeEl.parentElement) {
-            const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
-            if (linkEl) {
-                const match = linkEl.href.match(/\/status\/(\d+)/);
-                if (match) {
-                    postId = match[1];
-                }
+        const timeElements = typeof postContainer.querySelectorAll === "function"
+            ? postContainer.querySelectorAll("time")
+            : [postContainer.querySelector("time")].filter(Boolean);
+
+        for (const timeEl of timeElements) {
+            const timeLink = typeof timeEl.closest === "function"
+                ? timeEl.closest('a[href*="/status/"]')
+                : null;
+            const match = timeLink?.href?.match(/\/status\/(\d+)/);
+            if (match) {
+                return match[1];
             }
         }
 
-        if (postId) {
-            return postId;
+        for (const timeEl of timeElements) {
+            if (!timeEl.parentElement) {
+                continue;
+            }
+            const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
+            const match = linkEl?.href?.match(/\/status\/(\d+)/);
+            if (match) {
+                return match[1];
+            }
         }
 
         const links = typeof postContainer.querySelectorAll === "function"
@@ -419,17 +449,25 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
     }
 
     function getXMediaItemsFromStatus(status) {
-        const media = status &&
-            status.data &&
-            status.data.tweetResult &&
-            status.data.tweetResult.result &&
-            status.data.tweetResult.result.legacy &&
-            status.data.tweetResult.result.legacy.extended_entities &&
-            Array.isArray(status.data.tweetResult.result.legacy.extended_entities.media)
-            ? status.data.tweetResult.result.legacy.extended_entities.media
-            : [];
+        const result = status?.data?.tweetResult?.result;
+        const media = result?.legacy?.extended_entities?.media || [];
+        const quotedMedia = result?.quoted_status_result?.result?.legacy?.extended_entities?.media || [];
 
-        return media.map((item, index) => {
+        const quotedPhotos = quotedMedia.map((item, index) => {
+            if (item?.type !== "photo") {
+                return null;
+            }
+
+            return createMediaItem({
+                id: item.id_str || `graphql-quoted-photo-${index + 1}`,
+                kind: "image",
+                label: `图片 ${index + 1}`,
+                url: getOriginalImageUrl(item.media_url_https),
+                fallbackExt: ".jpg"
+            });
+        }).filter(Boolean);
+
+        const videos = media.map((item, index) => {
             const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
             if (mediaType !== "video" && mediaType !== "animated_gif") {
                 return null;
@@ -448,6 +486,8 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 fallbackExt: ".mp4"
             });
         }).filter(Boolean);
+
+        return quotedPhotos.concat(videos);
     }
 
     async function getXMediaItemsById(tweetId) {

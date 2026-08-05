@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博/X图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.4.3
+// @version      1.4.7
 // @description  一键下载微博和X帖子中的所有图片为原图，可选开启视频下载
 // @author       gbandszxc
 // @match        https://weibo.com/*
@@ -973,17 +973,32 @@
       });
       return mediaItems;
     }
-    function resolvePostMediaItems(_postContainer, fallbackItems) {
-      if (!isVideoDownloadEnabled() || fallbackItems.length > 0) {
+    function resolvePostMediaItems(postContainer, fallbackItems) {
+      if (!isVideoDownloadEnabled()) {
         return fallbackItems;
       }
-      const statusId = getPostId(_postContainer);
+      const statusId = getPostId(postContainer);
       if (!statusId) {
         return fallbackItems;
       }
-      return getXMediaItemsById(statusId).then(
-        (mediaItems) => mediaItems.length > 0 ? mediaItems : fallbackItems
-      );
+      if (fallbackItems.some((item) => item.kind === "video" || item.kind === "gif")) {
+        return fallbackItems;
+      }
+      if (!shouldResolveEmptyMediaItems(postContainer)) {
+        return fallbackItems;
+      }
+      return getXMediaItemsById(statusId).then((mediaItems) => {
+        if (mediaItems.length === 0) {
+          return fallbackItems;
+        }
+        const existingKeys = new Set(
+          fallbackItems.map((item) => (item.videoUrl || item.imageUrl || "").split("?")[0])
+        );
+        const merged = fallbackItems.concat(
+          mediaItems.filter((item) => !existingKeys.has((item.videoUrl || item.imageUrl || "").split("?")[0]))
+        );
+        return merged;
+      });
     }
     function getPostSelectors() {
       return postSelectors;
@@ -1000,19 +1015,23 @@
       return !isMainTweet(post);
     }
     function getPostId(postContainer) {
-      let postId;
-      const timeEl = postContainer.querySelector("time");
-      if (timeEl && timeEl.parentElement) {
-        const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
-        if (linkEl) {
-          const match = linkEl.href.match(/\/status\/(\d+)/);
-          if (match) {
-            postId = match[1];
-          }
+      const timeElements = typeof postContainer.querySelectorAll === "function" ? postContainer.querySelectorAll("time") : [postContainer.querySelector("time")].filter(Boolean);
+      for (const timeEl of timeElements) {
+        const timeLink = typeof timeEl.closest === "function" ? timeEl.closest('a[href*="/status/"]') : null;
+        const match = timeLink?.href?.match(/\/status\/(\d+)/);
+        if (match) {
+          return match[1];
         }
       }
-      if (postId) {
-        return postId;
+      for (const timeEl of timeElements) {
+        if (!timeEl.parentElement) {
+          continue;
+        }
+        const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
+        const match = linkEl?.href?.match(/\/status\/(\d+)/);
+        if (match) {
+          return match[1];
+        }
       }
       const links = typeof postContainer.querySelectorAll === "function" ? postContainer.querySelectorAll('a[href*="/status/"]') : [];
       for (const link of links) {
@@ -1066,8 +1085,22 @@
       return response.json();
     }
     function getXMediaItemsFromStatus(status) {
-      const media = status && status.data && status.data.tweetResult && status.data.tweetResult.result && status.data.tweetResult.result.legacy && status.data.tweetResult.result.legacy.extended_entities && Array.isArray(status.data.tweetResult.result.legacy.extended_entities.media) ? status.data.tweetResult.result.legacy.extended_entities.media : [];
-      return media.map((item, index) => {
+      const result = status?.data?.tweetResult?.result;
+      const media = result?.legacy?.extended_entities?.media || [];
+      const quotedMedia = result?.quoted_status_result?.result?.legacy?.extended_entities?.media || [];
+      const quotedPhotos = quotedMedia.map((item, index) => {
+        if (item?.type !== "photo") {
+          return null;
+        }
+        return createMediaItem({
+          id: item.id_str || `graphql-quoted-photo-${index + 1}`,
+          kind: "image",
+          label: `图片 ${index + 1}`,
+          url: getOriginalImageUrl(item.media_url_https),
+          fallbackExt: ".jpg"
+        });
+      }).filter(Boolean);
+      const videos = media.map((item, index) => {
         const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
         if (mediaType !== "video" && mediaType !== "animated_gif") {
           return null;
@@ -1084,6 +1117,7 @@
           fallbackExt: ".mp4"
         });
       }).filter(Boolean);
+      return quotedPhotos.concat(videos);
     }
     async function getXMediaItemsById(tweetId) {
       try {
@@ -1439,7 +1473,13 @@
       let message = "";
       if (failedCount === 0) {
         const allVideos = mediaItems.length > 0 && mediaItems.every((item) => item.kind === "video");
-        message = jobs.length === mediaItems.length ? allVideos ? `已下载 ${jobs.length} 个视频` : `已下载 ${jobs.length} 张图片` : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
+        const imageCount = jobs.filter((job) => job.type === "image").length;
+        const videoCount = jobs.filter((job) => job.type === "video").length;
+        if (jobs.length === mediaItems.length && imageCount > 0 && videoCount > 0) {
+          message = `已下载 ${imageCount} 张图片和 ${videoCount} 个视频`;
+        } else {
+          message = jobs.length === mediaItems.length ? allVideos ? `已下载 ${jobs.length} 个视频` : `已下载 ${jobs.length} 张图片` : `已下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件`;
+        }
       } else if (successCount === 0) {
         message = `下载失败，共 ${failedCount} 个文件未完成`;
       } else {
