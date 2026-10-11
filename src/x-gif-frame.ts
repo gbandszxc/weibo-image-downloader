@@ -1,8 +1,28 @@
 import * as gifenc from "gifenc";
+import type { GifColor } from "gifenc";
 
-const { GIFEncoder } = gifenc.GIFEncoder ? gifenc : gifenc.default;
+// gifenc 的 CJS 入口把 API 挂在 default 上，运行时按真值选择来源；类型层恒真（TS2774），故条件断言为 unknown。
+const { GIFEncoder } = (gifenc.GIFEncoder as unknown) ? gifenc : gifenc.default;
 
-export function getChangedFrame(index, palette, width, height, previousPixels) {
+/** 单帧图像数据；delay 由调用方在帧间累加后一并交给编码器。 */
+export interface GifFrame {
+    index: Uint8Array;
+    palette: GifColor[];
+    width: number;
+    height: number;
+    left: number;
+    top: number;
+    transparentIndex: number;
+    delay?: number;
+}
+
+/** 帧间比较结果：pixels 为整帧打包像素，frame 为裁剪出的变化区域（无变化时为 null）。 */
+export interface GifChangedFrame {
+    pixels: Uint32Array;
+    frame: GifFrame | null;
+}
+
+export function getChangedFrame(index: Uint8Array, palette: GifColor[], width: number, height: number, previousPixels: Uint32Array | null): GifChangedFrame {
     const colors = palette.map(([r, g, b]) => r | g << 8 | b << 16);
     const pixels = new Uint32Array(index.length);
     for (let i = 0; i < index.length; i++) {
@@ -39,7 +59,7 @@ export function getChangedFrame(index, palette, width, height, previousPixels) {
     for (let y = 0; y < frameHeight; y++) {
         for (let x = 0; x < frameWidth; x++) {
             const source = (top + y) * width + left + x;
-            cropped[y * frameWidth + x] = transparentIndex >= 0 && pixels[source] === previousPixels[source]
+            cropped[y * frameWidth + x] = transparentIndex >= 0 && pixels[source] === previousPixels![source]
                 ? transparentIndex : index[source];
         }
     }
@@ -49,7 +69,7 @@ export function getChangedFrame(index, palette, width, height, previousPixels) {
     };
 }
 
-export function encodeGifFrame(frame, first) {
+export function encodeGifFrame(frame: GifFrame, first: boolean): Uint8Array {
     const gif = GIFEncoder({ auto: false });
     if (first) gif.writeHeader();
     gif.writeFrame(frame.index, frame.width, frame.height, {

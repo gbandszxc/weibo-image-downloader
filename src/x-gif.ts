@@ -1,13 +1,24 @@
-import { getChangedFrame, encodeGifFrame } from "./x-gif-frame.js";
-import { prepareGifFrame } from "./x-gif-worker.js";
-import { acquireGifWorkers, yieldForGifUi } from "./x-gif-workers.js";
+import { getChangedFrame, encodeGifFrame } from "./x-gif-frame.ts";
+import type { GifFrame } from "./x-gif-frame.ts";
+import { prepareGifFrame } from "./x-gif-worker.ts";
+import type { GifPrepareResult } from "./x-gif-worker.ts";
+import { acquireGifWorkers, yieldForGifUi } from "./x-gif-workers.ts";
+import type { AcquiredGifWorkers, GifWindowLike } from "./x-gif-workers.ts";
+
+/** esbuild 插件（scripts/gif-worker.mjs）在打包时把该占位符替换为内联 Worker 源码字符串。 */
+declare const __X_GIF_WORKER_SOURCE__: string | undefined;
 
 const workerSource = typeof __X_GIF_WORKER_SOURCE__ === "string" ? __X_GIF_WORKER_SOURCE__ : "";
 
-function waitForVideo(video, eventName, action) {
+interface QueuedGifFrame {
+    result: Promise<GifPrepareResult>;
+    delay: number;
+}
+
+function waitForVideo(video: HTMLVideoElement, eventName: string, action: () => void): Promise<void> {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => finish(new Error("视频解码超时")), 30000);
-        function finish(error) {
+        function finish(error?: unknown): void {
             clearTimeout(timer);
             video.removeEventListener(eventName, onReady);
             video.removeEventListener("error", onError);
@@ -17,10 +28,10 @@ function waitForVideo(video, eventName, action) {
                 resolve();
             }
         }
-        function onReady() {
+        function onReady(): void {
             finish();
         }
-        function onError() {
+        function onError(): void {
             finish(new Error("浏览器无法解码此 GIF 视频源"));
         }
         video.addEventListener(eventName, onReady);
@@ -33,13 +44,13 @@ function waitForVideo(video, eventName, action) {
     });
 }
 
-export async function convertXVideoToGif(blob, windowRef) {
+export async function convertXVideoToGif(blob: Blob, windowRef: GifWindowLike): Promise<Blob> {
     const video = windowRef.document.createElement("video");
     const sourceUrl = windowRef.URL.createObjectURL(blob);
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
-    let workers = null;
+    let workers: AcquiredGifWorkers | null = null;
 
     try {
         await waitForVideo(video, "loadeddata", () => {
@@ -61,8 +72,9 @@ export async function convertXVideoToGif(blob, windowRef) {
             throw new Error("浏览器不支持 Canvas 2D");
         }
 
-        const encodedParts = [];
-        const encoding = [];
+        // gifenc 的字节缓冲均为普通 ArrayBuffer，故元素类型可收窄为 <ArrayBuffer> 以满足 BlobPart。
+        const encodedParts: Uint8Array<ArrayBuffer>[] = [];
+        const encoding: Promise<{ bytes: Uint8Array }>[] = [];
         let firstFrame = true;
         // shortcut: 按 20 FPS 采样，若需要保留更高帧率则改用逐帧解码。
         const frameDelay = 50;
@@ -71,22 +83,22 @@ export async function convertXVideoToGif(blob, windowRef) {
         workers = acquireGifWorkers(windowRef, workerSource);
         const captureInWorker = workers && typeof windowRef.createImageBitmap === "function" &&
             typeof windowRef.OffscreenCanvas === "function";
-        const queuedFrames = [];
-        let previousRaw = null;
-        let previousPixels = null;
-        let pendingFrame = null;
+        const queuedFrames: QueuedGifFrame[] = [];
+        let previousRaw: Uint32Array | null = null;
+        let previousPixels: Uint32Array | null = null;
+        let pendingFrame: (GifFrame & { delay: number }) | null = null;
 
-        async function writeFrame(frame) {
+        async function writeFrame(frame: GifFrame & { delay: number }): Promise<void> {
             if (!workers) await yieldForGifUi(windowRef);
             const result = workers ? workers.encode(frame, firstFrame) : Promise.resolve({ bytes: encodeGifFrame(frame, firstFrame) });
             firstFrame = false;
             result.catch(() => {});
             encoding.push(result);
-            if (encoding.length > 2) encodedParts.push((await encoding.shift()).bytes);
+            if (encoding.length > 2) encodedParts.push((await encoding.shift()!).bytes as Uint8Array<ArrayBuffer>);
         }
 
-        async function consumeFrame() {
-            const { result, delay } = queuedFrames.shift();
+        async function consumeFrame(): Promise<void> {
+            const { result, delay } = queuedFrames.shift()!;
             const { index, palette } = await result;
             if (!workers) await yieldForGifUi(windowRef);
             const changed = workers
@@ -99,13 +111,13 @@ export async function convertXVideoToGif(blob, windowRef) {
             }
             let remaining = delay;
             // GIF 延迟字段为 16 位，长时间静止时拆分，避免溢出加速播放。
-            while (pendingFrame.delay + remaining > 655350) {
-                remaining -= 655350 - pendingFrame.delay;
-                pendingFrame.delay = 655350;
-                await writeFrame(pendingFrame);
-                pendingFrame.delay = 0;
+            while (pendingFrame!.delay + remaining > 655350) {
+                remaining -= 655350 - pendingFrame!.delay;
+                pendingFrame!.delay = 655350;
+                await writeFrame(pendingFrame!);
+                pendingFrame!.delay = 0;
             }
-            pendingFrame.delay += remaining;
+            pendingFrame!.delay += remaining;
         }
 
         for (let frame = 0; frame < frameCount; frame++) {
@@ -119,9 +131,9 @@ export async function convertXVideoToGif(blob, windowRef) {
                 context.drawImage(video, 0, 0, width, height);
                 return context.getImageData(0, 0, width, height).data;
             };
-            let data;
+            let data: ImageData["data"];
             if (captureInWorker) {
-                ({ pixels: data } = await workers.capture(video, width, height, readFrame));
+                ({ pixels: data } = await workers!.capture(video, width, height, readFrame));
             } else {
                 // 大帧绘制与像素读取分开执行，让浏览器先处理输入和页面绘制。
                 await yieldForGifUi(windowRef);
@@ -134,7 +146,7 @@ export async function convertXVideoToGif(blob, windowRef) {
             let identical = !!previousRaw;
             if (identical) {
                 for (let i = 0; i < raw.length; i++) {
-                    if (raw[i] !== previousRaw[i]) { identical = false; break; }
+                    if (raw[i] !== previousRaw![i]) { identical = false; break; }
                 }
             }
             if (identical) {
@@ -155,8 +167,8 @@ export async function convertXVideoToGif(blob, windowRef) {
             }
         }
         while (queuedFrames.length) await consumeFrame();
-        await writeFrame(pendingFrame);
-        while (encoding.length) encodedParts.push((await encoding.shift()).bytes);
+        await writeFrame(pendingFrame!);
+        while (encoding.length) encodedParts.push((await encoding.shift()!).bytes as Uint8Array<ArrayBuffer>);
         return new Blob([...encodedParts, new Uint8Array([0x3b])], { type: "image/gif" });
     } finally {
         workers?.release();
