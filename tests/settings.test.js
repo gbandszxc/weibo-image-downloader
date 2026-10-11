@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { CONFIG } from "../src/config.js";
+import { CONFIG } from "../src/config.ts";
 
 test("X GIF menu uses the persisted setting and saves toggles immediately", async () => {
     const { outputFiles } = await build({
-        entryPoints: [fileURLToPath(new URL("../src/main.js", import.meta.url))],
+        entryPoints: [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
         bundle: true,
         write: false,
         format: "iife",

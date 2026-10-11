@@ -14,7 +14,7 @@ const version = packageJson.version;
 const distRelativePath = "dist/weibo-image-downloader.user.js";
 const rawDistUrl = `https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/${distRelativePath}`;
 
-const entryFile = path.join(projectRoot, "src", "main.js");
+const entryFile = path.join(projectRoot, "src", "main.ts");
 const outputFile = path.join(projectRoot, distRelativePath);
 const isWatchMode = process.argv.includes("--watch");
 

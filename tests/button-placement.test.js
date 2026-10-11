@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createWeiboPlatform } from "../src/platforms/weibo.js";
-import { createXPlatform } from "../src/platforms/x.js";
+import { createWeiboPlatform } from "../src/platforms/weibo.ts";
+import { createXPlatform } from "../src/platforms/x.ts";
 
 function createWeiboPlatformForLocation({ hostname, pathname = "/" }) {
     return createWeiboPlatform({

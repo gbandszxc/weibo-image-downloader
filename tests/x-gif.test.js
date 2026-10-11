@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { convertXVideoToGif } from "../src/x-gif.js";
+import { convertXVideoToGif } from "../src/x-gif.ts";
 import { createGifVideoMock } from "./helpers/gif-video-mock.js";
 import { GifReader } from "omggif";
 

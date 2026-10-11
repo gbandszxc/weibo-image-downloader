@@ -1,7 +1,8 @@
 import cssText from "./style.css";
-import { CONFIG } from "./config.js";
-import { createUtils } from "./utils.js";
-import { createUi } from "./ui.js";
+import { CONFIG } from "./config.ts";
+import { createUtils } from "./utils.ts";
+import { createUi } from "./ui.ts";
+import type { UiController } from "./ui.ts";
 
 const styleId = "weibo-image-downloader-style";
 const runtimeConfig = {
@@ -14,7 +15,7 @@ const runtimeConfig = {
         : CONFIG.X_GIF_AUTO_CONVERT
 };
 
-function injectStyles() {
+function injectStyles(): void {
     if (document.getElementById(styleId)) {
         return;
     }
@@ -34,7 +35,7 @@ function injectStyles() {
     document.head.appendChild(style);
 }
 
-let ui;
+let ui!: UiController;
 const utils = createUtils({
     config: runtimeConfig,
     windowRef: window,
@@ -58,7 +59,7 @@ ui = createUi({
     addStyle: injectStyles
 });
 
-function init() {
+function init(): void {
     injectStyles();
     ui.ensureImageSelectModalStyles();
 
@@ -66,7 +67,7 @@ function init() {
         ui.injectDownloadButtons();
     }, 2000);
 
-    let injectTimer = null;
+    let injectTimer: ReturnType<typeof setTimeout> | null = null;
     const observer = new MutationObserver(() => {
         if (injectTimer) {
             return;
@@ -98,14 +99,14 @@ if (document.readyState === "loading") {
 }
 
 if (typeof GM_registerMenuCommand === "function") {
-    let videoDownloadMenuId = null;
+    let videoDownloadMenuId: number | null = null;
     let videoDownloadMenuRegistered = false;
 
-    function getVideoDownloadMenuText() {
+    function getVideoDownloadMenuText(): string {
         return `视频下载：[${runtimeConfig.ENABLE_VIDEO_DOWNLOAD ? "开启" : "关闭"}]`;
     }
 
-    function registerVideoDownloadMenu() {
+    function registerVideoDownloadMenu(): void {
         if (videoDownloadMenuRegistered) {
             if (videoDownloadMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
                 return;
@@ -135,9 +136,9 @@ if (typeof GM_registerMenuCommand === "function") {
 
     registerVideoDownloadMenu();
 
-    let xGifMenuId = null;
+    let xGifMenuId: number | null = null;
     let xGifMenuRegistered = false;
-    function registerXGifMenu() {
+    function registerXGifMenu(): void {
         if (xGifMenuRegistered) {
             if (xGifMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
                 return;

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { CONFIG } from "../src/config.js";
-import { createUtils } from "../src/utils.js";
+import { CONFIG } from "../src/config.ts";
+import { createUtils } from "../src/utils.ts";
 import { createGifVideoMock } from "./helpers/gif-video-mock.js";
 
 function createTestUtils({

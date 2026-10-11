@@ -5,13 +5,13 @@ import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
 import { GifReader } from "omggif";
 import { buildGifWorker, gifWorkerPlugin } from "../scripts/gif-worker.mjs";
-import { acquireGifWorkers } from "../src/x-gif-workers.js";
-import { convertXVideoToGif } from "../src/x-gif.js";
+import { acquireGifWorkers } from "../src/x-gif-workers.ts";
+import { convertXVideoToGif } from "../src/x-gif.ts";
 import { createGifVideoMock } from "./helpers/gif-video-mock.js";
 
 const workerSource = (await buildGifWorker()).outputFiles[0].text;
 const converterSource = (await build({
-    entryPoints: ["src/x-gif.js"], bundle: true, format: "iife", globalName: "gifTest",
+    entryPoints: ["src/x-gif.ts"], bundle: true, format: "iife", globalName: "gifTest",
     platform: "browser", target: "es2020", write: false, plugins: [gifWorkerPlugin()]
 })).outputFiles[0].text;
 const context = { Blob, setTimeout, clearTimeout, Uint8Array, Uint8ClampedArray, Uint32Array };

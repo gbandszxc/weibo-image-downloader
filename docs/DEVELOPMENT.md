@@ -7,14 +7,17 @@
 ```bash
 bun install
 bun run build
+bun run typecheck
 bun run test
 bun run test:placement
 bun run verify:dist
 ```
 
+- `bun run typecheck` 使用 `tsc --noEmit` 校验类型；`bun run test` 通过 `node --experimental-strip-types` 直接运行，无需预编译
+
 ## 目录与测试结构
 
-- 源码位于 `src/`
+- 源码位于 `src/`，全部为 TypeScript；测试（`tests/*.js`）通过 `node --experimental-strip-types` 直接导入 `.ts` 源码
 - 平台实现位于 `src/platforms/`，共享流程通过统一适配器调用
 - `bun run test:placement` 可单独校验微博/X 各页面按钮位置是否回归
 - `tests/fixtures/x-gif-dom.json` 保存了通过 chrome-devtools 提取的 X GIF 示例详情页及回复媒体结构；`tests/x-platform.test.js` 基于该结构 mock 识别流程，`tests/x-gif.test.js`、`tests/x-gif-workers.test.js` 和 `tests/utils-download.test.js` 无网络回归转换产物、真实 Worker 的帧序与失败回退、下载开关和资源清理。X 更新结构时可替换 fixture 并执行 `bun run test`

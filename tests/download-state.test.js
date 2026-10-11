@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
-import { CONFIG } from "../src/config.js";
-import { createUi } from "../src/ui.js";
+import { CONFIG } from "../src/config.ts";
+import { createUi } from "../src/ui.ts";
 
 function deferred() {
     let resolve;

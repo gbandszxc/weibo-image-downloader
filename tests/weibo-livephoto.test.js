@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { CONFIG } from "../src/config.js";
-import { createUtils } from "../src/utils.js";
-import { createUi } from "../src/ui.js";
-import { createWeiboPlatform } from "../src/platforms/weibo.js";
+import { CONFIG } from "../src/config.ts";
+import { createUtils } from "../src/utils.ts";
+import { createUi } from "../src/ui.ts";
+import { createWeiboPlatform } from "../src/platforms/weibo.ts";
 
 function createUtilsForWeibo() {
     return createUtils({
