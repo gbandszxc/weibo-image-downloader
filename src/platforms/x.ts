@@ -1,4 +1,89 @@
-export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFileExtensionFromUrl }) {
+export type XMediaKind = "image" | "video" | "gif";
+
+export type XMediaItem = {
+    id: string;
+    kind: XMediaKind;
+    label: string;
+    imageUrl: string | null;
+    videoUrl: string | null;
+    imageExt: string;
+    videoExt: string;
+};
+
+export type XMediaVariant = {
+    bitrate?: number | string;
+    content_type?: string;
+    url?: string;
+};
+
+export type XMediaEntity = {
+    id_str?: string;
+    type?: string;
+    media_url_https?: string;
+    video_info?: {
+        variants?: XMediaVariant[];
+    };
+};
+
+export type XTweetResult = {
+    legacy?: {
+        extended_entities?: {
+            media?: XMediaEntity[];
+        };
+    };
+    quoted_status_result?: {
+        result?: XTweetResult;
+    };
+};
+
+export type XStatus = {
+    data?: {
+        tweetResult?: {
+            result?: XTweetResult;
+        };
+    };
+};
+
+export type XPlatformWindowRef = {
+    document?: Document;
+    location: Location;
+};
+
+export type XPlatformConfig = {
+    ENABLE_VIDEO_DOWNLOAD?: boolean;
+};
+
+export type XPlatformDeps = {
+    config?: XPlatformConfig;
+    windowRef: XPlatformWindowRef;
+    fetchRef?: typeof globalThis.fetch;
+    log: (...args: unknown[]) => void;
+    getFileExtensionFromUrl: (url: string | null | undefined, fallback?: string) => string;
+};
+
+export type XPlatform = {
+    id: string;
+    displayName: string;
+    isSearchPage: () => boolean;
+    isAvatarImage: () => boolean;
+    getOriginalImageUrl: (url: unknown) => string | null;
+    getXOriginalImageUrl: (url: unknown) => string | null;
+    getDomMediaItems: (container: Element) => XMediaItem[];
+    findImagesInPost: (container: Element) => HTMLImageElement[];
+    getBestXVideoVariant: (variants?: XMediaVariant[]) => string | null;
+    getXMediaItemsFromStatus: (status: XStatus | null) => XMediaItem[];
+    getXMediaItemsById: (tweetId: string) => Promise<XMediaItem[]>;
+    resolvePostMediaItems: (postContainer: Element, fallbackItems: XMediaItem[]) => XMediaItem[] | Promise<XMediaItem[]>;
+    getPostSelectors: () => string[];
+    shouldSkipPost: (post: Element) => boolean;
+    shouldResolveEmptyMediaItems: (postContainer: Element) => boolean;
+    getPostId: (postContainer: Element) => string;
+    insertDownloadButton: (options: { post: Element; btn: HTMLElement }) => boolean;
+    afterInjectDownloadButtons: () => void;
+    initObservers: () => void;
+};
+
+export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFileExtensionFromUrl }: XPlatformDeps): XPlatform {
     const imageSelectors = ['article img[src*="twimg.com"]'];
     const postSelectors = ['article[data-testid="tweet"]'];
     const tweetResultOperationId = "SgZWKwvBiOKrSC0QeOGvXw";
@@ -47,7 +132,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         withArticleSummaryText: true,
         withArticleVoiceOver: true
     };
-    function getOriginalImageUrl(url) {
+    function getOriginalImageUrl(url: unknown): string | null {
         if (!url || typeof url !== "string") {
             return null;
         }
@@ -77,11 +162,11 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         }
     }
 
-    function isPhotoImageUrl(url) {
+    function isPhotoImageUrl(url: string): boolean {
         return typeof url === "string" && url.includes("pbs.twimg.com/media/");
     }
 
-    function getVideoSourceUrl(video) {
+    function getVideoSourceUrl(video: HTMLVideoElement): string | null {
         if (!video) {
             return null;
         }
@@ -92,7 +177,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         }
 
         if (typeof video.querySelectorAll === "function") {
-            const sources = video.querySelectorAll("source");
+            const sources = video.querySelectorAll<HTMLSourceElement>("source");
             for (const source of sources) {
                 const src = source?.src;
                 if (typeof src === "string" && src.startsWith("http")) {
@@ -104,7 +189,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return null;
     }
 
-    function getVideoMediaContainer(node) {
+    function getVideoMediaContainer(node: Element): Element | null {
         if (!node || typeof node.closest !== "function") {
             return null;
         }
@@ -114,17 +199,17 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             node.closest("[data-testid]");
     }
 
-    function isGifVideo(video) {
+    function isGifVideo(video: HTMLVideoElement): boolean {
         const container = getVideoMediaContainer(video);
         const text = container?.textContent || "";
         return /\bGIF\b/i.test(text);
     }
 
-    function isVideoDownloadEnabled() {
+    function isVideoDownloadEnabled(): boolean {
         return !!config.ENABLE_VIDEO_DOWNLOAD;
     }
 
-    function getCookieValue(name) {
+    function getCookieValue(name: string): string {
         const cookie = windowRef.document && windowRef.document.cookie;
         if (!cookie || typeof cookie !== "string") {
             return "";
@@ -134,7 +219,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return match ? decodeURIComponent(match[1]) : "";
     }
 
-    function getBestXVideoVariant(variants) {
+    function getBestXVideoVariant(variants?: XMediaVariant[]): string | null {
         const candidates = (Array.isArray(variants) ? variants : [])
             .filter((variant) => variant &&
                 variant.content_type === "video/mp4" &&
@@ -142,10 +227,10 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 variant.url)
             .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0));
 
-        return candidates.length > 0 ? candidates[0].url : null;
+        return candidates.length > 0 ? candidates[0].url! : null;
     }
 
-    function isVideoCoverImage(img) {
+    function isVideoCoverImage(img: HTMLImageElement): boolean {
         if (!img || typeof img.closest !== "function") {
             return false;
         }
@@ -158,13 +243,13 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return alt.includes("视频") || alt.includes("video");
     }
 
-    function findImagesInPost(container) {
-        const images = [];
-        const seen = new Set();
+    function findImagesInPost(container: Element): HTMLImageElement[] {
+        const images: HTMLImageElement[] = [];
+        const seen = new Set<string>();
 
         for (const selector of imageSelectors) {
             try {
-                const elements = container.querySelectorAll(selector);
+                const elements = container.querySelectorAll<HTMLImageElement>(selector);
                 elements.forEach((img) => {
                     const src = img.src;
                     if (!src || typeof src !== "string") {
@@ -202,14 +287,20 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                     images.push(img);
                 });
             } catch (error) {
-                log("X 图片选择器执行失败:", error.message);
+                log("X 图片选择器执行失败:", (error as Error).message);
             }
         }
 
         return images;
     }
 
-    function createMediaItem({ id, kind, label, url, fallbackExt }) {
+    function createMediaItem({ id, kind, label, url, fallbackExt }: {
+        id: string;
+        kind: XMediaKind;
+        label: string;
+        url: string | null;
+        fallbackExt: string;
+    }): XMediaItem | null {
         if (!url) {
             return null;
         }
@@ -237,9 +328,9 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         };
     }
 
-    function getDomMediaItems(container) {
-        const mediaItems = [];
-        const seen = new Set();
+    function getDomMediaItems(container: Element): XMediaItem[] {
+        const mediaItems: XMediaItem[] = [];
+        const seen = new Set<string>();
 
         const photoImages = findImagesInPost(container);
         photoImages.forEach((img) => {
@@ -270,7 +361,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             return mediaItems;
         }
 
-        const videos = container.querySelectorAll("video");
+        const videos = container.querySelectorAll<HTMLVideoElement>("video");
         videos.forEach((video) => {
             const isGif = isGifVideo(video);
             if (!isGif && !isVideoDownloadEnabled()) {
@@ -307,7 +398,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
 
     // DOM 与接口返回的同一张图片 URL 形态不同（/media/abc?format=jpg 与 /media/abc.jpg），
     // 按去参后的路径（扩展名可省略）归一化，避免混合帖把同一张图下载两次。
-    function getMediaUrlKey(url) {
+    function getMediaUrlKey(url: string | null): string {
         const base = (url || "").split("?")[0];
         const match = base.match(/^(https:\/\/pbs\.twimg\.com\/media\/[^/?]+?)(?:\.[a-zA-Z0-9]+)?$/);
         return match ? match[1] : base;
@@ -315,7 +406,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
 
     // 媒体预览页（/status/:id/photo|video/:n）打开时，右栏主推文渲染在 #layers 内，
     // 媒体本体在预览左栏、不在推文 DOM 子树里，按 URL 匹配出正在查看的这条推文走接口解析。
-    function isMediaViewerMainArticle(postContainer) {
+    function isMediaViewerMainArticle(postContainer: Element): boolean {
         if (!postContainer || typeof postContainer.closest !== "function") {
             return false;
         }
@@ -333,7 +424,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return new RegExp(`/status/${statusId}/(?:photo|video)/\\d+`).test(pathname || "");
     }
 
-    function resolvePostMediaItems(postContainer, fallbackItems) {
+    function resolvePostMediaItems(postContainer: Element, fallbackItems: XMediaItem[]): XMediaItem[] | Promise<XMediaItem[]> {
         const isViewerMainArticle = isMediaViewerMainArticle(postContainer);
         if (!isVideoDownloadEnabled() && !isViewerMainArticle) {
             return fallbackItems;
@@ -356,7 +447,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 return fallbackItems;
             }
 
-            const apiByUrl = new Map(
+            const apiByUrl = new Map<string, XMediaItem>(
                 mediaItems.map((item) => [getMediaUrlKey(item.videoUrl || item.imageUrl), item])
             );
 
@@ -389,11 +480,11 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         });
     }
 
-    function getPostSelectors() {
+    function getPostSelectors(): string[] {
         return postSelectors;
     }
 
-    function isMainTweet(container) {
+    function isMainTweet(container: Element): boolean {
         const article = container.closest('article[data-testid="tweet"]');
         if (!article) {
             return false;
@@ -403,18 +494,18 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return timeEl !== null;
     }
 
-    function shouldSkipPost(post) {
+    function shouldSkipPost(post: Element): boolean {
         return !isMainTweet(post);
     }
 
-    function getPostId(postContainer) {
-        const timeElements = typeof postContainer.querySelectorAll === "function"
+    function getPostId(postContainer: Element): string {
+        const timeElements: Iterable<Element> = typeof postContainer.querySelectorAll === "function"
             ? postContainer.querySelectorAll("time")
-            : [postContainer.querySelector("time")].filter(Boolean);
+            : [postContainer.querySelector("time")].filter(Boolean) as Element[];
 
         for (const timeEl of timeElements) {
             const timeLink = typeof timeEl.closest === "function"
-                ? timeEl.closest('a[href*="/status/"]')
+                ? timeEl.closest<HTMLAnchorElement>('a[href*="/status/"]')
                 : null;
             const match = timeLink?.href?.match(/\/status\/(\d+)/);
             if (match) {
@@ -426,7 +517,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             if (!timeEl.parentElement) {
                 continue;
             }
-            const linkEl = timeEl.parentElement.querySelector('a[href*="/status/"]');
+            const linkEl = timeEl.parentElement.querySelector<HTMLAnchorElement>('a[href*="/status/"]');
             const match = linkEl?.href?.match(/\/status\/(\d+)/);
             if (match) {
                 return match[1];
@@ -434,7 +525,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         }
 
         const links = typeof postContainer.querySelectorAll === "function"
-            ? postContainer.querySelectorAll('a[href*="/status/"]')
+            ? postContainer.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]')
             : [];
         for (const link of links) {
             const match = link.href && link.href.match(/\/status\/(\d+)/);
@@ -448,7 +539,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return currentMatch ? currentMatch[1] : `x_${Date.now()}`;
     }
 
-    function shouldResolveEmptyMediaItems(postContainer) {
+    function shouldResolveEmptyMediaItems(postContainer: Element): boolean {
         if (!/^\d+$/.test(getPostId(postContainer))) {
             return false;
         }
@@ -471,7 +562,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         );
     }
 
-    function buildTweetResultUrl(tweetId) {
+    function buildTweetResultUrl(tweetId: string): string {
         const variables = {
             tweetId,
             includePromotedContent: true,
@@ -482,7 +573,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return `/i/api/graphql/${tweetResultOperationId}/TweetResultByRestId?variables=${encodeURIComponent(JSON.stringify(variables))}&features=${encodeURIComponent(JSON.stringify(tweetResultFeatures))}&fieldToggles=${encodeURIComponent(JSON.stringify(tweetResultFieldToggles))}`;
     }
 
-    async function fetchXStatus(tweetId) {
+    async function fetchXStatus(tweetId: string): Promise<XStatus | null> {
         if (typeof fetchRef !== "function") {
             return null;
         }
@@ -505,7 +596,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return response.json();
     }
 
-    function getXMediaItemsFromStatus(status) {
+    function getXMediaItemsFromStatus(status: XStatus | null): XMediaItem[] {
         const result = status?.data?.tweetResult?.result;
         const media = result?.legacy?.extended_entities?.media || [];
         const quotedMedia = result?.quoted_status_result?.result?.legacy?.extended_entities?.media || [];
@@ -519,7 +610,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 url: getOriginalImageUrl(item.media_url_https),
                 fallbackExt: ".jpg"
             });
-        }).filter(Boolean);
+        }).filter(Boolean) as XMediaItem[];
 
         const quotedPhotos = quotedMedia.map((item, index) => {
             if (item?.type !== "photo") {
@@ -533,7 +624,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 url: getOriginalImageUrl(item.media_url_https),
                 fallbackExt: ".jpg"
             });
-        }).filter(Boolean);
+        }).filter(Boolean) as XMediaItem[];
 
         const videos = media.map((item, index) => {
             const mediaType = typeof item.type === "string" ? item.type.toLowerCase() : "";
@@ -553,22 +644,22 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 url,
                 fallbackExt: ".mp4"
             });
-        }).filter(Boolean);
+        }).filter(Boolean) as XMediaItem[];
 
         return ownPhotos.concat(quotedPhotos, videos);
     }
 
-    async function getXMediaItemsById(tweetId) {
+    async function getXMediaItemsById(tweetId: string): Promise<XMediaItem[]> {
         try {
             const status = await fetchXStatus(tweetId);
             return getXMediaItemsFromStatus(status);
         } catch (error) {
-            log("X 接口解析失败:", error.message);
+            log("X 接口解析失败:", (error as Error).message);
             return [];
         }
     }
 
-    function insertDownloadButton({ post, btn }) {
+    function insertDownloadButton({ post, btn }: { post: Element; btn: HTMLElement }): boolean {
         const usernameEl = post.querySelector('[data-testid="User-Name"]');
         if (usernameEl) {
             const parent = usernameEl.parentElement;
