@@ -2768,10 +2768,11 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     patched.set(jpeg.subarray(2), 2 + minimal.length);
     return patched;
   }
-  var MPF_SEGMENT_LENGTH = 2 + 2 + 4 + 8 + (2 + 3 * 12 + 4) + 16;
-  function buildMpfSegment(jpegPartLength) {
+  var MPF_SEGMENT_LENGTH = 2 + 2 + 4 + 8 + (2 + 3 * 12 + 4) + 2 * 16;
+  var GAIN_MAP_PADDING_LENGTH = 16;
+  function buildMpfSegment(jpegPartLength, gainMap) {
     const bodyLength = MPF_SEGMENT_LENGTH - 4;
-    const mpEntryOffset = 4 + 8 + 2 + 3 * 12 + 4;
+    const mpEntryOffset = 8 + 2 + 3 * 12 + 4;
     const segment = new Uint8Array(bodyLength);
     const view = new DataView(segment.buffer);
     let offset = 0;
@@ -2791,17 +2792,21 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     view.setUint16(offset, 45057, false);
     view.setUint16(offset + 2, 4, false);
     view.setUint32(offset + 4, 1, false);
-    view.setUint32(offset + 8, 1, false);
+    view.setUint32(offset + 8, 2, false);
     offset += 12;
     view.setUint16(offset, 45058, false);
     view.setUint16(offset + 2, 7, false);
-    view.setUint32(offset + 4, 16, false);
+    view.setUint32(offset + 4, 32, false);
     view.setUint32(offset + 8, mpEntryOffset, false);
     offset += 12;
     view.setUint32(offset, 0, false);
     offset += 4;
     view.setUint32(offset, 196608, false);
     view.setUint32(offset + 4, jpegPartLength, false);
+    offset += 16;
+    view.setUint32(offset, 0, false);
+    view.setUint32(offset + 4, gainMap.size, false);
+    view.setUint32(offset + 8, gainMap.dataOffset, false);
     const finalSegment = new Uint8Array(MPF_SEGMENT_LENGTH);
     finalSegment[0] = 255;
     finalSegment[1] = 226;
@@ -2810,7 +2815,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     finalSegment.set(segment, 4);
     return finalSegment;
   }
-  function buildMotionPhotoXmp(videoLength) {
+  function buildMotionPhotoXmp(videoLength, ptsUs) {
     return [
       '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core Test.SNAPSHOT">',
       '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
@@ -2819,12 +2824,12 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       '        xmlns:OpCamera="http://ns.oplus.com/photos/1.0/camera/"',
       '        xmlns:Container="http://ns.google.com/photos/1.0/container/"',
       '        xmlns:Item="http://ns.google.com/photos/1.0/container/item/"',
-      `      GCamera:MotionPhoto="1"`,
-      `      GCamera:MotionPhotoVersion="1"`,
-      `      GCamera:MotionPhotoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
-      `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
-      `      OpCamera:MotionPhotoOwner="oplus"`,
-      `      OpCamera:OLivePhotoVersion="2"`,
+      '      GCamera:MotionPhoto="1"',
+      '      GCamera:MotionPhotoVersion="1"',
+      `      GCamera:MotionPhotoPresentationTimestampUs="${ptsUs}"`,
+      `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${ptsUs}"`,
+      '      OpCamera:MotionPhotoOwner="oplus"',
+      '      OpCamera:OLivePhotoVersion="2"',
       `      OpCamera:VideoLength="${videoLength}">`,
       "      <Container:Directory>",
       "        <rdf:Seq>",
@@ -2847,6 +2852,50 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       "  </rdf:RDF>",
       "</x:xmpmeta>"
     ].join("\n");
+  }
+  function parseMvhdDurationUs(video) {
+    try {
+      const view = new DataView(video.buffer, video.byteOffset, video.byteLength);
+      const u32 = (offset) => view.getUint32(offset, false);
+      let pos = 0;
+      while (pos + 8 <= video.length) {
+        const size = u32(pos);
+        if (size < 8 || pos + size > video.length) {
+          break;
+        }
+        if (bytesToLatin1(video.subarray(pos + 4, pos + 8)) === "moov") {
+          let inner = pos + 8;
+          while (inner + 8 <= pos + size) {
+            const innerSize = u32(inner);
+            if (innerSize < 8 || inner + innerSize > pos + size) {
+              break;
+            }
+            if (bytesToLatin1(video.subarray(inner + 4, inner + 8)) === "mvhd") {
+              if (video[inner + 8] === 1) {
+                const timescale = u32(inner + 28);
+                const hi = u32(inner + 32);
+                const lo = u32(inner + 36);
+                if (timescale > 0) {
+                  return Math.round((hi * 4294967296 + lo) * 1e6 / timescale);
+                }
+              } else {
+                const timescale = u32(inner + 20);
+                const duration = u32(inner + 24);
+                if (timescale > 0) {
+                  return Math.round(duration * 1e6 / timescale);
+                }
+              }
+              break;
+            }
+            inner += innerSize;
+          }
+          break;
+        }
+        pos += size;
+      }
+    } catch {
+    }
+    return STILL_IMAGE_TIMESTAMP_US;
   }
   function buildXmpApp1Segment(xmpText) {
     const idBytes = encodeUtf8(XMP_SEGMENT_ID);
@@ -2871,13 +2920,23 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     }
     const exifReady = ensureExifWithUserComment(jpeg, findJpegXmpInsertPoint(jpeg).existingExif);
     const { insertOffset, existingXmp } = findJpegXmpInsertPoint(exifReady);
-    const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(patchedVideo.length));
+    const ptsUs = parseMvhdDurationUs(patchedVideo);
+    const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(patchedVideo.length, ptsUs));
     const headEnd = existingXmp ? existingXmp.start : insertOffset;
     const jpegHead = exifReady.subarray(0, headEnd);
     const jpegTail = exifReady.subarray(existingXmp ? existingXmp.end : insertOffset);
     const jpegPartLength = jpegHead.length + xmpSegment.length + MPF_SEGMENT_LENGTH + jpegTail.length;
-    const mpfSegment = buildMpfSegment(jpegPartLength);
-    return concatBytes(jpegHead, xmpSegment, mpfSegment, jpegTail, patchedVideo);
+    const gainMap = { size: jpeg.length, dataOffset: MPF_SEGMENT_LENGTH + jpegTail.length - 8 };
+    const mpfSegment = buildMpfSegment(jpegPartLength, gainMap);
+    return concatBytes(
+      jpegHead,
+      xmpSegment,
+      mpfSegment,
+      jpegTail,
+      jpeg,
+      new Uint8Array(GAIN_MAP_PADDING_LENGTH),
+      patchedVideo
+    );
   }
 
   // src/apple-pair.ts

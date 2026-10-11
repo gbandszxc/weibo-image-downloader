@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildMotionPhoto, findJpegXmpInsertPoint, injectExifUserComment, patchVideoContainerBrand } from "../src/livephoto.ts";
+import { buildMotionPhoto, findJpegXmpInsertPoint, injectExifUserComment, parseMvhdDurationUs, patchVideoContainerBrand } from "../src/livephoto.ts";
 
 const STILL_TS = 1500000;
+/** 真机布局中 GainMap 数据后的 0 填充字节数（与 src/livephoto.ts 的 GAIN_MAP_PADDING_LENGTH 一致） */
+const GAIN_PAD = 16;
 const XMP_SEGMENT_ID = "http://ns.adobe.com/xap/1.0/\0";
 
 function ascii(text: string): Uint8Array {
@@ -303,26 +305,41 @@ test("buildMotionPhoto produces an OPPO-compatible single-file Motion Photo", ()
 
     const merged = buildMotionPhoto(jpeg, video);
 
-    // 布局：[JPEG 头部段][XMP][MPF][JPEG 尾部（DQT/SOS/EOI）][视频]；视频结束于 EOF
+    // 布局：[JPEG 头部段][XMP][MPF][JPEG 尾部（DQT/SOS/EOI）][GainMap=主图副本][16B 0填充][视频]；视频结束于 EOF
     const videoLength = video.length;
     const videoOffset = merged.length - videoLength;
     assert.equal(latin1(merged.subarray(videoOffset + 4, videoOffset + 8)), "ftyp");
     assert.equal(latin1(merged.subarray(videoOffset + 8, videoOffset + 12)), "isom", "QuickTime brand 应被补丁为 isom");
     assert.equal(latin1(merged.subarray(videoOffset + 16, videoOffset + 20)), "mp41");
     assert.deepEqual(Array.from(merged.subarray(videoOffset + 20)), Array.from(video.subarray(20)), "视频其余字节原样内嵌");
-    // EOI 紧邻视频起点
-    assert.equal(merged[videoOffset - 2], 0xff);
-    assert.equal(merged[videoOffset - 1], 0xd9);
-    // MPF 段紧随 XMP 之后（总长 74：FF E2 + 长度 + "MPF\0" + TIFF + 3 条目 + MPEntry）
-    const mpfLength = 74;
+    // 视频之前是 16 字节 0 填充，再往前是 GainMap 数据（主图副本，以 EOI 结束）
+    const gainMapStart = videoOffset - GAIN_PAD - jpeg.length;
+    assert.ok(
+        Array.from(merged.subarray(videoOffset - GAIN_PAD, videoOffset)).every((byte) => byte === 0),
+        "GainMap 与视频之间应有 16 字节 0 填充"
+    );
+    assert.deepEqual(
+        Array.from(merged.subarray(gainMapStart, videoOffset - GAIN_PAD)),
+        Array.from(jpeg),
+        "GainMap 数据应为完整主图字节"
+    );
+    // MPF 段紧随 XMP 之后（总长 90：FF E2 + 长度 + "MPF\0" + TIFF + 3 条目 + 2×MPEntry）
+    const mpfLength = 90;
     const xmpOffset = findXmpSegmentOffset(merged);
     const xmpSegmentLength = (merged[xmpOffset + 2] << 8) | merged[xmpOffset + 3];
     const mpfStart = xmpOffset + 2 + xmpSegmentLength;
     assert.equal(latin1(merged.subarray(mpfStart + 4, mpfStart + 8)), "MPF\0");
+    assert.equal((merged[mpfStart + 2] << 8) | merged[mpfStart + 3], 88, "MPF 段长字段应为 88（与真机一致）");
     const mpfView = new DataView(merged.buffer, merged.byteOffset + mpfStart);
     assert.equal(mpfView.getUint16(16, false), 3, "MPF 应有 3 个条目");
-    assert.equal(mpfView.getUint32(38, false), 1, "NumberOfImages = 1");
-    assert.equal(mpfView.getUint32(62, false), videoOffset, "MPEntry size 应为 JPEG 部分总长（至视频起点）");
+    assert.equal(mpfView.getUint32(38, false), 2, "NumberOfImages = 2（OPPO 识别触发点）");
+    // Entry0：Primary，size = JPEG 部分总长（至 GainMap 起点）
+    assert.equal(mpfView.getUint32(58, false), 0x00030000, "Entry0 应为 Baseline MP Primary");
+    assert.equal(mpfView.getUint32(62, false), gainMapStart, "Entry0 size 应为 JPEG 部分总长");
+    // Entry1：GainMap，size = 主图字节数，dataOffset 相对 MPF TIFF 起点
+    assert.equal(mpfView.getUint32(74, false), 0, "Entry1 属性应为 0");
+    assert.equal(mpfView.getUint32(78, false), jpeg.length, "Entry1 size 应为 GainMap 数据大小");
+    assert.equal(mpfView.getUint32(82, false), mpfLength + (jpeg.length - exifEnd) - 8, "Entry1 dataOffset 应相对 TIFF 起点");
     // JPEG 尾部（DQT/SOS/EOI）原样保留在 MPF 之后
     assert.deepEqual(
         Array.from(merged.subarray(mpfStart + mpfLength, mpfStart + mpfLength + (jpeg.length - exifEnd))),
@@ -357,9 +374,13 @@ test("buildMotionPhoto replaces existing XMP instead of appending a second APP1"
     withXmp.set(jpeg.subarray(exifEnd), exifEnd + plainXmp.length);
 
     const merged = buildMotionPhoto(withXmp, buildTestVideo());
-    const text = latin1(merged.subarray(0, merged.length));
-    assert.equal(text.split(XMP_SEGMENT_ID).length - 1, 1, "只应存在一个 XMP APP1 段");
-    assert.ok(!text.includes("<x:xmpmeta></x:xmpmeta>"), "旧 XMP 应被整段替换");
+    // GainMap 区间是输入原图的字节副本（连同其旧 XMP 段一起，属惰性数据），
+    // 断言只针对主图区间：旧 XMP 应在主图内被整段替换
+    const video = buildTestVideo();
+    const gainMapStart = merged.length - video.length - GAIN_PAD - withXmp.length;
+    const primaryText = latin1(merged.subarray(0, gainMapStart));
+    assert.equal(primaryText.split(XMP_SEGMENT_ID).length - 1, 1, "只应存在一个 XMP APP1 段");
+    assert.ok(!primaryText.includes("<x:xmpmeta></x:xmpmeta>"), "旧 XMP 应被整段替换");
 });
 
 test("buildMotionPhoto adds a minimal EXIF when the photo has none", () => {
@@ -375,6 +396,36 @@ test("buildMotionPhoto adds a minimal EXIF when the photo has none", () => {
     const headText = latin1(merged.subarray(0, merged.length - 28));
     assert.ok(headText.includes("Exif\0\0"), "应构造最小 EXIF 段");
     assert.ok(headText.includes("oplus_11534336"), "最小 EXIF 应包含 OPPO 标记");
+});
+
+test("parseMvhdDurationUs reads v0/v1 mvhd and falls back on missing moov", () => {
+    const u32be = (value: number) => new Uint8Array([(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]);
+    const box = (type: string, ...body: Uint8Array[]) => {
+        const payload = new Uint8Array(body.reduce((sum, part) => sum + part.length, 0));
+        let offset = 0;
+        for (const part of body) {
+            payload.set(part, offset);
+            offset += part.length;
+        }
+        const head = new Uint8Array(8);
+        head.set(ascii(type), 4);
+        new DataView(head.buffer).setUint32(0, 8 + payload.length, false);
+        return new Uint8Array([...head, ...payload]);
+    };
+    const fullbox = (type: string, version: number, ...body: Uint8Array[]) =>
+        box(type, new Uint8Array([version, 0, 0, 0]), ...body);
+
+    // v0：timescale=1000、duration=2000 → 2_000_000us
+    const v0 = box("moov", fullbox("mvhd", 0, new Uint8Array(8), u32be(1000), u32be(2000)));
+    assert.equal(parseMvhdDurationUs(v0), 2000000);
+
+    // v1：timescale=1_000_000_000、64 位 duration=2_000_000_000 → 2_000_000us
+    const v1 = box("moov", fullbox("mvhd", 1, new Uint8Array(16), u32be(1000000000), u32be(0), u32be(2000000000)));
+    assert.equal(parseMvhdDurationUs(v1), 2000000);
+
+    // 无 moov / 结构异常 → 回退惯例值
+    assert.equal(parseMvhdDurationUs(buildTestVideo()), STILL_TS);
+    assert.equal(parseMvhdDurationUs(new Uint8Array([0, 0, 0, 20])), STILL_TS);
 });
 
 test("buildMotionPhoto rejects videos without an ISO-BMFF ftyp box", () => {

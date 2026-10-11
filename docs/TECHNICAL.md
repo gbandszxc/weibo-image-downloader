@@ -39,14 +39,18 @@
 
 「微博LivePhoto自动合并」开启时，脚本在浏览器本地把 Live Photo 的封面图与 `.mov` 视频合并为单文件 Motion Photo，命名为 `weibo_帖子ID_序号.MP.jpg`（遵循 Google Motion Photo 规范建议的 `*.MP.jpg` 模式），全程纯字节拼接，不重新编码、不转码。关闭该设置时改为保存 **Apple Live Photo 配对文件**（同名 `.jpg` + `.mov`，见下节）；合并过程中任何一步失败（拉流失败、视频不是 ISO-BMFF 容器等）也会自动回退为配对保存，并在 toast 中提示。
 
-**输出文件布局**（实现位于 `src/livephoto.ts` 的 `buildMotionPhoto`，与用户 ColorOS 16 真机文件逐字节对照对齐）：
+**输出文件布局**（实现位于 `src/livephoto.ts` 的 `buildMotionPhoto`，与用户 ColorOS 16 真机文件逐字节对照对齐，并经 A/B 变体真机实测确认）：
 
 ```
 ┌──────────────────────────────────────────────┐
 │ JPEG 原始字节（不重编码）                      │
 │  EXIF：注入 UserComment="oplus_11534336" 标记 │
 │  XMP APP1（依 Adobe 建议排在 Exif APP1 之后）  │
-│  MPF APP2（NumberOfImages=1，紧跟 XMP）        │
+│  MPF APP2（NumberOfImages=2，紧跟 XMP）        │
+├──────────────────────────────────────────────┤
+│ GainMap 数据（复用主图字节占位，真机布局）      │
+├──────────────────────────────────────────────┤
+│ 16 字节 0 填充                                │
 ├──────────────────────────────────────────────┤
 │ 视频原始字节（ISO-BMFF；QuickTime brand 原位   │  ← 视频起点
 │  等长补丁为 isom/mp41，不转码、不移动 moov）    │
@@ -55,14 +59,17 @@
 
 XMP 字段与 ColorOS 16 真机文件对齐（无 xpacket 包裹、无 MicroVideo 旧字段），所有长度/偏移字段统一为**视频精确字节数**（视频结束于 EOF，"从文件末尾回退"与"目录顺序读取"两类实现都能正确定位）：
 
-- **Google 新格式**：`GCamera:MotionPhoto="1"`、`GCamera:MotionPhotoVersion="1"`、`GCamera:MotionPhotoPresentationTimestampUs`（取 iPhone Live Photo 惯例 1.5s，真机样本亦为同量级真实 PTS）+ `Container:Directory`（`Primary` 项 + `MotionPhoto` 项）；
-- **OPPO/一加（ColorOS 16）**：`OpCamera:MotionPhotoOwner="oplus"`、`OpCamera:OLivePhotoVersion="2"`、`OpCamera:VideoLength="视频字节数"`，配套 EXIF `UserComment="oplus_11534336"`（ColorOS 16 真机原值；14 时代为 "Oplus_8388608"，标记值随系统版本变化）与 MPF APP2 段；
+- **Google 新格式**：`GCamera:MotionPhoto="1"`、`GCamera:MotionPhotoVersion="1"`、`GCamera:MotionPhotoPresentationTimestampUs`（解析视频 `moov/mvhd` 取真实时长，无 moov 时回退 iPhone Live Photo 惯例 1.5s，真机样本 ≈1.37s 同量级）+ `Container:Directory`（`Primary` 项 + `MotionPhoto` 项）；
+- **OPPO/一加（ColorOS 16）**：`OpCamera:MotionPhotoOwner="oplus"`、`OpCamera:OLivePhotoVersion="2"`、`OpCamera:VideoLength="视频字节数"`，配套 EXIF `UserComment="oplus_11534336"`（ColorOS 16 真机原值；14 时代为 "Oplus_8388608"，标记值随系统版本变化）与 **MPF APP2 段（NumberOfImages=2）**；
 - 注意 ColorOS 16 真机已不写 `GCamera:MicroVideo` 旧字段与 xpacket 包裹，产物保持一致以免干扰解析。
+
+**OPPO 识别触发点（A/B 变体真机实测，ColorOS 16.0.10.501）**：同一微博素材生成四个候选变体侧载真机——V1 全复刻（XMP 三条目 + GainMap 数据 + MPF 双条目 + 真实 PTS）、V2 仅 XMP 三条目（MPF 单条目）、V3 仅 MPF 双条目（XMP 两条目）、V4 真机视频段。结果 **V1/V3/V4 可识别播放、V2 显示静态图**：MPF `NumberOfImages=2`（Primary + GainMap 条目 + GainMap 数据 + 16B 填充）是识别的必要充分条件，XMP 三条目、GainMap 声明、视频内容、PTS 取值均非关键。产物据此按 V3 最小已验证布局实现（与真机验证通过的 V3 文件逐字节一致），代价是文件体积约增加一倍（GainMap 数据复用主图字节，仅占位满足结构校验）。
 
 实现要点：
 
 - JPEG 段按 marker 结构逐段解析定位插入点，绝不全文件搜索 `FF D9` 找 EOI（EXIF 内嵌缩略图含假 EOI）。已有普通 XMP 段时整段原位替换；已含 `MotionPhoto`/`MicroVideo` 标记的图片拒绝重复合并。
 - EXIF 注入通过 TIFF IFD 结构化改写完成：在 Exif IFD 中按 tag 序插入 UserComment 条目，条目表增长 12 字节，所有指向表后数据的偏移同步平移（缩略图 IFD 指针、MakerNote 数据块整体后移，MakerNote 内部偏移以其自身为基不受影响）；结构不符合预期时跳过注入，不影响合并。
+- MPF 段按 CIPA 规范大端 TIFF 编码，`MPEntry` 的 size/dataOffset 均**相对 MPF TIFF 起点**填写（真机同值 50）；Primary 条目 size = 含 MPF 段在内的 JPEG 部分总长，GainMap 条目 size = 主图字节数、dataOffset 指向 JPEG 尾部之后。
 - 视频必须是 ISO-BMFF 容器（字节 4-7 为 `ftyp`）。微博 LivePhoto 视频存在 QuickTime MOV（`ftyp qt`）与 MP4 两种，前者会被原位等长补丁为 `isom`/`mp41` brand——box 尺寸不变、`stco` 偏移无需修补，主流播放器直接兼容；已是 MP4 brand 的视频保持原样。
 - 不写 Samsung SEFT 尾部：厂商真机文件均无尾部，且 SEF 尾部会使"文件末尾-长度"定位到错误位置。取舍是**三星相册不识别本产物**（三星相册依赖 SEFT trailer）；Google 相册、Windows 11 照片按 XMP 识别不受影响。
 
@@ -70,11 +77,11 @@ XMP 字段与 ColorOS 16 真机文件对齐（无 xpacket 包裹、无 MicroVide
 
 | 平台 | 动态效果 | 说明 |
 | --- | --- | --- |
-| Windows 11 照片（2023+） | ✓ | 按 XMP 识别 |
+| Windows 11 照片（2023+） | ✓ 实测 | 按 XMP 识别 |
 | Google 相册（App/Web） | ✓ | 新旧格式双写 |
-| OPPO/一加（ColorOS 16） | ✓ 待真机回归 | 按用户 ColorOS 16 真机文件逐字节对照对齐 |
-| 飞牛相册（fnOS v0.8.45+） | ✓ 理论兼容 | 官方支持安卓动态照片（华为/小米/OPPO/荣耀/三星/魅族），按 exiftool 路线解析 XMP |
+| OPPO/一加（ColorOS 16） | ✓ 实测 | ColorOS 16.0.10.501 真机 A/B 变体实测；触发点为 MPF 双条目 |
 | 小米（HyperOS） | ✓ 理论兼容 | 官方文档：按 XMP 的 MotionPhoto 关键字索引；仅 HyperOS 支持第三方合成产物 |
+| 飞牛相册（fnOS） | ✗ 实测 | 全复刻真机布局的第三方合成产物仍不识别，疑似按机型白名单，属平台限制 |
 | 三星相册 | ✗ | 依赖 SEFT trailer，与 OPPO 布局互斥，本产物不写 |
 | macOS 预览/Quick Look、iOS 相册 | ✗（合并产物）✓（配对文件） | 单文件动态照片为平台限制；关闭合并时的同名 jpg+mov 配对文件一起导入照片 App 可作为 Live Photo 播放 |
 | IrfanView、ACDSee、Honeyview | ✗ | 按静态图处理；ImageGlass 9.3+ 可识别 |

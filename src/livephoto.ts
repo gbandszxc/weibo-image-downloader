@@ -1,22 +1,28 @@
 /**
  * 微博 LivePhoto 单文件合并工具：JPEG 图片 + MOV 视频字节拼接为 Motion Photo。
  *
- * 输出文件布局（不重新编码，纯字节级拼装，视频结束于文件末尾、无尾部标记）：
+ * 输出文件布局（不重新编码，纯字节级拼装；视频结束于文件末尾、无尾部标记）：
  *   [JPEG 原始字节（EXIF 注入 UserComment，插入 XMP APP1 与 MPF APP2）]
+ *   [GainMap 数据（真机布局：复用主图字节占位，校验器只验结构不比对内容）]
+ *   [16 字节 0 填充]
  *   [视频原始字节（ISO-BMFF；QuickTime brand 原位等长补丁为 isom/mp41，不转码）]
  *
- * 兼容性依据（用户 ColorOS 16 真机文件 IMG20260809122911.jpg 逐字节对照 + 真机逆向参考）：
- *   - OPPO/一加（ColorOS 16 真机）：EXIF UserComment="oplus_11534336" + OpCamera 字段
- *     （MotionPhotoOwner=oplus、OLivePhotoVersion=2、VideoLength=视频精确字节数）+
- *     MPF APP2 + 视频 MP4 brand；XMP 无 xpacket 包裹、无 MicroVideo 旧字段（16 已废弃）；
+ * 兼容性依据（用户 ColorOS 16 真机文件 IMG20260809122911.jpg 逐字节对照 + A/B 变体真机实测）：
+ *   - OPPO/一加（ColorOS 16 真机 16.0.10.501 实测）：识别触发点是 MPF NumberOfImages=2
+ *     （Primary + GainMap 条目 + GainMap 数据 + 16B 填充）——A/B 变体矩阵实测：MPF 单条目
+ *     时 XMP 写齐三条目 + GainMap 数据仍显示静态图，MPF 双条目 + 两条目 XMP 即可识别，
+ *     XMP 三条目与视频内容均非关键；
+ *   - EXIF UserComment="oplus_11534336" + OpCamera 字段（MotionPhotoOwner=oplus、
+ *     OLivePhotoVersion=2、VideoLength=视频精确字节数）；XMP 无 xpacket 包裹、
+ *     无 MicroVideo 旧字段（16 已废弃）；PTS 取视频 mvhd 真实时长（真机同量级）；
  *   - Google：GCamera:MotionPhoto（新格式）+ Container:Directory，长度 = 视频精确字节数
- *     （视频结束于 EOF，"从文件末尾回退"的读取方同样可定位；Windows 11 照片/Google 相册
- *     实测可识别无 MicroVideo 的 ColorOS 16 真机文件）；
- *   - 飞牛相册（fnOS v0.8.45+）：官方支持安卓动态照片（含 ColorOS 16 真机文件），走
- *     GCamera XMP 解析路线，与本布局一致。
+ *     （视频结束于 EOF，"从文件末尾回退"的读取方同样可定位；Windows 11 照片实测可识别）；
+ *   - 飞牛相册（fnOS）：实测对全复刻真机布局的第三方合成产物仍不识别（疑似按机型
+ *     白名单），不再作为对齐目标。
  * 已知取舍：不写 Samsung SEFT 尾部（厂商真机文件均无，且 SEF 尾部会使
  * "文件末尾-长度"定位到错误位置）；三星相册因此不识别本产物，详见 docs/TECHNICAL.md。
- * Apple Live Photo 为"成对文件 + ContentIdentifier"机制，无单文件格式，故不在此范围。
+ * Apple Live Photo 为"成对文件 + ContentIdentifier"机制，无单文件格式，
+ * 由关闭合并/回退路径的 src/apple-pair.ts 配对保存支持。
  */
 
 const XMP_SEGMENT_ID = "http://ns.adobe.com/xap/1.0/\0";
@@ -364,20 +370,24 @@ function ensureExifWithUserComment(jpeg: Uint8Array, existingExif: { start: numb
 }
 
 // ---------------------------------------------------------------------------
-// MPF APP2 段（Multi-Picture Format，OPPO 识别标记之一）
+// MPF APP2 段（Multi-Picture Format）
 // ---------------------------------------------------------------------------
 
-/** MPF 段定长（"MPF\0" + TIFF 头 + 3 条目 IFD + 单条 MPEntry），用于预计算尺寸 */
-const MPF_SEGMENT_LENGTH = 2 + 2 + 4 + 8 + (2 + 3 * 12 + 4) + 16;
+/** MPF 段定长（"MPF\0" + TIFF 头 + 3 条目 IFD + Primary/GainMap 两条 MPEntry） */
+const MPF_SEGMENT_LENGTH = 2 + 2 + 4 + 8 + (2 + 3 * 12 + 4) + 2 * 16;
+/** 真机布局中 GainMap 数据之后的 0 填充字节数（介于 GainMap 与视频之间） */
+const GAIN_MAP_PADDING_LENGTH = 16;
 
 /**
- * 构造 MPF APP2 段（字节布局与真机逆向参考一致）：
- * NumberOfImages=1，MPEntry 属性 0x00030000（Baseline MP Primary），
- * size 字段 = 包含本段在内的 JPEG 部分总长。
+ * 构造 MPF APP2 段（字节布局与真机对照 + A/B 变体真机实测对齐）：
+ * NumberOfImages=2——Entry0 Primary（属性 0x00030000，size=含本段在内的 JPEG 部分总长）、
+ * Entry1 GainMap（属性 0，size/dataOffset 指向 JPEG 尾部之后的 GainMap 数据，
+ * dataOffset 相对本段 TIFF 起点填写）。真机实测单条目 MPF 时 OPPO 相册不识别。
  */
-function buildMpfSegment(jpegPartLength: number): Uint8Array {
+function buildMpfSegment(jpegPartLength: number, gainMap: { size: number; dataOffset: number }): Uint8Array {
     const bodyLength = MPF_SEGMENT_LENGTH - 4; // 去掉 FF E2 标记与长度字段
-    const mpEntryOffset = 4 + 8 + 2 + 3 * 12 + 4;
+    // MPEntry 数据区偏移按 MPF 规范相对 TIFF 起点（8+2+3×12+4=50，真机同值）
+    const mpEntryOffset = 8 + 2 + 3 * 12 + 4;
     const segment = new Uint8Array(bodyLength);
     const view = new DataView(segment.buffer);
     let offset = 0;
@@ -397,23 +407,28 @@ function buildMpfSegment(jpegPartLength: number): Uint8Array {
     view.setUint32(offset + 4, 4, false);
     segment.set(encodeUtf8("0100"), offset + 8);
     offset += 12;
-    // 0xB001 NumberOfImages = 1（内联）
+    // 0xB001 NumberOfImages = 2（内联，OPPO 识别触发点，A/B 实测确认）
     view.setUint16(offset, 0xb001, false);
     view.setUint16(offset + 2, 4, false);
     view.setUint32(offset + 4, 1, false);
-    view.setUint32(offset + 8, 1, false);
+    view.setUint32(offset + 8, 2, false);
     offset += 12;
-    // 0xB002 MPEntry（UNDEFINED，16 字节，指向数据区）
+    // 0xB002 MPEntry（UNDEFINED，2×16 字节，指向数据区）
     view.setUint16(offset, 0xb002, false);
     view.setUint16(offset + 2, 7, false);
-    view.setUint32(offset + 4, 16, false);
+    view.setUint32(offset + 4, 32, false);
     view.setUint32(offset + 8, mpEntryOffset, false);
     offset += 12;
     view.setUint32(offset, 0, false); // next IFD
     offset += 4;
-    // MPEntry：属性 0x00030000（Baseline MP Primary）+ JPEG 部分总长 + 8 字节保留
+    // Entry0：Primary——属性 0x00030000（Baseline MP Primary）+ JPEG 部分总长
     view.setUint32(offset, 0x00030000, false);
     view.setUint32(offset + 4, jpegPartLength, false);
+    offset += 16;
+    // Entry1：GainMap——属性 0 + GainMap 数据大小与偏移（相对 TIFF 起点）
+    view.setUint32(offset, 0, false);
+    view.setUint32(offset + 4, gainMap.size, false);
+    view.setUint32(offset + 8, gainMap.dataOffset, false);
 
     const finalSegment = new Uint8Array(MPF_SEGMENT_LENGTH);
     finalSegment[0] = 0xff;
@@ -434,7 +449,7 @@ function buildMpfSegment(jpegPartLength: number): Uint8Array {
  * 无 xpacket 包裹、无 MicroVideo 旧字段/厂商杂项（16 已废弃，避免干扰解析），
  * 所有长度字段统一为视频精确字节数（视频结束于 EOF）。
  */
-function buildMotionPhotoXmp(videoLength: number): string {
+function buildMotionPhotoXmp(videoLength: number, ptsUs: number): string {
     return [
         '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core Test.SNAPSHOT">',
         '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
@@ -443,12 +458,12 @@ function buildMotionPhotoXmp(videoLength: number): string {
         '        xmlns:OpCamera="http://ns.oplus.com/photos/1.0/camera/"',
         '        xmlns:Container="http://ns.google.com/photos/1.0/container/"',
         '        xmlns:Item="http://ns.google.com/photos/1.0/container/item/"',
-        `      GCamera:MotionPhoto="1"`,
-        `      GCamera:MotionPhotoVersion="1"`,
-        `      GCamera:MotionPhotoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
-        `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
-        `      OpCamera:MotionPhotoOwner="oplus"`,
-        `      OpCamera:OLivePhotoVersion="2"`,
+        '      GCamera:MotionPhoto="1"',
+        '      GCamera:MotionPhotoVersion="1"',
+        `      GCamera:MotionPhotoPresentationTimestampUs="${ptsUs}"`,
+        `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${ptsUs}"`,
+        '      OpCamera:MotionPhotoOwner="oplus"',
+        '      OpCamera:OLivePhotoVersion="2"',
         `      OpCamera:VideoLength="${videoLength}">`,
         '      <Container:Directory>',
         '        <rdf:Seq>',
@@ -471,6 +486,59 @@ function buildMotionPhotoXmp(videoLength: number): string {
         '  </rdf:RDF>',
         '</x:xmpmeta>'
     ].join("\n");
+}
+
+/**
+ * 解析 ISO-BMFF 视频 moov/mvhd 的总时长（微秒），作为 XMP 静态帧 PTS：
+ * 真机写入视频真实时长（≈1.37s），微博视频实测解析出 ≈2.2s，同量级；
+ * 无 moov/mvhd 或解析异常时回退 iPhone Live Photo 惯例值。
+ */
+export function parseMvhdDurationUs(video: Uint8Array): number {
+    try {
+        const view = new DataView(video.buffer, video.byteOffset, video.byteLength);
+        const u32 = (offset: number) => view.getUint32(offset, false);
+        let pos = 0;
+        while (pos + 8 <= video.length) {
+            const size = u32(pos);
+            if (size < 8 || pos + size > video.length) {
+                break;
+            }
+            if (bytesToLatin1(video.subarray(pos + 4, pos + 8)) === "moov") {
+                let inner = pos + 8;
+                while (inner + 8 <= pos + size) {
+                    const innerSize = u32(inner);
+                    if (innerSize < 8 || inner + innerSize > pos + size) {
+                        break;
+                    }
+                    if (bytesToLatin1(video.subarray(inner + 4, inner + 8)) === "mvhd") {
+                        // mvhd body 从 version 起算：v0 为 timescale@+12+duration@+16，
+                        // v1 为 timescale@+20+64 位 duration@+24（相对 box 体，即 box 起点 +8）
+                        if (video[inner + 8] === 1) {
+                            const timescale = u32(inner + 28);
+                            const hi = u32(inner + 32);
+                            const lo = u32(inner + 36);
+                            if (timescale > 0) {
+                                return Math.round((hi * 4294967296 + lo) * 1e6 / timescale);
+                            }
+                        } else {
+                            const timescale = u32(inner + 20);
+                            const duration = u32(inner + 24);
+                            if (timescale > 0) {
+                                return Math.round(duration * 1e6 / timescale);
+                            }
+                        }
+                        break;
+                    }
+                    inner += innerSize;
+                }
+                break;
+            }
+            pos += size;
+        }
+    } catch {
+        // 结构异常时走回退值
+    }
+    return STILL_IMAGE_TIMESTAMP_US;
 }
 
 /** 构造 XMP APP1 段：FF E1 + 段长（含长度字段自身）+ 段标识 + XMP 报文 */
@@ -507,14 +575,26 @@ export function buildMotionPhoto(jpeg: Uint8Array, video: Uint8Array): Uint8Arra
     const exifReady = ensureExifWithUserComment(jpeg, findJpegXmpInsertPoint(jpeg).existingExif);
     const { insertOffset, existingXmp } = findJpegXmpInsertPoint(exifReady);
 
-    const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(patchedVideo.length));
+    const ptsUs = parseMvhdDurationUs(patchedVideo);
+    const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(patchedVideo.length, ptsUs));
     // 已有 XMP 时整段替换：头部截到旧段起点，新段从旧段位置插入，旧段内容随尾部裁剪丢弃
     const headEnd = existingXmp ? existingXmp.start : insertOffset;
     const jpegHead = exifReady.subarray(0, headEnd);
     const jpegTail = exifReady.subarray(existingXmp ? existingXmp.end : insertOffset);
-    // MPF 的 size 字段统计包含 MPF 段自身在内的 JPEG 部分总长（段长恒定，可先算）
+    // Primary 条目的 size 字段统计包含 MPF 段自身在内的 JPEG 部分总长（段长恒定，可先算）；
+    // GainMap 数据紧随 JPEG 尾部之后，dataOffset 相对 MPF TIFF 起点
     const jpegPartLength = jpegHead.length + xmpSegment.length + MPF_SEGMENT_LENGTH + jpegTail.length;
-    const mpfSegment = buildMpfSegment(jpegPartLength);
+    const gainMap = { size: jpeg.length, dataOffset: MPF_SEGMENT_LENGTH + jpegTail.length - 8 };
+    const mpfSegment = buildMpfSegment(jpegPartLength, gainMap);
 
-    return concatBytes(jpegHead, xmpSegment, mpfSegment, jpegTail, patchedVideo);
+    // 真机布局：JPEG 尾部之后是 GainMap 数据 + 16 字节 0 填充，最后是视频（结束于 EOF）
+    return concatBytes(
+        jpegHead,
+        xmpSegment,
+        mpfSegment,
+        jpegTail,
+        jpeg,
+        new Uint8Array(GAIN_MAP_PADDING_LENGTH),
+        patchedVideo
+    );
 }
