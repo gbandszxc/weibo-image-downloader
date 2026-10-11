@@ -407,7 +407,7 @@ test("LivePhoto merge downloads fetch image and video and save a single Motion P
     assert.equal(createObjectUrlCalls[0].type, "image/jpeg");
     const mergedText = new TextDecoder("latin1").decode(await createObjectUrlCalls[0].arrayBuffer());
     assert.ok(mergedText.includes("GCamera:MotionPhoto=\"1\""), "应包含 Motion Photo XMP");
-    assert.ok(mergedText.includes("Oplus_8388608"), "应包含 OPPO EXIF 识别标记");
+    assert.ok(mergedText.includes("oplus_11534336"), "应包含 OPPO EXIF 识别标记");
     // 内嵌视频 QuickTime brand 已补丁为 MP4，且视频字节位于文件末尾（无尾部标记）
     assert.ok(/isom/.test(mergedText.slice(-40)), "内嵌视频 brand 应已补丁为 isom");
     assert.ok(mergedText.endsWith("free"), "应以视频原始字节结尾");

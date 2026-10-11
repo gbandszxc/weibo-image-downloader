@@ -2537,7 +2537,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
   var XMP_SEGMENT_ID = "http://ns.adobe.com/xap/1.0/\0";
   var EXIF_SEGMENT_ID = "Exif\0\0";
   var MPF_SEGMENT_ID = "MPF\0";
-  var OPPO_USER_COMMENT = "Oplus_8388608";
+  var OPPO_USER_COMMENT = "oplus_11534336";
+  var STILL_IMAGE_TIMESTAMP_US = 15e5;
   var USER_COMMENT_ASCII_PREFIX = "ASCII\0\0\0";
   function concatBytes(...parts) {
     const total = parts.reduce((sum, part) => sum + part.length, 0);
@@ -2811,28 +2812,20 @@ OR OTHER DEALINGS IN THE SOFTWARE.
   }
   function buildMotionPhotoXmp(videoLength) {
     return [
-      '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
-      '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.1.0-jc003">',
+      '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core Test.SNAPSHOT">',
       '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
       '    <rdf:Description rdf:about=""',
       '        xmlns:GCamera="http://ns.google.com/photos/1.0/camera/"',
       '        xmlns:OpCamera="http://ns.oplus.com/photos/1.0/camera/"',
-      '        xmlns:MiCamera="http://ns.xiaomi.com/photos/1.0/camera/"',
       '        xmlns:Container="http://ns.google.com/photos/1.0/container/"',
       '        xmlns:Item="http://ns.google.com/photos/1.0/container/item/"',
-      '      GCamera:MotionPhoto="1"',
-      '      GCamera:MotionPhotoVersion="1"',
-      '      GCamera:MotionPhotoPresentationTimestampUs="0"',
-      '      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="0"',
-      '      OpCamera:MotionPhotoOwner="oplus"',
-      '      OpCamera:OLivePhotoVersion="2"',
-      `      OpCamera:VideoLength="${videoLength}"`,
-      '      OpCamera:MotionPhotoFeatureFlag="1"',
-      `      MiCamera:XMPMeta="&lt;?xml version='1.0' encoding='UTF-8' standalone='yes' ?&gt;"`,
-      '      GCamera:MicroVideoVersion="1"',
-      '      GCamera:MicroVideo="1"',
-      `      GCamera:MicroVideoOffset="${videoLength}"`,
-      '      GCamera:MicroVideoPresentationTimestampUs="0">',
+      `      GCamera:MotionPhoto="1"`,
+      `      GCamera:MotionPhotoVersion="1"`,
+      `      GCamera:MotionPhotoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
+      `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
+      `      OpCamera:MotionPhotoOwner="oplus"`,
+      `      OpCamera:OLivePhotoVersion="2"`,
+      `      OpCamera:VideoLength="${videoLength}">`,
       "      <Container:Directory>",
       "        <rdf:Seq>",
       '          <rdf:li rdf:parseType="Resource">',
@@ -2852,8 +2845,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       "      </Container:Directory>",
       "    </rdf:Description>",
       "  </rdf:RDF>",
-      "</x:xmpmeta>",
-      '<?xpacket end="w"?>'
+      "</x:xmpmeta>"
     ].join("\n");
   }
   function buildXmpApp1Segment(xmpText) {

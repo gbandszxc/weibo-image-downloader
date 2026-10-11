@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { buildMotionPhoto, findJpegXmpInsertPoint, injectExifUserComment, patchVideoContainerBrand } from "../src/livephoto.ts";
 
+const STILL_TS = 1500000;
 const XMP_SEGMENT_ID = "http://ns.adobe.com/xap/1.0/\0";
 
 function ascii(text: string): Uint8Array {
@@ -263,8 +264,8 @@ test("injectExifUserComment inserts a sorted UserComment and shifts trailing off
     const patched = injectExifUserComment(withExif, { start: exifStart, end: exifStart + exifSegment.length });
     assert.ok(patched.length > withExif.length, "应增长一个条目与 UserComment 数据");
 
-    // 新 TIFF 长度 = 99 + 12（条目表增长）+ 21（UserComment 值）
-    const newTiffLength = 132;
+    // 新 TIFF 长度 = 99 + 12（条目表增长）+ 22（UserComment 值）
+    const newTiffLength = 133;
     const patchedExif = patched.subarray(exifStart + 10, exifStart + 10 + newTiffLength);
     assert.equal(readIfdEntries(patchedExif, 8).entries.length, 2, "IFD0 条目数不变");
     const ifd0 = readIfdEntries(patchedExif, 8);
@@ -284,10 +285,10 @@ test("injectExifUserComment inserts a sorted UserComment and shifts trailing off
     assert.equal(latin1(patchedExif.subarray(lensModel.value, lensModel.value + 3)), "abc");
     const userComment = exifIfd.entries.find((entry) => entry.tag === 0x9286)!;
     assert.equal(userComment.type, 7);
-    assert.equal(userComment.count, 21);
+    assert.equal(userComment.count, 22);
     assert.equal(
         latin1(patchedExif.subarray(userComment.value, userComment.value + userComment.count)),
-        "ASCII\0\0\0Oplus_8388608",
+        "ASCII\0\0\0oplus_11534336",
         "应包含 OPPO 识别标记"
     );
 });
@@ -332,19 +333,19 @@ test("buildMotionPhoto produces an OPPO-compatible single-file Motion Photo", ()
     const xmpSegmentLength2 = (merged[xmpOffset + 2] << 8) | merged[xmpOffset + 3];
     const xmpText = latin1(merged.subarray(xmpOffset + 4, xmpOffset + 2 + xmpSegmentLength2));
     assert.ok(xmpText.startsWith(XMP_SEGMENT_ID));
-    assert.match(xmpText, new RegExp(`GCamera:MicroVideoOffset="${videoLength}"`));
     assert.match(xmpText, new RegExp(`OpCamera:VideoLength="${videoLength}"`));
     assert.match(xmpText, new RegExp(`Item:Semantic="MotionPhoto"\\s+Item:Length="${videoLength}"`));
     assert.match(xmpText, /GCamera:MotionPhoto="1"/);
     assert.match(xmpText, /GCamera:MotionPhotoVersion="1"/);
-    assert.match(xmpText, /GCamera:MotionPhotoPresentationTimestampUs="0"/);
-    assert.match(xmpText, /GCamera:MicroVideoPresentationTimestampUs="0"/);
-    assert.match(xmpText, /OpCamera:MotionPhotoFeatureFlag="1"/);
+    assert.match(xmpText, new RegExp(`GCamera:MotionPhotoPresentationTimestampUs="${STILL_TS}"`));
     assert.match(xmpText, /OpCamera:MotionPhotoOwner="oplus"/);
+    assert.match(xmpText, new RegExp(`OpCamera:VideoLength="${videoLength}"`));
+    assert.ok(!xmpText.includes("MicroVideo"), "ColorOS 16 真机不写 MicroVideo 旧字段");
+    assert.ok(!xmpText.includes("xpacket"), "真机 XMP 无 xpacket 包裹");
     assert.match(xmpText, /Item:Mime="video\/mp4"/);
     // 合并产物应带 OPPO EXIF 识别标记
     const headText = latin1(merged.subarray(0, mpfStart));
-    assert.ok(headText.includes("Oplus_8388608"), "EXIF 应注入 Oplus UserComment");
+    assert.ok(headText.includes("oplus_11534336"), "EXIF 应注入 Oplus UserComment");
 });
 
 test("buildMotionPhoto replaces existing XMP instead of appending a second APP1", () => {
@@ -373,7 +374,7 @@ test("buildMotionPhoto adds a minimal EXIF when the photo has none", () => {
     const merged = buildMotionPhoto(bareJpeg, buildTestVideo());
     const headText = latin1(merged.subarray(0, merged.length - 28));
     assert.ok(headText.includes("Exif\0\0"), "应构造最小 EXIF 段");
-    assert.ok(headText.includes("Oplus_8388608"), "最小 EXIF 应包含 OPPO 标记");
+    assert.ok(headText.includes("oplus_11534336"), "最小 EXIF 应包含 OPPO 标记");
 });
 
 test("buildMotionPhoto rejects videos without an ISO-BMFF ftyp box", () => {

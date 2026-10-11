@@ -3,18 +3,18 @@
  *
  * 输出文件布局（不重新编码，纯字节级拼装，视频结束于文件末尾、无尾部标记）：
  *   [JPEG 原始字节（EXIF 注入 UserComment，插入 XMP APP1 与 MPF APP2）]
- *   [视频原始字节（ISO-BMFF 容器；QuickTime brand 原位补丁为 MP4 brand）]
+ *   [视频原始字节（ISO-BMFF；QuickTime brand 原位等长补丁为 isom/mp41，不转码）]
  *
- * 兼容性依据（字段级参考真机逆向实现）：
- *   - OPPO/ColorOS（Find X7 Ultra 实机验证的 Young-Spark/oppo-live-photo-maker 与
- *     NEORUAA/XHS_Downloader_Android 的多厂商审计）：EXIF UserComment="Oplus_8388608" +
- *     OpCamera 字段（OLivePhotoVersion=2、MotionPhotoOwner=oplus、VideoLength=视频精确
- *     字节数、MotionPhotoFeatureFlag=1）+ MPF APP2 + 视频 MP4 brand，缺一不可；
- *   - Google：GCamera:MotionPhoto（新格式）+ GCamera:MicroVideo（旧格式）+ Container:Directory，
- *     长度/偏移一律为视频精确字节数（视频结束于 EOF）；
- *   - 小米：MediaStore 按 XMP 中的 MicroVideo/MotionPhoto 关键字索引，保留 MiCamera 字段
- *     （NEORUAA 真机验证布局）。
- * 已知取舍：不写 Samsung SEFT 尾部（OPPO/小米真机文件均无，且 SEF 尾部会使
+ * 兼容性依据（用户 ColorOS 16 真机文件 IMG20260809122911.jpg 逐字节对照 + 真机逆向参考）：
+ *   - OPPO/一加（ColorOS 16 真机）：EXIF UserComment="oplus_11534336" + OpCamera 字段
+ *     （MotionPhotoOwner=oplus、OLivePhotoVersion=2、VideoLength=视频精确字节数）+
+ *     MPF APP2 + 视频 MP4 brand；XMP 无 xpacket 包裹、无 MicroVideo 旧字段（16 已废弃）；
+ *   - Google：GCamera:MotionPhoto（新格式）+ Container:Directory，长度 = 视频精确字节数
+ *     （视频结束于 EOF，"从文件末尾回退"的读取方同样可定位；Windows 11 照片/Google 相册
+ *     实测可识别无 MicroVideo 的 ColorOS 16 真机文件）；
+ *   - 飞牛相册（fnOS v0.8.45+）：官方支持安卓动态照片（含 ColorOS 16 真机文件），走
+ *     GCamera XMP 解析路线，与本布局一致。
+ * 已知取舍：不写 Samsung SEFT 尾部（厂商真机文件均无，且 SEF 尾部会使
  * "文件末尾-长度"定位到错误位置）；三星相册因此不识别本产物，详见 docs/TECHNICAL.md。
  * Apple Live Photo 为"成对文件 + ContentIdentifier"机制，无单文件格式，故不在此范围。
  */
@@ -22,8 +22,15 @@
 const XMP_SEGMENT_ID = "http://ns.adobe.com/xap/1.0/\0";
 const EXIF_SEGMENT_ID = "Exif\0\0";
 const MPF_SEGMENT_ID = "MPF\0";
-/** OPPO 相册要求的 EXIF UserComment 标记（NEORUAA 二次审计确认大小写） */
-const OPPO_USER_COMMENT = "Oplus_8388608";
+/**
+ * OPPO 相册要求的 EXIF UserComment 标记。
+ * 取值随系统版本变化：ColorOS 14 真机为 "Oplus_8388608"（Find X7 Ultra 逆向），
+ * ColorOS 16 真机为 "oplus_11534336"（用户实机 IMG20260809122911.jpg 逐字节确认），
+ * 这里按 ColorOS 16 原值写入。
+ */
+const OPPO_USER_COMMENT = "oplus_11534336";
+/** ColorOS 16 真机 XMP 的静态帧 PTS 量级（实机样本 ≈1.37s，iPhone Live Photo 惯例 ≈1.5s） */
+const STILL_IMAGE_TIMESTAMP_US = 1500000;
 /** UserComment 值的 8 字节字符集前缀（ASCII） */
 const USER_COMMENT_ASCII_PREFIX = "ASCII\0\0\0";
 
@@ -423,34 +430,26 @@ function buildMpfSegment(jpegPartLength: number): Uint8Array {
 // ---------------------------------------------------------------------------
 
 /**
- * 生成 Motion Photo 的 XMP 文本。所有长度字段统一为视频精确字节数
- * （视频结束于 EOF，"从文件末尾回退"的读取方据此可直接定位视频起点）；
- * 时间戳与 OPPO/小米真机文件一致取 0。
+ * 生成 Motion Photo 的 XMP 文本，字段与 ColorOS 16 真机文件对齐：
+ * 无 xpacket 包裹、无 MicroVideo 旧字段/厂商杂项（16 已废弃，避免干扰解析），
+ * 所有长度字段统一为视频精确字节数（视频结束于 EOF）。
  */
 function buildMotionPhotoXmp(videoLength: number): string {
     return [
-        '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
-        '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.1.0-jc003">',
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core Test.SNAPSHOT">',
         '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
         '    <rdf:Description rdf:about=""',
         '        xmlns:GCamera="http://ns.google.com/photos/1.0/camera/"',
         '        xmlns:OpCamera="http://ns.oplus.com/photos/1.0/camera/"',
-        '        xmlns:MiCamera="http://ns.xiaomi.com/photos/1.0/camera/"',
         '        xmlns:Container="http://ns.google.com/photos/1.0/container/"',
         '        xmlns:Item="http://ns.google.com/photos/1.0/container/item/"',
-        '      GCamera:MotionPhoto="1"',
-        '      GCamera:MotionPhotoVersion="1"',
-        '      GCamera:MotionPhotoPresentationTimestampUs="0"',
-        '      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="0"',
-        '      OpCamera:MotionPhotoOwner="oplus"',
-        '      OpCamera:OLivePhotoVersion="2"',
-        `      OpCamera:VideoLength="${videoLength}"`,
-        '      OpCamera:MotionPhotoFeatureFlag="1"',
-        '      MiCamera:XMPMeta="&lt;?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\' ?&gt;"',
-        '      GCamera:MicroVideoVersion="1"',
-        '      GCamera:MicroVideo="1"',
-        `      GCamera:MicroVideoOffset="${videoLength}"`,
-        '      GCamera:MicroVideoPresentationTimestampUs="0">',
+        `      GCamera:MotionPhoto="1"`,
+        `      GCamera:MotionPhotoVersion="1"`,
+        `      GCamera:MotionPhotoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
+        `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
+        `      OpCamera:MotionPhotoOwner="oplus"`,
+        `      OpCamera:OLivePhotoVersion="2"`,
+        `      OpCamera:VideoLength="${videoLength}">`,
         '      <Container:Directory>',
         '        <rdf:Seq>',
         '          <rdf:li rdf:parseType="Resource">',
@@ -470,8 +469,7 @@ function buildMotionPhotoXmp(videoLength: number): string {
         '      </Container:Directory>',
         '    </rdf:Description>',
         '  </rdf:RDF>',
-        '</x:xmpmeta>',
-        '<?xpacket end="w"?>'
+        '</x:xmpmeta>'
     ].join("\n");
 }
 
