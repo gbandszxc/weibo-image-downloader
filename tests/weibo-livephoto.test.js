@@ -886,6 +886,43 @@ test("mobile weibo card reads media items from vue item data without desktop fet
     assert.equal(mediaItems[0].id, "008vVtgily1id6q9sht56j30wr1dzk2k");
 });
 
+test("article cover images wrapped in ttarticle links are excluded from the DOM fallback scan", () => {
+    const platform = createWeiboPlatformForTests();
+
+    function createMockImage(src, { articleLink = false, videoMarkers = false } = {}) {
+        const pictureMain = videoMarkers
+            ? { querySelector: () => ({}) }
+            : null;
+        return {
+            src,
+            closest(selector) {
+                if (selector === 'a[href*="ttarticle"]') {
+                    return articleLink ? { tagName: "a" } : null;
+                }
+                if (selector === ".woo-picture-main") {
+                    return pictureMain;
+                }
+                return null;
+            }
+        };
+    }
+
+    const articleCover = createMockImage(
+        "https://wx3.sinaimg.cn/large/006llPhJly1iewdb4jb9gj30zk0jzq8b.jpg",
+        { articleLink: true }
+    );
+    const normalImage = createMockImage("https://wx1.sinaimg.cn/large/006llPhJly1normalab.jpg");
+    const container = {
+        querySelectorAll(selector) {
+            return selector === "img.woo-picture-img" ? [articleCover, normalImage] : [];
+        }
+    };
+
+    const images = platform.findImagesInPost(container);
+
+    assert.deepEqual(images, [normalImage]);
+});
+
 test("api result selection prefers authoritative empty list", () => {
     const ui = createUiForWeibo();
     const fallbackDomItems = [
@@ -914,17 +951,8 @@ test("pure video result removes download button", () => {
     assert.equal(button.removed, true);
 });
 
-test("ui creates a weibo button for video-only posts when async resolution is allowed", async () => {
-    const videoItem = {
-        id: "video-1",
-        kind: "video",
-        label: "视频 1",
-        imageUrl: null,
-        videoUrl: "https://f.video.weibocdn.com/a.mp4",
-        videoExt: ".mp4"
-    };
-
-    const ui = createUi({
+function createEmptyDomWeiboUi({ resolveItems, onInsert }) {
+    return createUi({
         config: {
             ...CONFIG,
             DEBUG: false,
@@ -947,10 +975,10 @@ test("ui creates a weibo button for video-only posts when async resolution is al
                         return true;
                     },
                     resolvePostMediaItems() {
-                        return [videoItem];
+                        return resolveItems;
                     },
                     getPostId() {
-                        return "weibo_video";
+                        return "weibo_empty_dom";
                     },
                     getPostSelectors() {
                         return [];
@@ -958,7 +986,8 @@ test("ui creates a weibo button for video-only posts when async resolution is al
                     shouldSkipPost() {
                         return false;
                     },
-                    insertDownloadButton() {
+                    insertDownloadButton({ btn }) {
+                        onInsert(btn);
                         return true;
                     },
                     afterInjectDownloadButtons() {},
@@ -985,6 +1014,24 @@ test("ui creates a weibo button for video-only posts when async resolution is al
         },
         addStyle() {}
     });
+}
+
+test("ui creates a weibo button for video-only posts only after async resolution confirms media", async () => {
+    const videoItem = {
+        id: "video-1",
+        kind: "video",
+        label: "视频 1",
+        imageUrl: null,
+        videoUrl: "https://f.video.weibocdn.com/a.mp4",
+        videoExt: ".mp4"
+    };
+    const insertedButtons = [];
+    const ui = createEmptyDomWeiboUi({
+        resolveItems: [videoItem],
+        onInsert(btn) {
+            insertedButtons.push(btn);
+        }
+    });
 
     const btn = ui.createDownloadButton({
         querySelector() {
@@ -992,10 +1039,32 @@ test("ui creates a weibo button for video-only posts when async resolution is al
         }
     });
 
-    assert.ok(btn);
-    assert.equal(btn.innerHTML, "↓...");
+    // 媒体确认非空前不插入按钮，避免按钮闪现
+    assert.equal(btn, null);
+    assert.equal(insertedButtons.length, 0);
     await flushPromises();
-    assert.equal(btn.innerHTML, "↓1");
+    assert.equal(insertedButtons.length, 1);
+    assert.equal(insertedButtons[0].innerHTML, "↓1");
+});
+
+test("ui never inserts a weibo button for posts whose async resolution is empty", async () => {
+    const insertedButtons = [];
+    const ui = createEmptyDomWeiboUi({
+        resolveItems: [],
+        onInsert(btn) {
+            insertedButtons.push(btn);
+        }
+    });
+
+    const btn = ui.createDownloadButton({
+        querySelector() {
+            return null;
+        }
+    });
+
+    assert.equal(btn, null);
+    await flushPromises();
+    assert.equal(insertedButtons.length, 0);
 });
 
 test("ui refreshDownloadButtons clears existing buttons and reinjects with fresh caches", () => {

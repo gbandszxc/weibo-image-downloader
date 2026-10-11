@@ -446,6 +446,16 @@ export function createWeiboPlatform({
         return !!pictureMain.querySelector('[class*="_videotime_"], [class*="_videobox_"], .woo-font--play');
     }
 
+    function isArticleCoverImage(img) {
+        if (!img || typeof img.closest !== "function") {
+            return false;
+        }
+
+        // 头条文章卡片的封面图包在文章链接里，接口侧不算可下载图片；
+        // 若不过滤，按钮会先按 DOM 计数插入、再被接口权威空结果移除，造成闪现。
+        return !!img.closest('a[href*="ttarticle"]');
+    }
+
     function findImagesInPost(container) {
         const images = [];
 
@@ -470,6 +480,9 @@ export function createWeiboPlatform({
                         return;
                     }
                     if (isVideoThumbnailImage(img)) {
+                        return;
+                    }
+                    if (isArticleCoverImage(img)) {
                         return;
                     }
 

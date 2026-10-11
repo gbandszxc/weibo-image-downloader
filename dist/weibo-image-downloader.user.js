@@ -1278,6 +1278,12 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       return !!pictureMain.querySelector('[class*="_videotime_"], [class*="_videobox_"], .woo-font--play');
     }
+    function isArticleCoverImage(img) {
+      if (!img || typeof img.closest !== "function") {
+        return false;
+      }
+      return !!img.closest('a[href*="ttarticle"]');
+    }
     function findImagesInPost(container) {
       const images = [];
       for (const selector of imageSelectors) {
@@ -1300,6 +1306,9 @@ OR OTHER DEALINGS IN THE SOFTWARE.
               return;
             }
             if (isVideoThumbnailImage(img)) {
+              return;
+            }
+            if (isArticleCoverImage(img)) {
               return;
             }
             images.push(img);
@@ -3161,22 +3170,24 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         documentRef.body.appendChild(overlay);
       });
     }
-    function createDownloadButton(postContainer) {
-      if (postContainer.querySelector(".weibo-img-download-btn")) {
-        return null;
+    function insertDownloadButtonIntoPost(post, btn) {
+      if (!btn) {
+        return;
       }
-      const initialMediaItems = getFallbackMediaItems(postContainer);
-      const shouldResolveEmptyMediaItems = typeof platform.shouldResolveEmptyMediaItems === "function" && platform.shouldResolveEmptyMediaItems(postContainer);
-      if (initialMediaItems.length === 0 && !shouldResolveEmptyMediaItems) {
-        return null;
+      const inserted = platform.insertDownloadButton({ post, btn, documentRef, windowRef });
+      if (!inserted) {
+        post.appendChild(btn);
       }
+    }
+    function buildDownloadButton(postContainer, initialMediaItems, resolvedPromise = null) {
       const btn = documentRef.createElement("button");
       btn.type = "button";
       btn.className = "weibo-img-download-btn";
       const postId = getPostId(postContainer);
       buttonDetails.set(btn, { postId, count: initialMediaItems.length });
       renderDownloadButton(btn);
-      resolvePostMediaItems(postContainer, initialMediaItems).then((mediaItems) => {
+      const syncPromise = resolvedPromise || resolvePostMediaItems(postContainer, initialMediaItems);
+      syncPromise.then((mediaItems) => {
         syncDownloadButtonState(btn, mediaItems);
       }).catch((error) => {
         utils2.log("媒体解析失败:", error.message);
@@ -3277,6 +3288,28 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       btn.addEventListener("pointercancel", clearLongPressTimer);
       return btn;
     }
+    function createDownloadButton(postContainer) {
+      if (postContainer.querySelector(".weibo-img-download-btn")) {
+        return null;
+      }
+      const initialMediaItems = getFallbackMediaItems(postContainer);
+      if (initialMediaItems.length > 0) {
+        return buildDownloadButton(postContainer, initialMediaItems);
+      }
+      const shouldResolveEmptyMediaItems = typeof platform.shouldResolveEmptyMediaItems === "function" && platform.shouldResolveEmptyMediaItems(postContainer);
+      if (!shouldResolveEmptyMediaItems) {
+        return null;
+      }
+      resolvePostMediaItems(postContainer, initialMediaItems).then((mediaItems) => {
+        if (!Array.isArray(mediaItems) || mediaItems.length === 0 || postContainer.querySelector(".weibo-img-download-btn")) {
+          return;
+        }
+        insertDownloadButtonIntoPost(postContainer, buildDownloadButton(postContainer, mediaItems, Promise.resolve(mediaItems)));
+      }).catch((error) => {
+        utils2.log("媒体解析失败:", error.message);
+      });
+      return null;
+    }
     function syncExistingButtonMedia(post, btn) {
       resolvePostMediaItems(post, getFallbackMediaItems(post)).then((mediaItems) => {
         if (btn.parentNode) {
@@ -3303,10 +3336,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           if (!btn) {
             return;
           }
-          const inserted = platform.insertDownloadButton({ post, btn, documentRef, windowRef });
-          if (!inserted) {
-            post.appendChild(btn);
-          }
+          insertDownloadButtonIntoPost(post, btn);
         });
       }
       if (typeof platform.afterInjectDownloadButtons === "function") {

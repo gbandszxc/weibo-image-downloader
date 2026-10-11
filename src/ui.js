@@ -398,17 +398,18 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         });
     }
 
-    function createDownloadButton(postContainer) {
-        if (postContainer.querySelector(".weibo-img-download-btn")) {
-            return null;
+    function insertDownloadButtonIntoPost(post, btn) {
+        if (!btn) {
+            return;
         }
 
-        const initialMediaItems = getFallbackMediaItems(postContainer);
-        const shouldResolveEmptyMediaItems = typeof platform.shouldResolveEmptyMediaItems === "function" &&
-            platform.shouldResolveEmptyMediaItems(postContainer);
-        if (initialMediaItems.length === 0 && !shouldResolveEmptyMediaItems) {
-            return null;
+        const inserted = platform.insertDownloadButton({ post, btn, documentRef, windowRef });
+        if (!inserted) {
+            post.appendChild(btn);
         }
+    }
+
+    function buildDownloadButton(postContainer, initialMediaItems, resolvedPromise = null) {
         const btn = documentRef.createElement("button");
         btn.type = "button";
         btn.className = "weibo-img-download-btn";
@@ -416,7 +417,8 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         buttonDetails.set(btn, { postId, count: initialMediaItems.length });
         renderDownloadButton(btn);
 
-        resolvePostMediaItems(postContainer, initialMediaItems).then((mediaItems) => {
+        const syncPromise = resolvedPromise || resolvePostMediaItems(postContainer, initialMediaItems);
+        syncPromise.then((mediaItems) => {
             syncDownloadButtonState(btn, mediaItems);
         }).catch((error) => {
             utils.log("媒体解析失败:", error.message);
@@ -533,6 +535,37 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         return btn;
     }
 
+    function createDownloadButton(postContainer) {
+        if (postContainer.querySelector(".weibo-img-download-btn")) {
+            return null;
+        }
+
+        const initialMediaItems = getFallbackMediaItems(postContainer);
+        if (initialMediaItems.length > 0) {
+            return buildDownloadButton(postContainer, initialMediaItems);
+        }
+
+        const shouldResolveEmptyMediaItems = typeof platform.shouldResolveEmptyMediaItems === "function" &&
+            platform.shouldResolveEmptyMediaItems(postContainer);
+        if (!shouldResolveEmptyMediaItems) {
+            return null;
+        }
+
+        // DOM 中没有媒体时是否真有内容（如仅视频帖）需接口确认，确认非空后再插入按钮，
+        // 避免按钮先以空计数闪现、解析为空后又被移除。
+        resolvePostMediaItems(postContainer, initialMediaItems).then((mediaItems) => {
+            if (!Array.isArray(mediaItems) || mediaItems.length === 0 ||
+                postContainer.querySelector(".weibo-img-download-btn")) {
+                return;
+            }
+
+            insertDownloadButtonIntoPost(postContainer, buildDownloadButton(postContainer, mediaItems, Promise.resolve(mediaItems)));
+        }).catch((error) => {
+            utils.log("媒体解析失败:", error.message);
+        });
+        return null;
+    }
+
     function syncExistingButtonMedia(post, btn) {
         resolvePostMediaItems(post, getFallbackMediaItems(post)).then((mediaItems) => {
             if (btn.parentNode) {
@@ -565,10 +598,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
                     return;
                 }
 
-                const inserted = platform.insertDownloadButton({ post, btn, documentRef, windowRef });
-                if (!inserted) {
-                    post.appendChild(btn);
-                }
+                insertDownloadButtonIntoPost(post, btn);
             });
         }
 
