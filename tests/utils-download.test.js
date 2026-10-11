@@ -321,3 +321,15 @@ test("downloadImage uses GM_xmlhttpRequest blob fallback when direct download fa
     assert.equal(openCalls.length, 0);
     assert.equal(clicks.length, 0);
 });
+
+test("browser anchor fallback reports initiation instead of claiming saved files", async () => {
+    const { utils, clicks, toastMessages } = createTestUtils({
+        fetchRef: async () => ({ ok: true, blob: async () => new Blob(["image"]) })
+    });
+    const result = await utils.downloadMediaItems([
+        { kind: "image", imageUrl: "https://pbs.twimg.com/media/demo.jpg", imageExt: ".jpg" }
+    ], "123");
+    assert.deepEqual(result, { successCount: 1, failedCount: 0, handedOffCount: 1 });
+    assert.equal(clicks.length, 1);
+    assert.deepEqual(toastMessages, ["已发起 1 个文件的下载；请查看浏览器下载列表"]);
+});

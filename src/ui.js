@@ -8,6 +8,9 @@ const SELECTION_LABEL_PREFIXES = {
 export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
     const platform = utils.getPlatformAdapter();
     let resolvedMediaItemsCache = new WeakMap();
+    const buttonDetails = new WeakMap();
+    const postDownloads = new Map();
+    const downloadButtonTitle = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
 
     function showToast(message, duration = 3000) {
         const existing = documentRef.getElementById("weibo-img-toast");
@@ -17,6 +20,8 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
 
         const toast = documentRef.createElement("div");
         toast.id = "weibo-img-toast";
+        toast.role = "status";
+        toast.ariaLive = "polite";
 
         const closeBtn = documentRef.createElement("span");
         closeBtn.textContent = "×";
@@ -111,7 +116,60 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
             return;
         }
 
-        btn.innerHTML = `↓${mediaItems.length}`;
+        const details = buttonDetails.get(btn);
+        if (details) {
+            details.count = mediaItems.length;
+            renderDownloadButton(btn);
+        } else {
+            btn.innerHTML = `↓${mediaItems.length}`;
+        }
+    }
+
+    function renderDownloadButton(btn) {
+        const details = buttonDetails.get(btn);
+        const { postId, count } = details;
+        const status = postDownloads.get(postId)?.status || "idle";
+        const labels = {
+            selecting: "选择中",
+            downloading: "下载中",
+            completed: "完成",
+            failed: "失败",
+            started: "已发起"
+        };
+        const busy = status === "downloading" || status === "selecting";
+        const label = labels[status] || (count > 0 ? `↓${count}` : "↓...");
+        const labelChanged = btn.innerHTML !== label;
+        const previousWidth = labelChanged && btn.isConnected ? btn.getBoundingClientRect().width : 0;
+        if (labelChanged) {
+            details.animation?.cancel();
+        }
+        btn.innerHTML = label;
+        btn.disabled = busy;
+        btn.setAttribute("data-download-state", status);
+        btn.setAttribute("aria-busy", String(busy));
+        btn.title = status === "started" ? "已发起下载，请查看浏览器下载列表"
+            : (status === "failed" ? "下载失败，请重试"
+                : (labels[status] ? `${labels[status]}${busy ? "，请稍候" : ""}` : downloadButtonTitle));
+        btn.setAttribute("aria-label", labels[status] ? btn.title : `下载 ${count} 个媒体项；${downloadButtonTitle}`);
+        if (previousWidth > 0 && typeof btn.animate === "function" &&
+            !windowRef.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+            const nextWidth = btn.getBoundingClientRect().width;
+            if (previousWidth !== nextWidth) {
+                // 限定实际宽度，避免拉伸文字；中途切换状态时从当前宽度继续。
+                details.animation = btn.animate([
+                    { minWidth: `${previousWidth}px`, maxWidth: `${previousWidth}px` },
+                    { minWidth: `${nextWidth}px`, maxWidth: `${nextWidth}px` }
+                ], { duration: 220, easing: "cubic-bezier(0.16, 1, 0.3, 1)" });
+            }
+        }
+    }
+
+    function refreshPostDownloadState(postId) {
+        documentRef.querySelectorAll(".weibo-img-download-btn").forEach((btn) => {
+            if (buttonDetails.get(btn)?.postId === postId) {
+                renderDownloadButton(btn);
+            }
+        });
     }
 
     async function resolvePostMediaItems(postContainer, initialFallbackItems = null) {
@@ -120,7 +178,10 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         }
 
         const fallbackItems = initialFallbackItems || getFallbackMediaItems(postContainer);
-        const mediaPromise = Promise.resolve(platform.resolvePostMediaItems(postContainer, fallbackItems));
+        const mediaPromise = Promise.resolve(platform.resolvePostMediaItems(postContainer, fallbackItems)).catch((error) => {
+            resolvedMediaItemsCache.delete(postContainer);
+            throw error;
+        });
 
         resolvedMediaItemsCache.set(postContainer, mediaPromise);
         return mediaPromise;
@@ -323,13 +384,17 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         if (initialMediaItems.length === 0 && !shouldResolveEmptyMediaItems) {
             return null;
         }
-        const btn = documentRef.createElement("span");
+        const btn = documentRef.createElement("button");
+        btn.type = "button";
         btn.className = "weibo-img-download-btn";
-        btn.innerHTML = initialMediaItems.length > 0 ? `↓${initialMediaItems.length}` : "↓...";
-        btn.title = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
+        const postId = getPostId(postContainer);
+        buttonDetails.set(btn, { postId, count: initialMediaItems.length });
+        renderDownloadButton(btn);
 
         resolvePostMediaItems(postContainer, initialMediaItems).then((mediaItems) => {
             syncDownloadButtonState(btn, mediaItems);
+        }).catch((error) => {
+            utils.log("媒体解析失败:", error.message);
         });
 
         let longPressTimer = null;
@@ -342,9 +407,49 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
             }
         };
 
-        const startDownload = async (targetMediaItems) => {
-            const postId = getPostId(postContainer);
-            await utils.downloadMediaItems(targetMediaItems, postId);
+        const startDownload = async (selectMedia = false) => {
+            const current = postDownloads.get(postId);
+            if (current?.status === "downloading" || current?.status === "selecting") {
+                return;
+            }
+            const task = { status: selectMedia ? "selecting" : "downloading" };
+            postDownloads.set(postId, task);
+            renderDownloadButton(btn);
+            refreshPostDownloadState(postId);
+            try {
+                let mediaItems = await resolvePostMediaItems(postContainer, initialMediaItems);
+                if (selectMedia) {
+                    mediaItems = await showImageSelectModal(mediaItems);
+                    if (!mediaItems || mediaItems.length === 0) {
+                        postDownloads.delete(postId);
+                        renderDownloadButton(btn);
+                        refreshPostDownloadState(postId);
+                        return;
+                    }
+                    task.status = "downloading";
+                    renderDownloadButton(btn);
+                    refreshPostDownloadState(postId);
+                }
+                const result = await utils.downloadMediaItems(mediaItems, postId);
+                task.status = !result || result.failedCount > 0 || result.successCount === 0
+                    ? "failed" : (result.handedOffCount > 0 ? "started" : "completed");
+            } catch (error) {
+                utils.log("下载失败:", error.message);
+                task.status = "failed";
+                showToast("下载失败，请重试");
+            } finally {
+                if (postDownloads.get(postId) === task) {
+                    renderDownloadButton(btn);
+                    refreshPostDownloadState(postId);
+                    setTimeout(() => {
+                        if (postDownloads.get(postId) === task) {
+                            postDownloads.delete(postId);
+                            renderDownloadButton(btn);
+                            refreshPostDownloadState(postId);
+                        }
+                    }, 1200);
+                }
+            }
         };
 
         btn.addEventListener("contextmenu", (event) => {
@@ -355,6 +460,9 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         btn.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
+            if (event.detail === 0) {
+                startDownload();
+            }
         });
 
         btn.addEventListener("pointerdown", (event) => {
@@ -364,19 +472,15 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
 
             event.preventDefault();
             event.stopPropagation();
+            if (btn.disabled) {
+                return;
+            }
             longPressTriggered = false;
             clearLongPressTimer();
-            longPressTimer = setTimeout(async () => {
+            longPressTimer = setTimeout(() => {
                 longPressTriggered = true;
                 clearLongPressTimer();
-                const mediaItems = await resolvePostMediaItems(
-                    postContainer,
-                    initialMediaItems
-                );
-                const selectedMediaItems = await showImageSelectModal(mediaItems);
-                if (selectedMediaItems && selectedMediaItems.length > 0) {
-                    startDownload(selectedMediaItems);
-                }
+                startDownload(true);
             }, config.LONG_PRESS_MS);
         });
 
@@ -393,11 +497,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
             longPressTriggered = false;
 
             if (!wasLongPress) {
-                const mediaItems = await resolvePostMediaItems(
-                    postContainer,
-                    initialMediaItems
-                );
-                await startDownload(mediaItems);
+                await startDownload();
             }
         });
 

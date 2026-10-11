@@ -199,7 +199,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
 
         setTimeout(() => windowRef.URL.revokeObjectURL(blobUrl), 1000);
-        return true;
+        return "started";
     }
 
     async function fetchBlobWithXmlHttpRequest(url) {
@@ -329,7 +329,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             if (ui && typeof ui.showToast === "function") {
                 ui.showToast("未找到图片");
             }
-            return;
+            return { successCount: 0, failedCount: 0, handedOffCount: 0 };
         }
 
         const jobs = buildMediaDownloadJobs(mediaItems, postId);
@@ -337,7 +337,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             if (ui && typeof ui.showToast === "function") {
                 ui.showToast("未找到图片");
             }
-            return;
+            return { successCount: 0, failedCount: 0, handedOffCount: 0 };
         }
 
         log(`开始下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件...`);
@@ -345,6 +345,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         let successCount = 0;
         let failedCount = 0;
         let failedGifCount = 0;
+        let handedOffCount = 0;
 
         for (let i = 0; i < jobs.length; i++) {
             const job = jobs[i];
@@ -353,6 +354,9 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                 : await downloadImage(job.url, job.filename);
             if (success) {
                 successCount++;
+                if (success === "started") {
+                    handedOffCount++;
+                }
             } else {
                 failedCount++;
                 if (job.convertToGif) {
@@ -382,6 +386,9 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             message = `已下载 ${successCount} 个文件，${failedCount} 个失败`;
         }
 
+        if (handedOffCount > 0) {
+            message = `已发起 ${successCount} 个文件的下载${failedCount > 0 ? `，${failedCount} 个失败` : ""}；请查看浏览器下载列表`;
+        }
         if (failedGifCount > 0) {
             message += "；X GIF转换或保存失败，可关闭自动转换下载 MP4 源";
         }
@@ -389,6 +396,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         if (ui && typeof ui.showToast === "function") {
             ui.showToast(message);
         }
+        return { successCount, failedCount, handedOffCount };
     }
 
     return {

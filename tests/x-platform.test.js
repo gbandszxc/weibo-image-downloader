@@ -84,6 +84,7 @@ function createXPlatformWithFetch({ configOverrides = {}, response }) {
 
 function createButtonElement() {
     return {
+        setAttribute() {},
         className: "",
         innerHTML: "",
         title: "",

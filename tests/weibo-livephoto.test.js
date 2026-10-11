@@ -172,6 +172,7 @@ function createTestElement(tagName) {
 
 function createButtonElement() {
     return {
+        setAttribute() {},
         className: "",
         innerHTML: "",
         title: "",
