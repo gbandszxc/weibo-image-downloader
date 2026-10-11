@@ -2535,11 +2535,10 @@ OR OTHER DEALINGS IN THE SOFTWARE.
 
   // src/livephoto.ts
   var XMP_SEGMENT_ID = "http://ns.adobe.com/xap/1.0/\0";
-  var SAMSUNG_FIELD_MARKER = new Uint8Array([0, 0, 48, 10]);
-  var SAMSUNG_FIELD_HEAD_SIZE = 24;
-  var SAMSUNG_SEF_TAIL_SIZE = 32;
-  var SAMSUNG_SEF_VERSION = 106;
-  var STILL_IMAGE_TIMESTAMP_US = 15e5;
+  var EXIF_SEGMENT_ID = "Exif\0\0";
+  var MPF_SEGMENT_ID = "MPF\0";
+  var OPPO_USER_COMMENT = "Oplus_8388608";
+  var USER_COMMENT_ASCII_PREFIX = "ASCII\0\0\0";
   function concatBytes(...parts) {
     const total = parts.reduce((sum, part) => sum + part.length, 0);
     const out = new Uint8Array(total);
@@ -2567,6 +2566,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     let offset = 2;
     let insertOffset = 2;
     let existingXmp = null;
+    let existingExif = null;
     while (offset + 4 <= jpeg.length) {
       while (offset < jpeg.length - 1 && jpeg[offset] === 255 && jpeg[offset + 1] === 255) {
         offset++;
@@ -2584,21 +2584,232 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         throw new Error("JPEG 段结构损坏（段长度越界）");
       }
       if (marker === 225) {
-        const idEnd = Math.min(offset + 4 + XMP_SEGMENT_ID.length, segmentEnd);
-        const segmentId = bytesToLatin1(jpeg.subarray(offset + 4, idEnd));
+        const segmentBytes = jpeg.subarray(offset + 4, segmentEnd);
+        const segmentId = bytesToLatin1(segmentBytes.subarray(0, XMP_SEGMENT_ID.length));
         if (segmentId === XMP_SEGMENT_ID) {
           existingXmp = { start: offset, end: segmentEnd };
-          if (bytesToLatin1(jpeg.subarray(offset + 4, segmentEnd)).includes("MotionPhoto") || bytesToLatin1(jpeg.subarray(offset + 4, segmentEnd)).includes("MicroVideo")) {
+          const segmentText = bytesToLatin1(segmentBytes);
+          if (segmentText.includes("MotionPhoto") || segmentText.includes("MicroVideo")) {
             throw new Error("图片已包含 Motion Photo 元数据，无需重复合并");
           }
+        } else if (bytesToLatin1(segmentBytes.subarray(0, EXIF_SEGMENT_ID.length)) === EXIF_SEGMENT_ID) {
+          existingExif = { start: offset, end: segmentEnd };
         }
         insertOffset = segmentEnd;
       }
       offset = segmentEnd;
     }
-    return { insertOffset, existingXmp };
+    return { insertOffset, existingXmp, existingExif };
   }
-  function buildMotionPhotoXmp(embeddedLength, microVideoOffset) {
+  function patchVideoContainerBrand(video) {
+    if (video.length < 20 || bytesToLatin1(video.subarray(4, 8)) !== "ftyp" || bytesToLatin1(video.subarray(8, 12)) !== "qt  ") {
+      return video;
+    }
+    const patched = video.slice();
+    patched.set(encodeUtf8("isom"), 8);
+    patched.set(encodeUtf8("mp41"), 16);
+    return patched;
+  }
+  var USER_COMMENT_TAG = 37510;
+  var EXIF_IFD_POINTER_TAG = 34665;
+  var USER_COMMENT_VALUE = `${USER_COMMENT_ASCII_PREFIX}${OPPO_USER_COMMENT}`;
+  function buildUserCommentValue() {
+    return encodeUtf8(USER_COMMENT_VALUE);
+  }
+  function buildMinimalExifApp1() {
+    const value = buildUserCommentValue();
+    const exifIfdOffset = 8 + 2 + 12 + 4;
+    const valueOffset = exifIfdOffset + 2 + 12 + 4;
+    const tiff = new Uint8Array(valueOffset + value.length);
+    const view = new DataView(tiff.buffer);
+    tiff.set(encodeUtf8("II"), 0);
+    view.setUint16(2, 42, true);
+    view.setUint32(4, 8, true);
+    view.setUint16(8, 1, true);
+    view.setUint16(10, EXIF_IFD_POINTER_TAG, true);
+    view.setUint16(12, 4, true);
+    view.setUint32(14, 1, true);
+    view.setUint32(18, exifIfdOffset, true);
+    view.setUint32(22, 0, true);
+    view.setUint16(exifIfdOffset, 1, true);
+    view.setUint16(exifIfdOffset + 2, USER_COMMENT_TAG, true);
+    view.setUint16(exifIfdOffset + 4, 7, true);
+    view.setUint32(exifIfdOffset + 6, value.length, true);
+    view.setUint32(exifIfdOffset + 10, valueOffset, true);
+    view.setUint32(exifIfdOffset + 14, 0, true);
+    tiff.set(value, valueOffset);
+    return concatBytes(
+      new Uint8Array([255, 225]),
+      u16be(2 + EXIF_SEGMENT_ID.length + tiff.length),
+      encodeUtf8(EXIF_SEGMENT_ID),
+      tiff
+    );
+  }
+  function u16be(value) {
+    return Uint8Array.from([value >> 8 & 255, value & 255]);
+  }
+  function readIfd(view, offset, littleEndian) {
+    const count = view.getUint16(offset, littleEndian);
+    const entries = [];
+    for (let i = 0; i < count; i++) {
+      const entryOffset = offset + 2 + i * 12;
+      entries.push({
+        tag: view.getUint16(entryOffset, littleEndian),
+        type: view.getUint16(entryOffset + 2, littleEndian),
+        count: view.getUint32(entryOffset + 4, littleEndian),
+        offset: view.getUint32(entryOffset + 8, littleEndian)
+      });
+    }
+    return {
+      offset,
+      count,
+      entries,
+      nextIfdOffset: view.getUint32(offset + 2 + count * 12, littleEndian),
+      tableEnd: offset + 2 + count * 12 + 4
+    };
+  }
+  function entryValueByteLength(entry) {
+    const typeSizes = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
+    return (typeSizes[entry.type] || 1) * entry.count;
+  }
+  function injectExifUserComment(jpeg, exif) {
+    try {
+      const segment = jpeg.subarray(exif.start, exif.end);
+      const tiffStart = 10;
+      const tiff = segment.subarray(tiffStart);
+      if (tiff.length < 8) {
+        return jpeg;
+      }
+      const littleEndian = tiff[0] === 73 && tiff[1] === 73;
+      const bigEndian = tiff[0] === 77 && tiff[1] === 77;
+      const magic = littleEndian ? tiff[3] << 8 | tiff[2] : tiff[2] << 8 | tiff[3];
+      if (!littleEndian && !bigEndian || magic !== 42) {
+        return jpeg;
+      }
+      const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength);
+      const ifd0 = readIfd(view, view.getUint32(4, littleEndian), littleEndian);
+      const exifPointer = ifd0.entries.find((entry) => entry.tag === EXIF_IFD_POINTER_TAG);
+      if (!exifPointer || entryValueByteLength(exifPointer) !== 4) {
+        return jpeg;
+      }
+      const exifIfd = readIfd(view, exifPointer.offset, littleEndian);
+      const userComment = buildUserCommentValue();
+      const existing = exifIfd.entries.find((entry) => entry.tag === USER_COMMENT_TAG);
+      if (existing) {
+        const existingLength = entryValueByteLength(existing);
+        if (existingLength >= userComment.length && existing.offset >= exifIfd.tableEnd && existing.offset + existing.count <= tiff.length) {
+          const patched2 = jpeg.slice();
+          const valueStart = exif.start + tiffStart + existing.offset;
+          patched2.set(userComment, valueStart);
+          patched2.fill(0, valueStart + userComment.length, valueStart + existing.count);
+          return patched2;
+        }
+        return jpeg;
+      }
+      const insertIndex = exifIfd.entries.filter((entry) => entry.tag < USER_COMMENT_TAG).length;
+      const newTableEntries = [...exifIfd.entries];
+      newTableEntries.splice(insertIndex, 0, { tag: USER_COMMENT_TAG, type: 7, count: userComment.length, offset: 0 });
+      const shift = 12;
+      const valueOffset = tiff.length + shift;
+      const newTiffLength = tiff.length + shift + userComment.length;
+      const newTiff = new Uint8Array(newTiffLength);
+      newTiff.set(tiff.subarray(0, exifIfd.tableEnd - shift), 0);
+      newTiff.set(tiff.subarray(exifIfd.tableEnd - 4), exifIfd.tableEnd + 8);
+      const newView = new DataView(newTiff.buffer);
+      const writeU16 = (offset, value) => newView.setUint16(offset, value, littleEndian);
+      const writeU32 = (offset, value) => newView.setUint32(offset, value, littleEndian);
+      writeU16(exifIfd.offset, newTableEntries.length);
+      newTableEntries.forEach((entry, index) => {
+        const entryOffset = exifIfd.offset + 2 + index * 12;
+        writeU16(entryOffset, entry.tag);
+        writeU16(entryOffset + 2, entry.type);
+        writeU32(entryOffset + 4, entry.count);
+        const isUserComment = entry.tag === USER_COMMENT_TAG;
+        const outOfLine = !isUserComment && entry.offset >= exifIfd.tableEnd && entry.offset < tiff.length;
+        const baseOffset = outOfLine ? entry.offset + shift : entry.offset;
+        writeU32(entryOffset + 8, isUserComment ? valueOffset : baseOffset);
+      });
+      const oldNext = exifIfd.nextIfdOffset;
+      writeU32(exifIfd.offset + 2 + newTableEntries.length * 12, oldNext >= exifIfd.tableEnd && oldNext < tiff.length ? oldNext + shift : oldNext);
+      if (ifd0.nextIfdOffset >= exifIfd.tableEnd && ifd0.nextIfdOffset < tiff.length) {
+        writeU32(ifd0.offset + 2 + ifd0.count * 12, ifd0.nextIfdOffset + shift);
+      }
+      ifd0.entries.forEach((entry, index) => {
+        if (entry.offset >= exifIfd.tableEnd && entry.offset < tiff.length) {
+          writeU32(ifd0.offset + 2 + index * 12 + 8, entry.offset + shift);
+        }
+      });
+      newTiff.set(userComment, valueOffset);
+      const newSegmentLength = 2 + 6 + newTiffLength;
+      const delta = newSegmentLength + 2 - segment.length;
+      const patched = new Uint8Array(jpeg.length + delta);
+      patched.set(jpeg.subarray(0, exif.start), 0);
+      patched[exif.start] = 255;
+      patched[exif.start + 1] = 225;
+      patched[exif.start + 2] = newSegmentLength >> 8 & 255;
+      patched[exif.start + 3] = newSegmentLength & 255;
+      patched.set(encodeUtf8(EXIF_SEGMENT_ID), exif.start + 4);
+      patched.set(newTiff, exif.start + tiffStart);
+      patched.set(jpeg.subarray(exif.end), exif.start + tiffStart + newTiffLength);
+      return patched;
+    } catch {
+      return jpeg;
+    }
+  }
+  function ensureExifWithUserComment(jpeg, existingExif) {
+    if (existingExif) {
+      return injectExifUserComment(jpeg, existingExif);
+    }
+    const minimal = buildMinimalExifApp1();
+    const patched = new Uint8Array(jpeg.length + minimal.length);
+    patched.set(jpeg.subarray(0, 2), 0);
+    patched.set(minimal, 2);
+    patched.set(jpeg.subarray(2), 2 + minimal.length);
+    return patched;
+  }
+  var MPF_SEGMENT_LENGTH = 2 + 2 + 4 + 8 + (2 + 3 * 12 + 4) + 16;
+  function buildMpfSegment(jpegPartLength) {
+    const bodyLength = MPF_SEGMENT_LENGTH - 4;
+    const mpEntryOffset = 4 + 8 + 2 + 3 * 12 + 4;
+    const segment = new Uint8Array(bodyLength);
+    const view = new DataView(segment.buffer);
+    let offset = 0;
+    segment.set(encodeUtf8(MPF_SEGMENT_ID), offset);
+    offset += 4;
+    segment.set(encodeUtf8("MM"), offset);
+    view.setUint16(offset + 2, 42, false);
+    view.setUint32(offset + 4, 8, false);
+    offset += 8;
+    view.setUint16(offset, 3, false);
+    offset += 2;
+    view.setUint16(offset, 45056, false);
+    view.setUint16(offset + 2, 7, false);
+    view.setUint32(offset + 4, 4, false);
+    segment.set(encodeUtf8("0100"), offset + 8);
+    offset += 12;
+    view.setUint16(offset, 45057, false);
+    view.setUint16(offset + 2, 4, false);
+    view.setUint32(offset + 4, 1, false);
+    view.setUint32(offset + 8, 1, false);
+    offset += 12;
+    view.setUint16(offset, 45058, false);
+    view.setUint16(offset + 2, 7, false);
+    view.setUint32(offset + 4, 16, false);
+    view.setUint32(offset + 8, mpEntryOffset, false);
+    offset += 12;
+    view.setUint32(offset, 0, false);
+    offset += 4;
+    view.setUint32(offset, 196608, false);
+    view.setUint32(offset + 4, jpegPartLength, false);
+    const finalSegment = new Uint8Array(MPF_SEGMENT_LENGTH);
+    finalSegment[0] = 255;
+    finalSegment[1] = 226;
+    finalSegment[2] = MPF_SEGMENT_LENGTH - 2 >> 8 & 255;
+    finalSegment[3] = MPF_SEGMENT_LENGTH - 2 & 255;
+    finalSegment.set(segment, 4);
+    return finalSegment;
+  }
+  function buildMotionPhotoXmp(videoLength) {
     return [
       '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
       '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.1.0-jc003">',
@@ -2611,16 +2822,17 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       '        xmlns:Item="http://ns.google.com/photos/1.0/container/item/"',
       '      GCamera:MotionPhoto="1"',
       '      GCamera:MotionPhotoVersion="1"',
-      `      GCamera:MotionPhotoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
-      `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
+      '      GCamera:MotionPhotoPresentationTimestampUs="0"',
+      '      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="0"',
       '      OpCamera:MotionPhotoOwner="oplus"',
       '      OpCamera:OLivePhotoVersion="2"',
-      `      OpCamera:VideoLength="${embeddedLength}"`,
+      `      OpCamera:VideoLength="${videoLength}"`,
+      '      OpCamera:MotionPhotoFeatureFlag="1"',
       `      MiCamera:XMPMeta="&lt;?xml version='1.0' encoding='UTF-8' standalone='yes' ?&gt;"`,
       '      GCamera:MicroVideoVersion="1"',
       '      GCamera:MicroVideo="1"',
-      `      GCamera:MicroVideoOffset="${microVideoOffset}"`,
-      `      GCamera:MicroVideoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}">`,
+      `      GCamera:MicroVideoOffset="${videoLength}"`,
+      '      GCamera:MicroVideoPresentationTimestampUs="0">',
       "      <Container:Directory>",
       "        <rdf:Seq>",
       '          <rdf:li rdf:parseType="Resource">',
@@ -2634,7 +2846,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       "            <Container:Item",
       '              Item:Mime="video/mp4"',
       '              Item:Semantic="MotionPhoto"',
-      `              Item:Length="${embeddedLength}"/>`,
+      `              Item:Length="${videoLength}"/>`,
       "          </rdf:li>",
       "        </rdf:Seq>",
       "      </Container:Directory>",
@@ -2660,74 +2872,20 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     segment.set(payload, 4 + idBytes.length);
     return segment;
   }
-  function buildSamsungFieldHead() {
-    const nameBytes = encodeUtf8("MotionPhoto_Data");
-    const head = new Uint8Array(SAMSUNG_FIELD_HEAD_SIZE);
-    let offset = 0;
-    head.set(SAMSUNG_FIELD_MARKER, offset);
-    offset += SAMSUNG_FIELD_MARKER.length;
-    const nameLength = nameBytes.length;
-    head[offset] = nameLength & 255;
-    head[offset + 1] = nameLength >> 8 & 255;
-    head[offset + 2] = nameLength >> 16 & 255;
-    head[offset + 3] = nameLength >> 24 & 255;
-    offset += 4;
-    head.set(nameBytes, offset);
-    return head;
-  }
-  function buildSamsungSefTail(videoLength) {
-    const sefHeadSize = 4 + 4 + 4;
-    const sefFieldInfoSize = SAMSUNG_FIELD_MARKER.length + 4 + 4;
-    const sefOffset = SAMSUNG_FIELD_HEAD_SIZE + videoLength;
-    const tail = new Uint8Array(SAMSUNG_SEF_TAIL_SIZE);
-    let offset = 0;
-    tail.set(encodeUtf8("SEFH"), offset);
-    offset += 4;
-    tail[offset] = SAMSUNG_SEF_VERSION & 255;
-    tail[offset + 1] = SAMSUNG_SEF_VERSION >> 8 & 255;
-    tail[offset + 2] = SAMSUNG_SEF_VERSION >> 16 & 255;
-    tail[offset + 3] = SAMSUNG_SEF_VERSION >> 24 & 255;
-    offset += 4;
-    const fieldCount = 1;
-    tail[offset] = fieldCount;
-    offset += 4;
-    tail.set(SAMSUNG_FIELD_MARKER, offset);
-    offset += SAMSUNG_FIELD_MARKER.length;
-    const negativeOffsetFromSef = sefOffset;
-    tail[offset] = negativeOffsetFromSef & 255;
-    tail[offset + 1] = negativeOffsetFromSef >> 8 & 255;
-    tail[offset + 2] = negativeOffsetFromSef >> 16 & 255;
-    tail[offset + 3] = negativeOffsetFromSef >> 24 & 255;
-    offset += 4;
-    const fieldDataLength = sefOffset;
-    tail[offset] = fieldDataLength & 255;
-    tail[offset + 1] = fieldDataLength >> 8 & 255;
-    tail[offset + 2] = fieldDataLength >> 16 & 255;
-    tail[offset + 3] = fieldDataLength >> 24 & 255;
-    offset += 4;
-    const sefDataSize = sefHeadSize + sefFieldInfoSize;
-    tail[offset] = sefDataSize & 255;
-    tail[offset + 1] = sefDataSize >> 8 & 255;
-    tail[offset + 2] = sefDataSize >> 16 & 255;
-    tail[offset + 3] = sefDataSize >> 24 & 255;
-    offset += 4;
-    tail.set(encodeUtf8("SEFT"), offset);
-    return tail;
-  }
   function buildMotionPhoto(jpeg, video) {
-    if (video.length < 12 || bytesToLatin1(video.subarray(4, 8)) !== "ftyp") {
+    const patchedVideo = patchVideoContainerBrand(video);
+    if (patchedVideo.length < 12 || bytesToLatin1(patchedVideo.subarray(4, 8)) !== "ftyp") {
       throw new Error("视频不是 ISO-BMFF 容器（缺少 ftyp box），无法合并");
     }
-    const { insertOffset, existingXmp } = findJpegXmpInsertPoint(jpeg);
-    const microVideoOffset = video.length + SAMSUNG_SEF_TAIL_SIZE;
-    const embeddedLength = microVideoOffset;
-    const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(embeddedLength, microVideoOffset));
-    const fieldHead = buildSamsungFieldHead();
-    const sefTail = buildSamsungSefTail(video.length);
+    const exifReady = ensureExifWithUserComment(jpeg, findJpegXmpInsertPoint(jpeg).existingExif);
+    const { insertOffset, existingXmp } = findJpegXmpInsertPoint(exifReady);
+    const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(patchedVideo.length));
     const headEnd = existingXmp ? existingXmp.start : insertOffset;
-    const jpegHead = jpeg.subarray(0, headEnd);
-    const jpegTail = jpeg.subarray(existingXmp ? existingXmp.end : insertOffset);
-    return concatBytes(jpegHead, xmpSegment, jpegTail, fieldHead, video, sefTail);
+    const jpegHead = exifReady.subarray(0, headEnd);
+    const jpegTail = exifReady.subarray(existingXmp ? existingXmp.end : insertOffset);
+    const jpegPartLength = jpegHead.length + xmpSegment.length + MPF_SEGMENT_LENGTH + jpegTail.length;
+    const mpfSegment = buildMpfSegment(jpegPartLength);
+    return concatBytes(jpegHead, xmpSegment, mpfSegment, jpegTail, patchedVideo);
   }
 
   // src/utils.ts

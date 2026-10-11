@@ -39,30 +39,45 @@
 
 「微博LivePhoto自动合并」开启时，脚本在浏览器本地把 Live Photo 的封面图与 `.mov` 视频合并为单文件 Motion Photo，命名为 `weibo_帖子ID_序号.MP.jpg`（遵循 Google Motion Photo 规范建议的 `*.MP.jpg` 模式），全程纯字节拼接，不重新编码、不转码。关闭该设置时回退为分别保存 `.jpg` 与 `_live.mov`；合并过程中任何一步失败（拉流失败、视频不是 ISO-BMFF 容器等）也会自动回退为分别保存，并在 toast 中提示。
 
-**输出文件布局**（实现位于 `src/livephoto.ts` 的 `buildMotionPhoto`）：
+**输出文件布局**（实现位于 `src/livephoto.ts` 的 `buildMotionPhoto`，与 OPPO Find X7 Ultra 真机逆向参考实现同构）：
 
 ```
-┌─────────────────────────────────────────────┐
-│ 原始 JPEG 字节（含 EXIF，不改动）              │
-│  在最后一个 APP1 段后插入 XMP APP1 段          │
-├─────────────────────────────────────────────┤
-│ Samsung SEF 字段头 24 字节                    │
-│   [00 00 30 0A][长度 16]["MotionPhoto_Data"] │
-│ 视频原始字节（微博 LivePhoto 为 H.264 MOV）    │  ← 视频起点
-│ Samsung SEF 索引尾 32 字节                    │
-│   ["SEFH"][版本 106][字段数 1][字段索引][SEFT] │
-└─────────────────────────────────────────────┘（SEFT 必须位于文件末尾）
+┌──────────────────────────────────────────────┐
+│ JPEG 原始字节（不重编码）                      │
+│  EXIF：注入 UserComment="Oplus_8388608" 标记  │
+│  XMP APP1（依 Adobe 建议排在 Exif APP1 之后）  │
+│  MPF APP2（NumberOfImages=1，紧跟 XMP）        │
+├──────────────────────────────────────────────┤
+│ 视频原始字节（ISO-BMFF；QuickTime brand 原位   │  ← 视频起点
+│  等长补丁为 isom/mp41，不转码、不移动 moov）    │
+└──────────────────────────────────────────────┘ 视频结束于文件末尾（EOF）
 ```
 
-XMP 同时写入三套识别标记，一份文件多端识别：
+XMP 同时写入三套识别标记，全部长度/偏移字段统一为**视频精确字节数**（视频结束于 EOF，"从文件末尾回退"与"目录顺序读取"两类实现都能正确定位）：
 
-- **Google 新格式**：`GCamera:MotionPhoto="1"`、`GCamera:MotionPhotoVersion="1"`、`GCamera:MotionPhotoPresentationTimestampUs="1500000"`（iPhone Live Photo 静态帧标准位置 ≈1.5s）+ `Container:Directory`（`Primary` 项 + `MotionPhoto` 项，`Item:Length` 覆盖视频与 SEF 尾部，读至文件末尾）；
-- **Google 旧格式（MVIMG 时代）**：`GCamera:MicroVideo="1"`、`GCamera:MicroVideoVersion="1"`、`GCamera:MicroVideoOffset="视频长度+32"`——偏移语义为"从文件末尾回退到视频起始字节的字节数"；
-- **厂商相册字段**：镜像真机文件的 `OpCamera`（OPPO）与 `MiCamera`（小米）XMP 字段，提升国产 ROM 自带相册的识别率。
+- **Google 新格式**：`GCamera:MotionPhoto="1"`、`GCamera:MotionPhotoVersion="1"`、`GCamera:MotionPhotoPresentationTimestampUs="0"` + `Container:Directory`（`Primary` 项 + `MotionPhoto` 项）；
+- **Google 旧格式（MVIMG 时代）**：`GCamera:MicroVideo="1"`、`GCamera:MicroVideoVersion="1"`、`GCamera:MicroVideoOffset="视频字节数"`——偏移语义为"从文件末尾回退到视频起始字节的字节数"；
+- **OPPO/一加（ColorOS 14+）**：`OpCamera:MotionPhotoOwner="oplus"`、`OpCamera:OLivePhotoVersion="2"`、`OpCamera:VideoLength="视频字节数"`、`OpCamera:MotionPhotoFeatureFlag="1"`，配套 EXIF `UserComment="Oplus_8388608"` 与 MPF APP2 段（真机逆向确认缺一不可）；
+- **小米（HyperOS）**：系统 MediaStore 按 XMP 中的 `MicroVideo`/`MotionPhoto` 关键字建索引，并保留真机文件同款的 `MiCamera` 字段。
 
 实现要点：
 
-- JPEG 段按 marker 结构逐段解析定位插入点（XMP APP1 依 Adobe 建议排在 Exif APP1 之后）；绝不全文件搜索 `FF D9` 找 EOI，避免命中 EXIF 内嵌缩略图的假 EOI。已有普通 XMP 段时整段原位替换；已含 `MotionPhoto`/`MicroVideo` 标记的图片拒绝重复合并。
-- 视频必须是 ISO-BMFF 容器（字节 4-7 为 `ftyp`）。微博 LivePhoto 视频为 `ftyp qt`（QuickTime MOV）的 H.264 流，moov 在文件尾部，直接拼接即可播放，无需转码；Google 新规范明确允许内嵌 `video/quicktime`。
-- Samsung SEF trailer 字节布局参考 doodspav/motionphoto 与 ExifTool 对三星真机文件的逆向结论（视频长度与 `MicroVideoOffset` 相差 56 字节的 SEF 开销）。
-- 产物兼容性（实测/资料结论）：Google 相册（新旧格式双写）、三星相册（SEFT）、Windows 11 照片（2023+ 版本）、ImageGlass 9.3+、Immich 等自托管相册可识别动态效果；macOS Quick Look、iOS 相册采用 Apple 成对文件机制（EXIF ContentIdentifier + MOV `mdta`），不识别任何单文件动态照片格式，仅显示静态封面；IrfanView、ACDSee、Honeyview 按静态图处理。
+- JPEG 段按 marker 结构逐段解析定位插入点，绝不全文件搜索 `FF D9` 找 EOI（EXIF 内嵌缩略图含假 EOI）。已有普通 XMP 段时整段原位替换；已含 `MotionPhoto`/`MicroVideo` 标记的图片拒绝重复合并。
+- EXIF 注入通过 TIff IFD 结构化改写完成：在 Exif IFD 中按 tag 序插入 UserComment 条目，条目表增长 12 字节，所有指向表后数据的偏移同步平移（缩略图 IFD 指针、MakerNote 数据块整体后移，MakerNote 内部偏移以其自身为基不受影响）；结构不符合预期时跳过注入，不影响合并。
+- 视频必须是 ISO-BMFF 容器（字节 4-7 为 `ftyp`）。微博 LivePhoto 视频存在 QuickTime MOV（`ftyp qt`）与 MP4 两种，前者会被原位等长补丁为 `isom`/`mp41` brand——box 尺寸不变、`stco` 偏移无需修补，主流播放器直接兼容；已是 MP4 brand 的视频保持原样。
+- 不写 Samsung SEFT 尾部：OPPO/小米真机文件均无尾部，且 SEF 尾部会使"文件末尾-长度"定位到错误位置。取舍是**三星相册不识别本产物**（三星相册依赖 SEFT trailer）；Google 相册、Windows 11 照片按 XMP 识别不受影响。
+
+**实测/资料兼容性矩阵**：
+
+| 平台 | 动态效果 | 说明 |
+| --- | --- | --- |
+| Windows 11 照片（2023+） | ✓ | 按 XMP 识别 |
+| Google 相册（App/Web） | ✓ | 新旧格式双写 |
+| OPPO/一加（ColorOS 14+） | ✓ | 按 Find X7 Ultra 真机逆向参考对齐，需真机回归 |
+| 飞牛相册（fnOS v0.8.45+） | ✓ 理论兼容 | 官方支持安卓动态照片（华为/小米/OPPO/荣耀/三星/魅族），按 exiftool 路线解析 XMP |
+| 小米（HyperOS） | ✓ 理论兼容 | 官方文档：XMP 关键字索引；仅 HyperOS 支持第三方合成产物 |
+| 三星相册 | ✗ | 依赖 SEFT trailer，与 OPPO 布局互斥，本产物不写 |
+| macOS 预览/Quick Look、iOS 相册 | ✗ | Apple 为"成对文件 + ContentIdentifier"机制，不识别任何单文件动态照片，仅显示静态封面 |
+| IrfanView、ACDSee、Honeyview | ✗ | 按静态图处理；ImageGlass 9.3+ 可识别 |
+
+**传输与使用注意**：合并产物依赖 JPEG 内的 XMP/EXIF/MPF 元数据，微信普通图片、QQ、部分云盘传输会重压缩并剥掉这些段导致动态效果丢失——请使用 USB、"原图"方式或可直接保存的传输通道；落盘后等待相册重新扫描索引。

@@ -407,8 +407,10 @@ test("LivePhoto merge downloads fetch image and video and save a single Motion P
     assert.equal(createObjectUrlCalls[0].type, "image/jpeg");
     const mergedText = new TextDecoder("latin1").decode(await createObjectUrlCalls[0].arrayBuffer());
     assert.ok(mergedText.includes("GCamera:MotionPhoto=\"1\""), "应包含 Motion Photo XMP");
-    assert.ok(mergedText.includes("MotionPhoto_Data"), "应包含 Samsung trailer 字段");
-    assert.ok(mergedText.endsWith("SEFT"), "文件应以 SEFT 结尾");
+    assert.ok(mergedText.includes("Oplus_8388608"), "应包含 OPPO EXIF 识别标记");
+    // 内嵌视频 QuickTime brand 已补丁为 MP4，且视频字节位于文件末尾（无尾部标记）
+    assert.ok(/isom/.test(mergedText.slice(-40)), "内嵌视频 brand 应已补丁为 isom");
+    assert.ok(mergedText.endsWith("free"), "应以视频原始字节结尾");
     assert.equal(toastMessages[toastMessages.length - 1], "已发起 1 个文件的下载；请查看浏览器下载列表");
 });
 
@@ -452,10 +454,36 @@ function buildTestMotionJpeg(): Uint8Array {
         seg.set(payload, 4);
         return seg;
     };
+    // 结构合法的大端 TIFF：IFD0(Orientation + ExifIFD 指针@38) + ExifIFD(ExifVersion)
+    const tiff = new Uint8Array(56);
+    const view = new DataView(tiff.buffer);
+    tiff.set(ascii("MM"), 0);
+    view.setUint16(2, 42, false);
+    view.setUint32(4, 8, false);
+    view.setUint16(8, 2, false);
+    view.setUint16(10, 0x0112, false);
+    view.setUint16(12, 3, false);
+    view.setUint32(14, 1, false);
+    view.setUint16(18, 1, false);
+    view.setUint16(20, 0, false);
+    view.setUint16(22, 0x8769, false);
+    view.setUint16(24, 4, false);
+    view.setUint32(26, 1, false);
+    view.setUint32(30, 38, false);
+    view.setUint32(34, 0, false);
+    view.setUint16(38, 1, false);
+    view.setUint16(40, 0x9000, false);
+    view.setUint16(42, 7, false);
+    view.setUint32(44, 4, false);
+    tiff.set(ascii("0232"), 48);
+    view.setUint32(52, 0, false);
+    const exifPayload = new Uint8Array(6 + tiff.length);
+    exifPayload.set(ascii("Exif\0\0"), 0);
+    exifPayload.set(tiff, 6);
     const parts = [
         new Uint8Array([0xff, 0xd8]),
         segment(0xe0, ascii("JFIF\0\x01\x02\x00\x00\x01\x00\x01\x00\x00")),
-        segment(0xe1, ascii("Exif\0\0MM\x00*\x00\x00\x00\x08\x00\x01")),
+        segment(0xe1, exifPayload),
         segment(0xdb, new Uint8Array(16).fill(0x22)),
         segment(0xda, ascii("\x00\x01\x01\x00\x00\x3f\x00")),
         ascii("scan"),
