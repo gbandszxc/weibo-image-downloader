@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { convertXVideoToGif } from "../src/x-gif.ts";
-import { createGifVideoMock } from "./helpers/gif-video-mock.js";
+import { createGifVideoMock } from "./helpers/gif-video-mock.ts";
+// @ts-expect-error omggif 未提供类型声明，GifReader 在测试中按动态结构使用
 import { GifReader } from "omggif";
 
 // 按 GIF89a 块结构读取帧延迟，独立校验编码产物而非仅校验文件扩展名。
-function readFrameDelays(bytes) {
+function readFrameDelays(bytes: Uint8Array) {
     let offset = 13 + (bytes[10] & 128 ? 3 * (2 ** ((bytes[10] & 7) + 1)) : 0);
     const delays = [];
     function skipBlocks() {
@@ -109,7 +110,7 @@ test("frames using all 256 colors retain every color without reserving transpare
 });
 
 test("invalid video metadata and decoder errors reject and release the source", async () => {
-    for (const options of [{ duration: Infinity }, { duration: 0 }, { failOn: "load" }, { failOn: "seek" }]) {
+    for (const options of [{ duration: Infinity }, { duration: 0 }, { failOn: "load" }, { failOn: "seek" }] as const) {
         const mock = createGifVideoMock(options);
         await assert.rejects(convertXVideoToGif(new Blob(["invalid"]), mock.windowRef));
         assert.equal(mock.cleanup.paused, true);

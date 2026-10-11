@@ -1,7 +1,17 @@
-export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, height = 1, frames = null } = {}) {
-    const seeks = [];
-    const drawnTimes = [];
-    const revokedUrls = [];
+import type { GifWindowLike } from "../../src/x-gif-workers.ts";
+
+export interface GifVideoMockOptions {
+    duration?: number;
+    failOn?: "load" | "seek" | null;
+    width?: number;
+    height?: number;
+    frames?: Uint8Array[] | null;
+}
+
+export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, height = 1, frames = null }: GifVideoMockOptions = {}) {
+    const seeks: number[] = [];
+    const drawnTimes: number[] = [];
+    const revokedUrls: string[] = [];
     let loadCalls = 0;
     let paused = false;
     let sourceRemoved = false;
@@ -10,10 +20,12 @@ export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, 
         videoHeight = height;
         duration = duration;
         time = 0;
+        // src 由被测代码在加载时赋值，这里声明字段仅供类型检查，运行时行为与原动态属性一致。
+        src = "";
         get currentTime() {
             return this.time;
         }
-        set currentTime(value) {
+        set currentTime(value: number) {
             seeks.push(value);
             this.time = value;
             queueMicrotask(() => this.dispatchEvent(new Event(failOn === "seek" ? "error" : "seeked")));
@@ -27,7 +39,7 @@ export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, 
         pause() {
             paused = true;
         }
-        removeAttribute(name) {
+        removeAttribute(name: string) {
             if (name === "src") {
                 this.src = "";
                 sourceRemoved = true;
@@ -56,10 +68,11 @@ export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, 
         }
     };
     return {
+        // 交叉 Record<string, unknown>：本 mock 也被 downloadMediaItems 等以 windowOverrides: Record<string, unknown> 消费。
         windowRef: {
             location: { hostname: "x.com" },
             document: {
-                createElement(tag) {
+                createElement(tag: string) {
                     if (tag === "video") return video;
                     if (tag === "canvas") return canvas;
                     throw new Error(`Unexpected element: ${tag}`);
@@ -67,9 +80,9 @@ export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, 
             },
             URL: {
                 createObjectURL() { return "blob:gif-source"; },
-                revokeObjectURL(url) { revokedUrls.push(url); }
+                revokeObjectURL(url: string) { revokedUrls.push(url); }
             }
-        },
+        } as unknown as GifWindowLike & Record<string, unknown>,
         video,
         seeks,
         drawnTimes,

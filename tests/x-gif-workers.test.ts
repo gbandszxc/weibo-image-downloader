@@ -1,33 +1,49 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Worker as NodeWorker } from "node:worker_threads";
+import type { Transferable as NodeTransferable } from "node:worker_threads";
 import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
+// @ts-expect-error omggif 未提供类型声明，GifReader 在测试中按动态结构使用
 import { GifReader } from "omggif";
+// @ts-expect-error scripts/gif-worker.mjs 为无声明的 ESM 构建脚本
 import { buildGifWorker, gifWorkerPlugin } from "../scripts/gif-worker.mjs";
 import { acquireGifWorkers } from "../src/x-gif-workers.ts";
+import type { AcquiredGifWorkers, GifWindowLike } from "../src/x-gif-workers.ts";
 import { convertXVideoToGif } from "../src/x-gif.ts";
-import { createGifVideoMock } from "./helpers/gif-video-mock.js";
+import type { GifColor } from "gifenc";
+import { createGifVideoMock } from "./helpers/gif-video-mock.ts";
+
+type ConverterContext = {
+    gifTest: { convertXVideoToGif: typeof convertXVideoToGif };
+};
 
 const workerSource = (await buildGifWorker()).outputFiles[0].text;
 const converterSource = (await build({
     entryPoints: ["src/x-gif.ts"], bundle: true, format: "iife", globalName: "gifTest",
     platform: "browser", target: "es2020", write: false, plugins: [gifWorkerPlugin()]
 })).outputFiles[0].text;
-const context = { Blob, setTimeout, clearTimeout, Uint8Array, Uint8ClampedArray, Uint32Array };
+const context = { Blob, setTimeout, clearTimeout, Uint8Array, Uint8ClampedArray, Uint32Array } as unknown as ConverterContext;
 runInNewContext(converterSource, context);
 
-function workerEnvironment({ cores = 8, fail = null, reverseFirstPair = false } = {}) {
-    const workers = [];
-    const replies = [];
-    const revoked = [];
-    const terminations = [];
-    const commands = new Map();
+function workerEnvironment({ cores = 8, fail = null, reverseFirstPair = false }: {
+    cores?: number;
+    fail?: "constructor" | "runtime" | "encode" | null;
+    reverseFirstPair?: boolean;
+} = {}) {
+    const workers: BrowserWorker[] = [];
+    const replies: number[] = [];
+    const revoked: string[] = [];
+    const terminations: Promise<number>[] = [];
+    const commands = new Map<number, string>();
     let urls = 0;
     let failureSent = false;
-    let firstReply = null;
+    let firstReply: (() => void) | null = null;
     let secondReplied = false;
     class BrowserWorker {
+        onerror: ((event: { preventDefault(): void }) => void) | null = null;
+        onmessage: ((event: { data: unknown }) => void) | null = null;
+        thread: NodeWorker;
         constructor() {
             if (fail === "constructor") throw new Error("CSP blocked");
             this.thread = new NodeWorker(`
@@ -57,7 +73,7 @@ function workerEnvironment({ cores = 8, fail = null, reverseFirstPair = false } 
             });
             this.thread.on("error", () => this.onerror?.({ preventDefault() {} }));
         }
-        postMessage(data, transfer) {
+        postMessage(data: { id: number; command?: string }, transfer: NodeTransferable[]) {
             commands.set(data.id, data.command || "quantize");
             this.thread.postMessage(data, transfer);
         }
@@ -72,9 +88,9 @@ function workerEnvironment({ cores = 8, fail = null, reverseFirstPair = false } 
             navigator: { hardwareConcurrency: cores },
             URL: {
                 createObjectURL: () => `blob:worker-${++urls}`,
-                revokeObjectURL: (url) => revoked.push(url)
+                revokeObjectURL: (url: string) => revoked.push(url)
             }
-        }
+        } as unknown as GifWindowLike
     };
 }
 
@@ -91,11 +107,11 @@ test("real worker replies may arrive out of order while GIF pixels and timing st
     Object.assign(mock.windowRef, { Worker: env.windowRef.Worker, navigator: env.windowRef.navigator });
     const originalURL = mock.windowRef.URL;
     mock.windowRef.URL = {
-        createObjectURL: (blob) => blob.type === "text/javascript"
+        createObjectURL: (blob: Blob) => blob.type === "text/javascript"
             ? env.windowRef.URL.createObjectURL(blob) : originalURL.createObjectURL(blob),
-        revokeObjectURL: (url) => url.startsWith("blob:worker-")
+        revokeObjectURL: (url: string) => url.startsWith("blob:worker-")
             ? env.windowRef.URL.revokeObjectURL(url) : originalURL.revokeObjectURL(url)
-    };
+    } as unknown as typeof URL;
     const gif = await context.gifTest.convertXVideoToGif(new Blob(["workers"]), mock.windowRef);
     const bytes = new Uint8Array(await gif.arrayBuffer());
     assert.deepEqual(bytes, new Uint8Array(await expected.arrayBuffer()));
@@ -119,8 +135,8 @@ test("real worker replies may arrive out of order while GIF pixels and timing st
 test("concurrent users share at most two workers, transfer ownership, and release the pool", async (t) => {
     const env = workerEnvironment();
     t.after(async () => { env.workers.forEach((worker) => worker.terminate()); await Promise.all(env.terminations); });
-    const first = acquireGifWorkers(env.windowRef, workerSource);
-    const second = acquireGifWorkers(env.windowRef, workerSource);
+    const first = acquireGifWorkers(env.windowRef, workerSource) as AcquiredGifWorkers;
+    const second = acquireGifWorkers(env.windowRef, workerSource) as AcquiredGifWorkers;
     const pixels = new Uint8ClampedArray([255, 0, 0, 255]);
     const backup = pixels.slice();
     const jobs = [first.process(pixels, backup)];
@@ -152,7 +168,7 @@ test("decoder failure with a frame in flight releases workers and the video sour
 test("worker failure after transfer falls back without losing pixels or leaving resources", async (t) => {
     const env = workerEnvironment({ fail: "runtime" });
     t.after(async () => { env.workers.forEach((worker) => worker.terminate()); await Promise.all(env.terminations); });
-    const pool = acquireGifWorkers(env.windowRef, workerSource);
+    const pool = acquireGifWorkers(env.windowRef, workerSource) as AcquiredGifWorkers;
     const pixels = new Uint8ClampedArray([0, 255, 0, 255]);
     const jobs = Array.from({ length: 4 }, () => pool.process(pixels.slice(), pixels));
     for (const { index, palette } of await Promise.all(jobs)) {
@@ -166,7 +182,7 @@ test("worker failure after transfer falls back without losing pixels or leaving 
 test("low-core devices use one worker and blocked or absent workers retain fallback", async (t) => {
     const env = workerEnvironment({ cores: 2 });
     t.after(async () => { env.workers.forEach((worker) => worker.terminate()); await Promise.all(env.terminations); });
-    const pool = acquireGifWorkers(env.windowRef, workerSource);
+    const pool = acquireGifWorkers(env.windowRef, workerSource) as AcquiredGifWorkers;
     const pixels = new Uint8ClampedArray([0, 0, 255, 255]);
     const { index, palette } = await pool.process(pixels.slice(), pixels);
     assert.deepEqual(palette[index[0]], [0, 0, 255]);
@@ -175,7 +191,7 @@ test("low-core devices use one worker and blocked or absent workers retain fallb
     const blocked = workerEnvironment({ fail: "constructor" });
     assert.equal(acquireGifWorkers(blocked.windowRef, workerSource), null);
     assert.equal(blocked.revoked.length, 1);
-    assert.equal(acquireGifWorkers({}, workerSource), null);
+    assert.equal(acquireGifWorkers({} as GifWindowLike, workerSource), null);
 });
 
 test("stalled workers time out and recover transferred pixels", async (t) => {
@@ -185,11 +201,11 @@ test("stalled workers time out and recover transferred pixels", async (t) => {
         navigator: { hardwareConcurrency: 2 },
         URL: { createObjectURL: () => "blob:stalled", revokeObjectURL() {} },
         Worker: class {
-            postMessage(data, transfer) { structuredClone(data, { transfer }); }
+            postMessage(data: unknown, transfer: Transferable[]) { structuredClone(data, { transfer }); }
             terminate() { terminated++; }
         }
-    };
-    const pool = acquireGifWorkers(windowRef, workerSource);
+    } as unknown as GifWindowLike;
+    const pool = acquireGifWorkers(windowRef, workerSource) as AcquiredGifWorkers;
     const pixels = new Uint8ClampedArray([255, 0, 0, 255]);
     const result = pool.process(pixels.slice(), pixels);
     t.mock.timers.tick(15000);
@@ -202,15 +218,16 @@ test("stalled workers time out and recover transferred pixels", async (t) => {
 test("independent encoded chunks retain canvas coordinates and queued frame timing", async (t) => {
     const env = workerEnvironment();
     t.after(async () => { env.workers.forEach((worker) => worker.terminate()); await Promise.all(env.terminations); });
-    const pool = acquireGifWorkers(env.windowRef, workerSource);
-    const palette = [[255, 0, 0], [0, 255, 0]];
+    const pool = acquireGifWorkers(env.windowRef, workerSource) as AcquiredGifWorkers;
+    const palette: GifColor[] = [[255, 0, 0], [0, 255, 0]];
     const first = { index: new Uint8Array([0, 0]), palette, width: 2, height: 1, left: 0, top: 0, transparentIndex: -1, delay: 50 };
     const second = { ...first, index: new Uint8Array([1]), width: 1, left: 1, delay: 60 };
     const last = { ...second, index: new Uint8Array([0]), delay: 70 };
     const jobs = [pool.encode(first, true), pool.encode(second, false), pool.encode(last, false)];
     last.delay = 10;
     const chunks = await Promise.all(jobs);
-    const gif = new Blob([...chunks.map((chunk) => chunk.bytes), new Uint8Array([0x3b])]);
+    // gifenc 的字节缓冲均为普通 ArrayBuffer，收窄元素类型以满足 BlobPart（与 src/x-gif.ts 同法）。
+    const gif = new Blob([...chunks.map((chunk) => chunk.bytes as Uint8Array<ArrayBuffer>), new Uint8Array([0x3b])]);
     const reader = new GifReader(new Uint8Array(await gif.arrayBuffer()));
     assert.equal(reader.width, 2);
     assert.equal(reader.height, 1);
@@ -251,7 +268,8 @@ test("failed bitmap capture recovers from the held video frame and closes the bi
         OffscreenCanvas: class {},
         createImageBitmap: async () => ({ close() { closed++; } }),
         Worker: class {
-            postMessage() { queueMicrotask(() => this.onerror({ preventDefault() {} })); }
+            onerror: ((event: { preventDefault(): void }) => void) | null = null;
+            postMessage() { queueMicrotask(() => this.onerror!({ preventDefault() {} })); }
             terminate() { terminated++; }
         }
     });
