@@ -3,15 +3,55 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { CONFIG } from "../src/config.ts";
 import { createUi } from "../src/ui.ts";
+import type { MediaItem, UiConfig, UiDownloadResult, UiPlatformAdapter, UiUtils } from "../src/ui.ts";
 
-function deferred() {
-    let resolve;
-    let reject;
-    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+type MediaItemSeed = Partial<MediaItem> & Pick<MediaItem, "kind" | "imageUrl">;
+
+/** 测试侧类型辅助：允许只写断言关心的字段，运行时原样返回同一对象。 */
+function asMediaItem(seed: MediaItemSeed): MediaItem {
+    return seed as MediaItem;
+}
+
+function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
     return { promise, resolve, reject };
 }
 
-function element(tagName) {
+interface MockEvent {
+    pointerType?: string;
+    button?: number;
+    detail?: number;
+    preventDefault?(): void;
+    stopPropagation?(): void;
+}
+
+interface MockElement {
+    tagName: string;
+    children: MockElement[];
+    className: string;
+    attributes: Record<string, string>;
+    handlers: Record<string, (event: MockEvent) => unknown>;
+    style: Record<string, string>;
+    id?: string;
+    type?: string;
+    checked?: boolean;
+    innerHTML?: string;
+    disabled?: boolean;
+    parentNode?: MockElement | null;
+    setAttribute(name: string, value: string): void;
+    appendChild(child: MockElement): void;
+    removeChild(child: MockElement): void;
+    remove(): void;
+    addEventListener(type: string, handler: (event: MockEvent) => unknown): void;
+    removeEventListener(type: string): void;
+    fire(type: string, overrides?: Partial<MockEvent>): unknown;
+    querySelectorAll(selector: string): MockElement[];
+    querySelector(selector: string): MockElement | null;
+}
+
+function element(tagName: string): MockElement {
     return {
         tagName, children: [], className: "", attributes: {}, handlers: {}, style: {},
         setAttribute(name, value) { this.attributes[name] = value; },
@@ -37,45 +77,52 @@ function element(tagName) {
     };
 }
 
+interface HarnessOptions {
+    resolveMedia?: (post: Element, items: MediaItem[]) => MediaItem[] | Promise<MediaItem[]>;
+    download?: (items: MediaItem[] | null, id: string) => Promise<UiDownloadResult>;
+    shouldResolveEmptyMediaItems?: () => boolean;
+    configOverrides?: Partial<UiConfig>;
+}
+
 function harness({
     resolveMedia = (_post, items) => items,
     download = async () => ({ successCount: 1, failedCount: 0, handedOffCount: 0 }),
     shouldResolveEmptyMediaItems = () => false,
     configOverrides = {}
-} = {}) {
-    const calls = [];
+}: HarnessOptions = {}) {
+    const calls: { items: MediaItem[]; id: string }[] = [];
     const document = {
         head: element("head"), body: element("body"),
         createElement: element,
-        getElementById(id) { return this.body.querySelectorAll("*").find((node) => node.id === id) || null; },
-        querySelectorAll(selector) { return this.body.querySelectorAll(selector); },
+        getElementById(id: string) { return this.body.querySelectorAll("*").find((node) => node.id === id) || null; },
+        querySelectorAll(selector: string) { return this.body.querySelectorAll(selector); },
         addEventListener() {}, removeEventListener() {}
     };
-    const media = [{ kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/mock.mp4" }];
+    const media: MediaItem[] = [asMediaItem({ kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/mock.mp4" })];
     const ui = createUi({
-        config: { ...CONFIG, ...configOverrides }, documentRef: document, windowRef: {}, addStyle() {},
+        config: { ...CONFIG, ...configOverrides }, documentRef: document as unknown as Document, windowRef: {} as Window, addStyle() {},
         utils: {
             log() {},
-            async downloadMediaItems(items, id) { calls.push({ items, id }); return download(items, id); },
+            async downloadMediaItems(items: MediaItem[] | null, id: string) { calls.push({ items: items as MediaItem[], id }); return download(items, id); },
             getPlatformAdapter() {
                 return {
                     getDomMediaItems() { return media; },
                     resolvePostMediaItems: resolveMedia,
-                    getPostId(post) { return post.id; },
+                    getPostId(post: Element) { return post.id; },
                     getPostSelectors() { return [".post"]; },
                     shouldSkipPost() { return false; },
                     shouldResolveEmptyMediaItems,
-                    insertDownloadButton({ post, btn }) { post.appendChild(btn); return true; }
-                };
+                    insertDownloadButton({ post, btn }: { post: Element; btn: HTMLElement }) { post.appendChild(btn); return true; }
+                } as unknown as UiPlatformAdapter;
             }
-        }
+        } as UiUtils
     });
-    function addPost(id) {
+    function addPost(id: string): { post: MockElement; button: MockElement } {
         const post = element("article");
         post.id = id;
         post.className = "post";
         document.body.appendChild(post);
-        const button = ui.createDownloadButton(post);
+        const button = ui.createDownloadButton(post as unknown as Element) as unknown as MockElement;
         post.appendChild(button);
         return { post, button };
     }
@@ -84,8 +131,8 @@ function harness({
 
 test("click feedback precedes media resolution and prevents same-post duplicates across refresh", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
-    const media = deferred();
-    const downloads = deferred();
+    const media = deferred<MediaItem[]>();
+    const downloads = deferred<UiDownloadResult>();
     const h = harness({ resolveMedia: () => media.promise, download: () => downloads.promise });
     const { button } = h.addPost("1");
     const other = h.addPost("2");
@@ -122,7 +169,7 @@ test("failure, partial failure and browser handoff display truthful results and 
         [{ successCount: 0, failedCount: 1, handedOffCount: 0 }, "失败"],
         [{ successCount: 1, failedCount: 1, handedOffCount: 0 }, "失败"],
         [{ successCount: 1, failedCount: 0, handedOffCount: 1 }, "已发起"]
-    ]) {
+    ] as [UiDownloadResult, string][]) {
         const h = harness({ download: async () => result });
         const { button } = h.addPost(label);
         await button.fire("pointerup");
@@ -152,9 +199,9 @@ test("a resolution error unlocks the button and can be retried without caching t
 
 test("long press cancels without downloading and confirmation downloads only selected items", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
-    const pending = deferred();
+    const pending = deferred<UiDownloadResult>();
     const h = harness({ download: () => pending.promise });
-    h.media.push({ kind: "image", imageUrl: "https://example.test/second.jpg" });
+    h.media.push(asMediaItem({ kind: "image", imageUrl: "https://example.test/second.jpg" }));
     const { button } = h.addPost("1");
     button.fire("pointerdown");
     t.mock.timers.tick(CONFIG.LONG_PRESS_MS);
@@ -182,7 +229,7 @@ test("long press cancels without downloading and confirmation downloads only sel
 
 test("keyboard activation starts one download and pointer-generated clicks do not start another", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
-    const pending = deferred();
+    const pending = deferred<UiDownloadResult>();
     const h = harness({ download: () => pending.promise });
     const { button } = h.addPost("1");
     button.fire("click", { detail: 0 });
@@ -202,7 +249,7 @@ test("buttons re-resolve when media mounts after injection and update the count"
     await setImmediate();
     assert.equal(button.innerHTML, "↓1");
 
-    h.media.push({ kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/second.mp4" });
+    h.media.push(asMediaItem({ kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/second.mp4" }));
     h.ui.injectDownloadButtons();
     await setImmediate();
 
@@ -247,7 +294,7 @@ test("downloading rescans media so late-mounted items are included", async () =>
     const { button } = h.addPost("1");
     await setImmediate();
 
-    h.media.push({ kind: "image", imageUrl: "https://pbs.twimg.com/media/Late?name=orig" });
+    h.media.push(asMediaItem({ kind: "image", imageUrl: "https://pbs.twimg.com/media/Late?name=orig" }));
     await button.fire("pointerup");
 
     assert.equal(h.calls.length, 1);
@@ -257,7 +304,7 @@ test("downloading rescans media so late-mounted items are included", async () =>
 test("failed resolutions back off per fingerprint and retry after the cooldown", async () => {
     let shouldFail = true;
     let resolutions = 0;
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const h = harness({
         configOverrides: { MEDIA_RESOLVE_RETRY_COOLDOWN_MS: 20 },
         resolveMedia: (_post, items) => {

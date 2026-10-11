@@ -4,20 +4,22 @@ import { readFileSync } from "node:fs";
 
 import { CONFIG } from "../src/config.ts";
 import { createUi } from "../src/ui.ts";
+import type { UiConfig, UiPlatformAdapter, UiUtils } from "../src/ui.ts";
 import { createXPlatform } from "../src/platforms/x.ts";
+import type { XMediaItem, XPlatformConfig, XPlatformDeps, XStatus } from "../src/platforms/x.ts";
 
-function createXPlatformForTests(configOverrides = {}) {
+function createXPlatformForTests(configOverrides: XPlatformConfig = {}) {
     return createXPlatform({
         config: {
             ...CONFIG,
             DEBUG: false,
             ...configOverrides
-        },
+        } as XPlatformConfig,
         windowRef: {
             location: {
                 hostname: "x.com",
                 pathname: "/home"
-            }
+            } as Location
         },
         log() {},
         fetchRef: async () => {
@@ -41,42 +43,45 @@ function createXPlatformForTests(configOverrides = {}) {
     });
 }
 
-function createQueryContainer(selectorMap) {
+function createQueryContainer(selectorMap: Record<string, unknown>) {
     return {
-        querySelectorAll(selector) {
+        querySelectorAll(selector: string) {
             return selectorMap[selector] || [];
         },
-        querySelector(selector) {
+        querySelector(selector: string) {
             const value = selectorMap[selector];
             if (Array.isArray(value)) {
                 return value[0] || null;
             }
             return value || null;
         }
-    };
+    } as unknown as Element;
 }
 
-function createXPlatformWithFetch({ configOverrides = {}, response }) {
+function createXPlatformWithFetch({ configOverrides = {}, response }: {
+    configOverrides?: XPlatformConfig;
+    response: XStatus;
+}) {
     return createXPlatform({
         config: {
             ...CONFIG,
             DEBUG: false,
             ...configOverrides
-        },
+        } as XPlatformConfig,
         windowRef: {
             location: {
                 hostname: "x.com",
                 pathname: "/TimJayas/status/2058971197417914571",
                 href: "https://x.com/TimJayas/status/2058971197417914571"
-            }
+            } as Location
         },
         log() {},
-        fetchRef: async () => ({
+        fetchRef: (async () => ({
             ok: true,
             json: async () => response
-        }),
+        })) as unknown as typeof fetch,
         getFileExtensionFromUrl(url, fallback = ".jpg") {
-            const match = url.split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            const match = (url as string).split("?")[0].match(/(\.[a-z0-9]+)$/i);
             return match ? match[1].toLowerCase() : fallback;
         }
     });
@@ -102,7 +107,7 @@ test("captured X GIF posts remain GIF items with video download disabled", () =>
             'article img[src*="twimg.com"]': [{ src: post.video.poster }],
             video: [{
                 ...post.video,
-                closest(selector) {
+                closest(selector: string) {
                     return selector === '[data-testid="videoComponent"]' ? post.container : null;
                 }
             }]
@@ -210,7 +215,7 @@ test("x platform skips video cover images inside previewInterstitial containers"
             {
                 src: "https://pbs.twimg.com/media/HO5QDQfbQAA3Rcq?format=jpg&name=360x360",
                 alt: "嵌入式视频",
-                closest(selector) {
+                closest(selector: string) {
                     return selector.includes("previewInterstitial") ? {} : null;
                 }
             }
@@ -265,13 +270,13 @@ test("video-enabled x platform resolves highest bitrate video from TweetResultBy
     });
 
     const mediaItems = await platform.resolvePostMediaItems({
-        querySelector(selector) {
+        querySelector(selector: string) {
             if (selector.includes("previewInterstitial")) {
                 return {};
             }
             return null;
         }
-    }, []);
+    } as Element, []);
 
     assert.equal(mediaItems.length, 1);
     assert.equal(mediaItems[0].kind, "video");
@@ -310,14 +315,14 @@ test("video-enabled x platform merges GraphQL videos with DOM photos for mixed p
         }
     });
     const post = {
-        querySelector(selector) {
+        querySelector(selector: string) {
             if (selector.includes("previewInterstitial")) {
                 return {};
             }
             return null;
         }
-    };
-    const photoItem = {
+    } as Element;
+    const photoItem: XMediaItem = {
         id: "p1",
         kind: "image",
         label: "图片 1",
@@ -375,10 +380,10 @@ test("video-enabled x platform resolves quoted photos when their DOM has not loa
         }
     });
     const post = {
-        querySelector(selector) {
+        querySelector(selector: string) {
             return selector.includes("previewInterstitial") ? {} : null;
         }
-    };
+    } as Element;
 
     const mediaItems = await platform.resolvePostMediaItems(post, []);
 
@@ -389,10 +394,10 @@ test("video-enabled x platform resolves quoted photos when their DOM has not loa
 
 function createStatusPostWithVideo() {
     return {
-        querySelectorAll(selector) {
+        querySelectorAll(selector: string) {
             if (selector === "time") {
                 return [{
-                    closest(sel) {
+                    closest(sel: string) {
                         return sel.includes("/status/")
                             ? { href: "https://x.com/Enorez2/status/2108593257039221196" }
                             : null;
@@ -401,13 +406,13 @@ function createStatusPostWithVideo() {
             }
             return [];
         },
-        querySelector(selector) {
+        querySelector(selector: string) {
             return selector.includes("previewInterstitial") ? {} : null;
         }
-    };
+    } as unknown as Element;
 }
 
-function createVideoDomItem(url) {
+function createVideoDomItem(url: string): XMediaItem {
     return {
         id: "dom-video-1",
         kind: "video",
@@ -419,24 +424,26 @@ function createVideoDomItem(url) {
     };
 }
 
-function createXPlatformForResolve({ fetchImpl }) {
+function createXPlatformForResolve({ fetchImpl }: {
+    fetchImpl: (...args: Parameters<typeof fetch>) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
+}) {
     let fetchCount = 0;
     const platform = createXPlatform({
-        config: { ...CONFIG, DEBUG: false, ENABLE_VIDEO_DOWNLOAD: true },
+        config: { ...CONFIG, DEBUG: false, ENABLE_VIDEO_DOWNLOAD: true } as XPlatformConfig,
         windowRef: {
             location: {
                 hostname: "x.com",
                 pathname: "/Enorez2/status/2108593257039221196",
                 href: "https://x.com/Enorez2/status/2108593257039221196"
-            }
+            } as Location
         },
         log() {},
         fetchRef: async (...args) => {
             fetchCount++;
-            return fetchImpl(...args);
+            return fetchImpl(...args) as unknown as Response;
         },
         getFileExtensionFromUrl(url, fallback = ".jpg") {
-            const match = url.split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            const match = (url as string).split("?")[0].match(/(\.[a-z0-9]+)$/i);
             return match ? match[1].toLowerCase() : fallback;
         }
     });
@@ -534,7 +541,7 @@ test("video-enabled x platform skips API fetch when DOM already found a GIF badg
             throw new Error("fetch should not be called");
         }
     });
-    const gifItem = {
+    const gifItem: XMediaItem = {
         id: "dom-gif-1",
         kind: "gif",
         label: "GIF 1",
@@ -559,13 +566,13 @@ test("x platform with video disabled resolves only DOM photos for mixed posts", 
             fetchCalled = true;
             throw new Error("fetch should not be called");
         }
-    });
+    } as unknown as XPlatformDeps);
     const post = {
         querySelector() {
             return {};
         }
-    };
-    const photoItem = {
+    } as unknown as Element;
+    const photoItem: XMediaItem = {
         id: "p1",
         kind: "image",
         label: "图片 1",
@@ -588,13 +595,13 @@ test("video-enabled x platform allows async resolution for video-only detail pos
         response: {}
     });
     const post = {
-        querySelector(selector) {
+        querySelector(selector: string) {
             if (selector === 'img[src*="video_thumb"], img[src*="amplify_video_thumb"], img[src*="ext_tw_video_thumb"], a[href*="/video/"], video, [data-testid="previewInterstitial"]') {
                 return { src: "https://pbs.twimg.com/amplify_video_thumb/demo.jpg" };
             }
             return null;
         }
-    };
+    } as unknown as Element;
 
     assert.equal(platform.shouldResolveEmptyMediaItems(post), true);
     assert.equal(platform.getPostId(post), "2058971197417914571");
@@ -618,10 +625,10 @@ test("x platform uses the timestamp link instead of a quoted post link", () => {
         }
     };
     const post = {
-        querySelector(selector) {
+        querySelector(selector: string) {
             return selector === "time" ? quotedTime : null;
         },
-        querySelectorAll(selector) {
+        querySelectorAll(selector: string) {
             if (selector === "time") {
                 return [quotedTime, mainTime];
             }
@@ -630,7 +637,7 @@ test("x platform uses the timestamp link instead of a quoted post link", () => {
                 { href: "https://x.com/XaiabP/status/2084954812937117767" }
             ];
         }
-    };
+    } as unknown as Element;
 
     assert.equal(platform.getPostId(post), "2084954812937117767");
 });
@@ -647,7 +654,7 @@ test("video-enabled x platform does not inject placeholder buttons for plain det
         querySelectorAll() {
             return [];
         }
-    };
+    } as unknown as Element;
 
     assert.equal(platform.shouldResolveEmptyMediaItems(post), false);
 });
@@ -660,7 +667,7 @@ test("x platform inserts download button beside the time link on any tweet layou
     let insertedBefore = null;
 
     const timeLinkParent = {
-        insertBefore(node, before) {
+        insertBefore(node: unknown, before: unknown) {
             insertedNode = node;
             insertedBefore = before;
         }
@@ -676,16 +683,16 @@ test("x platform inserts download button beside the time link on any tweet layou
     };
 
     const post = {
-        querySelector(selector) {
+        querySelector(selector: string) {
             if (selector === "time") {
                 return timeEl;
             }
 
             return null;
         }
-    };
+    } as unknown as Element;
 
-    const inserted = platform.insertDownloadButton({ post, btn });
+    const inserted = platform.insertDownloadButton({ post, btn: btn as HTMLElement });
 
     assert.equal(inserted, true);
     assert.equal(insertedNode, btn);
@@ -697,16 +704,16 @@ test("x platform prefers the header row over the detail timestamp row", () => {
     const btn = { id: "download-btn" };
     const headerAfterNode = { id: "header-after" };
     const timeAfterNode = { id: "time-after" };
-    const calls = [];
+    const calls: { target: string; node: unknown; before: unknown }[] = [];
 
     const headerRow = {
-        insertBefore(node, before) {
+        insertBefore(node: unknown, before: unknown) {
             calls.push({ target: "header", node, before });
         }
     };
 
     const timeRow = {
-        insertBefore(node, before) {
+        insertBefore(node: unknown, before: unknown) {
             calls.push({ target: "time", node, before });
         }
     };
@@ -722,7 +729,7 @@ test("x platform prefers the header row over the detail timestamp row", () => {
     };
 
     const post = {
-        querySelector(selector) {
+        querySelector(selector: string) {
             if (selector === '[data-testid="User-Name"]') {
                 return {
                     parentElement: userNameParent
@@ -737,9 +744,9 @@ test("x platform prefers the header row over the detail timestamp row", () => {
 
             return null;
         }
-    };
+    } as unknown as Element;
 
-    const inserted = platform.insertDownloadButton({ post, btn });
+    const inserted = platform.insertDownloadButton({ post, btn: btn as HTMLElement });
 
     assert.equal(inserted, true);
     assert.equal(calls.length, 1);
@@ -751,7 +758,7 @@ test("x platform prefers the header row over the detail timestamp row", () => {
 });
 
 test("ui creates an initial X download button for GIF media discovered from DOM videos", () => {
-    const gifItem = {
+    const gifItem: XMediaItem = {
         id: "dom-gif-1",
         kind: "gif",
         label: "GIF 1",
@@ -765,12 +772,12 @@ test("ui creates an initial X download button for GIF media discovered from DOM 
         config: {
             ...CONFIG,
             DEBUG: false
-        },
+        } as UiConfig,
         utils: {
-            getOriginalImageUrl: (url) => url,
+            getOriginalImageUrl: (url: string) => url,
             getFileExtensionFromUrl: () => ".jpg",
             downloadMediaItems() {},
-            getPlatformAdapter() {
+            getPlatformAdapter(): UiPlatformAdapter {
                 return {
                     getDomMediaItems() {
                         return [gifItem];
@@ -797,8 +804,8 @@ test("ui creates an initial X download button for GIF media discovered from DOM 
                     initObservers() {}
                 };
             }
-        },
-        windowRef: {},
+        } as unknown as UiUtils,
+        windowRef: {} as Window,
         documentRef: {
             getElementById() {
                 return null;
@@ -814,7 +821,7 @@ test("ui creates an initial X download button for GIF media discovered from DOM 
             },
             addEventListener() {},
             removeEventListener() {}
-        },
+        } as unknown as Document,
         addStyle() {}
     });
 
@@ -822,7 +829,7 @@ test("ui creates an initial X download button for GIF media discovered from DOM 
         querySelector() {
             return null;
         }
-    };
+    } as unknown as Element;
 
     const btn = ui.createDownloadButton(post);
 
@@ -830,15 +837,18 @@ test("ui creates an initial X download button for GIF media discovered from DOM 
     assert.equal(btn.innerHTML, "↓1");
 });
 
-function createViewerArticle({ statusId, inLayers = true }) {
+function createViewerArticle({ statusId, inLayers = true }: {
+    statusId: string;
+    inLayers?: boolean;
+}) {
     return {
-        closest(selector) {
+        closest(selector: string) {
             return inLayers && selector === "#layers" ? {} : null;
         },
-        querySelectorAll(selector) {
+        querySelectorAll(selector: string) {
             if (selector === "time") {
                 return [{
-                    closest(sel) {
+                    closest(sel: string) {
                         return sel.includes("/status/")
                             ? { href: `https://x.com/someone/status/${statusId}` }
                             : null;
@@ -850,29 +860,33 @@ function createViewerArticle({ statusId, inLayers = true }) {
         querySelector() {
             return null;
         }
-    };
+    } as unknown as Element;
 }
 
-function createXPlatformForViewer({ configOverrides = {}, pathname, response }) {
+function createXPlatformForViewer({ configOverrides = {}, pathname, response }: {
+    configOverrides?: XPlatformConfig;
+    pathname: string;
+    response: XStatus;
+}) {
     let fetchCount = 0;
     const platform = createXPlatform({
-        config: { ...CONFIG, DEBUG: false, ...configOverrides },
+        config: { ...CONFIG, DEBUG: false, ...configOverrides } as XPlatformConfig,
         windowRef: {
             location: {
                 hostname: "x.com",
                 pathname
-            }
+            } as Location
         },
         log() {},
-        fetchRef: async () => {
+        fetchRef: (async () => {
             fetchCount++;
             return {
                 ok: true,
                 json: async () => response
             };
-        },
+        }) as unknown as typeof fetch,
         getFileExtensionFromUrl(url, fallback = ".jpg") {
-            const match = url.split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            const match = (url as string).split("?")[0].match(/(\.[a-z0-9]+)$/i);
             return match ? match[1].toLowerCase() : fallback;
         }
     });
@@ -996,7 +1010,7 @@ test("reply articles inside the media viewer never trigger API resolution with v
         response: {}
     });
     const replyArticle = createViewerArticle({ statusId: "2108799767946162176" });
-    const photoItem = {
+    const photoItem: XMediaItem = {
         id: "p1",
         kind: "image",
         label: "图片 1",
@@ -1050,7 +1064,7 @@ test("mixed posts do not duplicate photos whose DOM URLs omit the file extension
         }
     });
     const post = createStatusPostWithVideo();
-    const domPhotoItem = {
+    const domPhotoItem: XMediaItem = {
         id: "dom-photo-1",
         kind: "image",
         label: "图片 1",

@@ -8,7 +8,7 @@
     "dev": "bun run scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types",
-    "test:placement": "node --test tests/button-placement.test.js",
+    "test:placement": "node --experimental-strip-types --test tests/button-placement.test.ts",
     "verify:dist": "bun run scripts/verify-dist.mjs"
   },
   "devDependencies": {

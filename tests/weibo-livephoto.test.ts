@@ -4,8 +4,18 @@ import { readFileSync } from "node:fs";
 
 import { CONFIG } from "../src/config.ts";
 import { createUtils } from "../src/utils.ts";
+import type { UtilsWindowRef } from "../src/utils.ts";
 import { createUi } from "../src/ui.ts";
+import type { MediaItem, UiConfig, UiPlatformAdapter, UiUtils } from "../src/ui.ts";
 import { createWeiboPlatform } from "../src/platforms/weibo.ts";
+import type { WeiboGmXmlhttpRequestDetails, WeiboMediaItem, WeiboPlatform, WeiboPlatformConfig, WeiboStatus, WeiboVueElement } from "../src/platforms/weibo.ts";
+
+type MediaItemSeed = Partial<MediaItem> & Pick<MediaItem, "kind" | "imageUrl">;
+
+/** 测试侧类型辅助：允许只写断言关心的字段，运行时原样返回同一对象。 */
+function asMediaItem(seed: MediaItemSeed): MediaItem {
+    return seed as MediaItem;
+}
 
 function createUtilsForWeibo() {
     return createUtils({
@@ -26,7 +36,7 @@ function createUtilsForWeibo() {
                 }
             },
             open() {}
-        },
+        } as unknown as UtilsWindowRef,
         fetchRef: async () => {
             throw new Error("fetch should not be called in unit tests");
         },
@@ -42,12 +52,12 @@ function createUiForWeibo() {
         config: {
             ...CONFIG,
             DEBUG: false
-        },
+        } as UiConfig,
         utils: {
-            getOriginalImageUrl: (url) => url,
+            getOriginalImageUrl: (url: string) => url,
             getFileExtensionFromUrl: () => ".jpg",
             log() {},
-            getPlatformAdapter() {
+            getPlatformAdapter(): UiPlatformAdapter {
                 return {
                     findImagesInPost() {
                         return [];
@@ -90,8 +100,8 @@ function createUiForWeibo() {
                     initObservers() {}
                 };
             }
-        },
-        windowRef: {},
+        } as unknown as UiUtils,
+        windowRef: {} as Window,
         documentRef: {
             getElementById() {
                 return null;
@@ -114,12 +124,30 @@ function createUiForWeibo() {
             },
             addEventListener() {},
             removeEventListener() {}
-        },
+        } as unknown as Document,
         addStyle() {}
     });
 }
 
-function createTestElement(tagName) {
+interface TestElement {
+    tagName: string;
+    id: string;
+    type: string;
+    value: string;
+    checked: boolean;
+    className: string;
+    textContent: string;
+    children: TestElement[];
+    parentNode: TestElement | null;
+    style: Record<string, string>;
+    appendChild(child: TestElement): void;
+    addEventListener(type: string, listener: () => void): void;
+    removeEventListener(type: string): void;
+    remove(): void;
+    querySelectorAll(selector: string): TestElement[];
+}
+
+function createTestElement(tagName: string): TestElement {
     return {
         tagName,
         id: "",
@@ -146,8 +174,8 @@ function createTestElement(tagName) {
             this.parentNode = null;
         },
         querySelectorAll(selector) {
-            const results = [];
-            const visit = (node) => {
+            const results: TestElement[] = [];
+            const visit = (node: TestElement) => {
                 if (selector === 'input[type="checkbox"]' && node.tagName === "input" && node.type === "checkbox") {
                     results.push(node);
                 }
@@ -186,10 +214,10 @@ function flushPromises() {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function findElementsByClassName(root, className) {
-    const results = [];
+function findElementsByClassName(root: TestElement, className: string) {
+    const results: TestElement[] = [];
     const expectedClassNames = className.split(/\s+/).filter(Boolean);
-    const visit = (node) => {
+    const visit = (node: TestElement) => {
         const actualClassNames = String(node.className || "").split(/\s+/).filter(Boolean);
         if (expectedClassNames.every((name) => actualClassNames.includes(name))) {
             results.push(node);
@@ -210,7 +238,7 @@ function createUiForModalTests() {
         getElementById() {
             return null;
         },
-        createElement(tagName) {
+        createElement(tagName: string) {
             return createTestElement(tagName);
         },
         head,
@@ -223,12 +251,12 @@ function createUiForModalTests() {
         config: {
             ...CONFIG,
             DEBUG: false
-        },
+        } as UiConfig,
         utils: {
-            getOriginalImageUrl: (url) => url,
+            getOriginalImageUrl: (url: string) => url,
             getFileExtensionFromUrl: () => ".jpg",
             log() {},
-            getPlatformAdapter() {
+            getPlatformAdapter(): UiPlatformAdapter {
                 return {
                     findImagesInPost() {
                         return [];
@@ -252,22 +280,22 @@ function createUiForModalTests() {
                     initObservers() {}
                 };
             }
-        },
-        windowRef: {},
-        documentRef,
+        } as unknown as UiUtils,
+        windowRef: {} as Window,
+        documentRef: documentRef as unknown as Document,
         addStyle() {}
     });
 
     return { ui, documentRef };
 }
 
-function createWeiboPlatformForTests(configOverrides = {}) {
+function createWeiboPlatformForTests(configOverrides: WeiboPlatformConfig = {}) {
     return createWeiboPlatform({
         config: {
             ...CONFIG,
             DEBUG: false,
             ...configOverrides
-        },
+        } as WeiboPlatformConfig,
         windowRef: {
             location: {
                 hostname: "weibo.com",
@@ -315,14 +343,17 @@ function createWeiboPlatformForTests(configOverrides = {}) {
     });
 }
 
-function createSearchWeiboPlatformWithGm({ configOverrides = {}, response }) {
-    let lastGmOptions = null;
+function createSearchWeiboPlatformWithGm({ configOverrides = {}, response }: {
+    configOverrides?: WeiboPlatformConfig;
+    response: unknown;
+}) {
+    let lastGmOptions: WeiboGmXmlhttpRequestDetails | null = null;
     const platform = createWeiboPlatform({
         config: {
             ...CONFIG,
             DEBUG: false,
             ...configOverrides
-        },
+        } as WeiboPlatformConfig,
         windowRef: {
             location: {
                 hostname: "s.weibo.com",
@@ -350,9 +381,9 @@ function createSearchWeiboPlatformWithGm({ configOverrides = {}, response }) {
             const match = String(url || "").split("?")[0].match(/(\.[a-z0-9]+)$/i);
             return match ? match[1].toLowerCase() : fallback;
         }
-    });
+    }) as WeiboPlatform & { getLastGmOptions(): WeiboGmXmlhttpRequestDetails };
 
-    platform.getLastGmOptions = () => lastGmOptions;
+    platform.getLastGmOptions = () => lastGmOptions as WeiboGmXmlhttpRequestDetails;
     return platform;
 }
 
@@ -362,7 +393,7 @@ function createSearchWeiboPlatformWithForbiddenGm() {
             ...CONFIG,
             DEBUG: false,
             ENABLE_VIDEO_DOWNLOAD: true
-        },
+        } as WeiboPlatformConfig,
         windowRef: {
             location: {
                 hostname: "s.weibo.com",
@@ -546,7 +577,7 @@ const sampleMixMediaStatus = {
             }
         ]
     }
-};
+} as unknown as WeiboStatus;
 
 const sampleMobilePicsStatus = {
     mid: "5299112496859176",
@@ -706,13 +737,13 @@ test("mixed media status keeps image items", () => {
 test("standalone video media creates a normal mp4 job without live suffix", () => {
     const utils = createUtilsForWeibo();
     const jobs = utils.buildMediaDownloadJobs([
-        {
+        asMediaItem({
             id: "video-1",
             kind: "video",
             imageUrl: null,
             videoUrl: "https://f.video.weibocdn.com/demo.mp4",
             videoExt: ".mp4"
-        }
+        })
     ], "5286555824429155");
 
     assert.deepEqual(
@@ -749,13 +780,13 @@ test("search weibo video status resolves through GM cross-origin request", async
     });
 
     const mediaItems = await platform.resolvePostMediaItems({
-        getAttribute(name) {
+        getAttribute(name: string) {
             return name === "mid" ? "5302940270073103" : null;
         },
         querySelectorAll() {
             return [];
         }
-    }, []);
+    } as unknown as Element, []);
 
     assert.equal(mediaItems.length, 1);
     assert.equal(mediaItems[0].kind, "video");
@@ -772,24 +803,24 @@ test("search weibo video status resolves through GM cross-origin request", async
 test("search weibo forbidden GM response falls back instead of becoming authoritative empty media", async () => {
     const platform = createSearchWeiboPlatformWithForbiddenGm();
     const fallbackItems = [
-        {
+        asMediaItem({
             id: "pending-video",
             kind: "video",
             label: "视频 1",
             imageUrl: null,
             videoUrl: "https://f.video.weibocdn.com/fallback.mp4",
             videoExt: ".mp4"
-        }
+        })
     ];
 
     const mediaItems = await platform.resolvePostMediaItems({
-        getAttribute(name) {
+        getAttribute(name: string) {
             return name === "mid" ? "5302940270073103" : null;
         },
         querySelectorAll() {
             return [];
         }
-    }, fallbackItems);
+    } as unknown as Element, fallbackItems);
 
     assert.equal(mediaItems, fallbackItems);
 });
@@ -878,9 +909,9 @@ test("mobile weibo card reads media items from vue item data without desktop fet
                 item: sampleMobilePicsStatus
             }
         }
-    };
+    } as unknown as WeiboVueElement;
 
-    const mediaItems = platform.getDomMediaItems(postContainer);
+    const mediaItems = platform.getDomMediaItems(postContainer) as WeiboMediaItem[];
 
     assert.equal(mediaItems.length, 1);
     assert.equal(mediaItems[0].id, "008vVtgily1id6q9sht56j30wr1dzk2k");
@@ -889,13 +920,16 @@ test("mobile weibo card reads media items from vue item data without desktop fet
 test("article cover images wrapped in ttarticle links are excluded from the DOM fallback scan", () => {
     const platform = createWeiboPlatformForTests();
 
-    function createMockImage(src, { articleLink = false, videoMarkers = false } = {}) {
+    function createMockImage(src: string, { articleLink = false, videoMarkers = false }: {
+        articleLink?: boolean;
+        videoMarkers?: boolean;
+    } = {}) {
         const pictureMain = videoMarkers
-            ? { querySelector: () => ({}) }
+            ? { querySelector: () => ({} as Element) }
             : null;
         return {
             src,
-            closest(selector) {
+            closest(selector: string) {
                 if (selector === 'a[href*="ttarticle"]') {
                     return articleLink ? { tagName: "a" } : null;
                 }
@@ -904,7 +938,7 @@ test("article cover images wrapped in ttarticle links are excluded from the DOM 
                 }
                 return null;
             }
-        };
+        } as HTMLImageElement;
     }
 
     const articleCover = createMockImage(
@@ -913,21 +947,21 @@ test("article cover images wrapped in ttarticle links are excluded from the DOM 
     );
     const normalImage = createMockImage("https://wx1.sinaimg.cn/large/006llPhJly1normalab.jpg");
     const container = {
-        querySelectorAll(selector) {
+        querySelectorAll(selector: string) {
             return selector === "img.woo-picture-img" ? [articleCover, normalImage] : [];
         }
     };
 
-    const images = platform.findImagesInPost(container);
+    const images = platform.findImagesInPost(container as unknown as Element);
 
     assert.deepEqual(images, [normalImage]);
 });
 
 test("api result selection prefers authoritative empty list", () => {
     const ui = createUiForWeibo();
-    const fallbackDomItems = [
-        { id: "dom-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null },
-        { id: "dom-2", kind: "image", imageUrl: "https://wx2.sinaimg.cn/large/b.jpg", videoUrl: null }
+    const fallbackDomItems: MediaItem[] = [
+        asMediaItem({ id: "dom-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null }),
+        asMediaItem({ id: "dom-2", kind: "image", imageUrl: "https://wx2.sinaimg.cn/large/b.jpg", videoUrl: null })
     ];
 
     const authoritativeEmptyItems = ui.selectPreferredMediaItems(fallbackDomItems, [], true);
@@ -947,23 +981,26 @@ test("pure video result removes download button", () => {
         }
     };
 
-    ui.syncDownloadButtonState(button, []);
+    ui.syncDownloadButtonState(button as unknown as HTMLButtonElement, []);
     assert.equal(button.removed, true);
 });
 
-function createEmptyDomWeiboUi({ resolveItems, onInsert }) {
+function createEmptyDomWeiboUi({ resolveItems, onInsert }: {
+    resolveItems: MediaItem[];
+    onInsert: (btn: HTMLElement) => void;
+}) {
     return createUi({
         config: {
             ...CONFIG,
             DEBUG: false,
             ENABLE_VIDEO_DOWNLOAD: true
-        },
+        } as UiConfig,
         utils: {
-            getOriginalImageUrl: (url) => url,
+            getOriginalImageUrl: (url: string) => url,
             getFileExtensionFromUrl: () => ".jpg",
             downloadMediaItems() {},
             log() {},
-            getPlatformAdapter() {
+            getPlatformAdapter(): UiPlatformAdapter {
                 return {
                     getDomMediaItems() {
                         return null;
@@ -994,8 +1031,8 @@ function createEmptyDomWeiboUi({ resolveItems, onInsert }) {
                     initObservers() {}
                 };
             }
-        },
-        windowRef: {},
+        } as unknown as UiUtils,
+        windowRef: {} as Window,
         documentRef: {
             getElementById() {
                 return null;
@@ -1011,21 +1048,21 @@ function createEmptyDomWeiboUi({ resolveItems, onInsert }) {
             },
             addEventListener() {},
             removeEventListener() {}
-        },
+        } as unknown as Document,
         addStyle() {}
     });
 }
 
 test("ui creates a weibo button for video-only posts only after async resolution confirms media", async () => {
-    const videoItem = {
+    const videoItem = asMediaItem({
         id: "video-1",
         kind: "video",
         label: "视频 1",
         imageUrl: null,
         videoUrl: "https://f.video.weibocdn.com/a.mp4",
         videoExt: ".mp4"
-    };
-    const insertedButtons = [];
+    });
+    const insertedButtons: HTMLElement[] = [];
     const ui = createEmptyDomWeiboUi({
         resolveItems: [videoItem],
         onInsert(btn) {
@@ -1034,10 +1071,10 @@ test("ui creates a weibo button for video-only posts only after async resolution
     });
 
     const btn = ui.createDownloadButton({
-        querySelector() {
+        querySelector(): Element | null {
             return null;
         }
-    });
+    } as unknown as Element);
 
     // 媒体确认非空前不插入按钮，避免按钮闪现
     assert.equal(btn, null);
@@ -1048,7 +1085,7 @@ test("ui creates a weibo button for video-only posts only after async resolution
 });
 
 test("ui never inserts a weibo button for posts whose async resolution is empty", async () => {
-    const insertedButtons = [];
+    const insertedButtons: HTMLElement[] = [];
     const ui = createEmptyDomWeiboUi({
         resolveItems: [],
         onInsert(btn) {
@@ -1057,10 +1094,10 @@ test("ui never inserts a weibo button for posts whose async resolution is empty"
     });
 
     const btn = ui.createDownloadButton({
-        querySelector() {
+        querySelector(): Element | null {
             return null;
         }
-    });
+    } as unknown as Element);
 
     assert.equal(btn, null);
     await flushPromises();
@@ -1086,23 +1123,23 @@ test("ui refreshDownloadButtons clears existing buttons and reinjects with fresh
         config: {
             ...CONFIG,
             DEBUG: false
-        },
+        } as UiConfig,
         utils: {
-            getOriginalImageUrl: (url) => url,
+            getOriginalImageUrl: (url: string) => url,
             getFileExtensionFromUrl: () => ".jpg",
             downloadMediaItems() {},
             log() {},
-            getPlatformAdapter() {
+            getPlatformAdapter(): UiPlatformAdapter {
                 return {
                     getDomMediaItems() {
                         return [
-                            {
+                            asMediaItem({
                                 id: "img-1",
                                 kind: "image",
                                 label: "图片 1",
                                 imageUrl: "https://wx1.sinaimg.cn/large/a.jpg",
                                 videoUrl: null
-                            }
+                            })
                         ];
                     },
                     findImagesInPost() {
@@ -1128,8 +1165,8 @@ test("ui refreshDownloadButtons clears existing buttons and reinjects with fresh
                     initObservers() {}
                 };
             }
-        },
-        windowRef: {},
+        } as unknown as UiUtils,
+        windowRef: {} as Window,
         documentRef: {
             getElementById() {
                 return null;
@@ -1137,7 +1174,7 @@ test("ui refreshDownloadButtons clears existing buttons and reinjects with fresh
             createElement() {
                 return createButtonElement();
             },
-            querySelectorAll(selector) {
+            querySelectorAll(selector: string) {
                 if (selector === ".weibo-img-download-btn") {
                     return [oldButton];
                 }
@@ -1154,7 +1191,7 @@ test("ui refreshDownloadButtons clears existing buttons and reinjects with fresh
             },
             addEventListener() {},
             removeEventListener() {}
-        },
+        } as unknown as Document,
         addStyle() {}
     });
 
@@ -1167,10 +1204,10 @@ test("ui refreshDownloadButtons clears existing buttons and reinjects with fresh
 test("weibo video thumbnail image is filtered from fallback matching", () => {
     const ui = createUiForWeibo();
     const videoThumbImage = {
-        closest(selector) {
+        closest(selector: string) {
             if (selector === ".woo-picture-main") {
                 return {
-                    querySelector(query) {
+                    querySelector(query: string) {
                         if (query === '[class*="_videotime_"], [class*="_videobox_"], .woo-font--play') {
                             return { textContent: "00:22" };
                         }
@@ -1182,16 +1219,16 @@ test("weibo video thumbnail image is filtered from fallback matching", () => {
         }
     };
 
-    assert.equal(ui.isVideoThumbnailImage(videoThumbImage), true);
+    assert.equal(ui.isVideoThumbnailImage(videoThumbImage as HTMLImageElement), true);
 });
 
 test("image selection modal uses compact p lp a labels by media type", () => {
     const { ui, documentRef } = createUiForModalTests();
 
     ui.showImageSelectModal([
-        { id: "img-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null },
-        { id: "live-1", kind: "livephoto", imageUrl: "https://wx1.sinaimg.cn/large/b.jpg", videoUrl: "https://livephoto.us.sinaimg.cn/a.mov" },
-        { id: "gif-1", kind: "gif", imageUrl: "https://wx1.sinaimg.cn/large/c.gif", videoUrl: null }
+        asMediaItem({ id: "img-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null }),
+        asMediaItem({ id: "live-1", kind: "livephoto", imageUrl: "https://wx1.sinaimg.cn/large/b.jpg", videoUrl: "https://livephoto.us.sinaimg.cn/a.mov" }),
+        asMediaItem({ id: "gif-1", kind: "gif", imageUrl: "https://wx1.sinaimg.cn/large/c.gif", videoUrl: null })
     ]);
 
     const overlay = documentRef.body.children[0];
@@ -1207,9 +1244,9 @@ test("image selection modal uses compact v labels and a video color class", () =
     const { ui, documentRef } = createUiForModalTests();
 
     ui.showImageSelectModal([
-        { id: "img-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null },
-        { id: "video-1", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/a.mp4" },
-        { id: "video-2", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/b.mp4" }
+        asMediaItem({ id: "img-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null }),
+        asMediaItem({ id: "video-1", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/a.mp4" }),
+        asMediaItem({ id: "video-2", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/b.mp4" })
     ]);
 
     const overlay = documentRef.body.children[0];
