@@ -21,3 +21,4 @@
 7. 修改 userscript metadata、构建脚本或发布流程后：核对 README、文档地图相关文档、构建脚本、产物头部 metadata 四处一致。
 8. 适配新站点、新域名或新入口页面时：在 userscript metadata 中补全对应 `@match` 规则，否则脚本不在该页面生效。
 9. 发布前：运行 `bun run verify:dist`。报告不一致时，先重新构建再提交。
+10. 每次代码修改完成后：现阶段油猴全自动测试化流程不完备，需运行构建命令打包最新产物，并把 `dist/weibo-image-downloader.user.js` 的路径告知用户，由用户自行安装实测；以用户实测结果作为交付验收。

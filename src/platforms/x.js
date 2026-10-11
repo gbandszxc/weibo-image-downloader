@@ -305,8 +305,37 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return mediaItems;
     }
 
+    // DOM 与接口返回的同一张图片 URL 形态不同（/media/abc?format=jpg 与 /media/abc.jpg），
+    // 按去参后的路径（扩展名可省略）归一化，避免混合帖把同一张图下载两次。
+    function getMediaUrlKey(url) {
+        const base = (url || "").split("?")[0];
+        const match = base.match(/^(https:\/\/pbs\.twimg\.com\/media\/[^/?]+?)(?:\.[a-zA-Z0-9]+)?$/);
+        return match ? match[1] : base;
+    }
+
+    // 媒体预览页（/status/:id/photo|video/:n）打开时，右栏主推文渲染在 #layers 内，
+    // 媒体本体在预览左栏、不在推文 DOM 子树里，按 URL 匹配出正在查看的这条推文走接口解析。
+    function isMediaViewerMainArticle(postContainer) {
+        if (!postContainer || typeof postContainer.closest !== "function") {
+            return false;
+        }
+
+        if (!postContainer.closest("#layers")) {
+            return false;
+        }
+
+        const statusId = getPostId(postContainer);
+        if (!/^\d+$/.test(statusId)) {
+            return false;
+        }
+
+        const pathname = windowRef.location && windowRef.location.pathname;
+        return new RegExp(`/status/${statusId}/(?:photo|video)/\\d+`).test(pathname || "");
+    }
+
     function resolvePostMediaItems(postContainer, fallbackItems) {
-        if (!isVideoDownloadEnabled()) {
+        const isViewerMainArticle = isMediaViewerMainArticle(postContainer);
+        if (!isVideoDownloadEnabled() && !isViewerMainArticle) {
             return fallbackItems;
         }
 
@@ -315,8 +344,10 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             return fallbackItems;
         }
 
-        // DOM 徽标已明确是 GIF（或帖子无视频迹象）时无需再调接口
-        if (fallbackItems.some((item) => item.kind === "gif") || !shouldResolveEmptyMediaItems(postContainer)) {
+        // DOM 徽标已明确是 GIF（或帖子无视频迹象）时无需再调接口；媒体预览右栏主推文
+        // 的媒体不在推文 DOM 内，始终需要接口解析
+        if (!isViewerMainArticle &&
+            (fallbackItems.some((item) => item.kind === "gif") || !shouldResolveEmptyMediaItems(postContainer))) {
             return fallbackItems;
         }
 
@@ -326,7 +357,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             }
 
             const apiByUrl = new Map(
-                mediaItems.map((item) => [(item.videoUrl || item.imageUrl || "").split("?")[0], item])
+                mediaItems.map((item) => [getMediaUrlKey(item.videoUrl || item.imageUrl), item])
             );
 
             // DOM 已解析出视频直链时仅按 URL 校正 kind：GIF 徽标渲染滞后会被误判成
@@ -336,18 +367,24 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                     if (item.kind !== "video") {
                         return item;
                     }
-                    const apiItem = apiByUrl.get((item.videoUrl || item.imageUrl || "").split("?")[0]);
+                    const apiItem = apiByUrl.get(getMediaUrlKey(item.videoUrl || item.imageUrl));
                     return apiItem && apiItem.kind === "gif" ? apiItem : item;
                 });
             }
 
             // 混合帖：保留 DOM 图片，附加接口解析出的视频/GIF
             const existingKeys = new Set(
-                fallbackItems.map((item) => (item.videoUrl || item.imageUrl || "").split("?")[0])
+                fallbackItems.map((item) => getMediaUrlKey(item.videoUrl || item.imageUrl))
             );
             const merged = fallbackItems.concat(
-                mediaItems.filter((item) => !existingKeys.has((item.videoUrl || item.imageUrl || "").split("?")[0]))
+                mediaItems.filter((item) => !existingKeys.has(getMediaUrlKey(item.videoUrl || item.imageUrl)))
             );
+
+            // 预览页在视频下载关闭时也会走接口，但视频项仍遵循该开关（图片与 GIF 不受影响）
+            if (!isVideoDownloadEnabled() && isViewerMainArticle) {
+                return merged.filter((item) => item.kind !== "video");
+            }
+
             return merged;
         });
     }
@@ -412,11 +449,20 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
     }
 
     function shouldResolveEmptyMediaItems(postContainer) {
-        if (!isVideoDownloadEnabled() || !/^\d+$/.test(getPostId(postContainer))) {
+        if (!/^\d+$/.test(getPostId(postContainer))) {
             return false;
         }
 
         if (!postContainer || typeof postContainer.querySelector !== "function") {
+            return false;
+        }
+
+        // 媒体预览右栏主推文的 DOM 里没有媒体，始终需要接口确认
+        if (isMediaViewerMainArticle(postContainer)) {
+            return true;
+        }
+
+        if (!isVideoDownloadEnabled()) {
             return false;
         }
 
@@ -464,6 +510,17 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         const media = result?.legacy?.extended_entities?.media || [];
         const quotedMedia = result?.quoted_status_result?.result?.legacy?.extended_entities?.media || [];
 
+        // 媒体预览页右栏主推文的 DOM 子树里没有媒体，自有图片也要依赖接口返回
+        const ownPhotos = media.filter((item) => item?.type === "photo").map((item, index) => {
+            return createMediaItem({
+                id: item.id_str || `graphql-photo-${index + 1}`,
+                kind: "image",
+                label: `图片 ${index + 1}`,
+                url: getOriginalImageUrl(item.media_url_https),
+                fallbackExt: ".jpg"
+            });
+        }).filter(Boolean);
+
         const quotedPhotos = quotedMedia.map((item, index) => {
             if (item?.type !== "photo") {
                 return null;
@@ -498,7 +555,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             });
         }).filter(Boolean);
 
-        return quotedPhotos.concat(videos);
+        return ownPhotos.concat(quotedPhotos, videos);
     }
 
     async function getXMediaItemsById(tweetId) {

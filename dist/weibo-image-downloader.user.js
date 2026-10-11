@@ -1847,15 +1847,35 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       });
       return mediaItems;
     }
+    function getMediaUrlKey(url) {
+      const base = (url || "").split("?")[0];
+      const match = base.match(/^(https:\/\/pbs\.twimg\.com\/media\/[^/?]+?)(?:\.[a-zA-Z0-9]+)?$/);
+      return match ? match[1] : base;
+    }
+    function isMediaViewerMainArticle(postContainer) {
+      if (!postContainer || typeof postContainer.closest !== "function") {
+        return false;
+      }
+      if (!postContainer.closest("#layers")) {
+        return false;
+      }
+      const statusId = getPostId(postContainer);
+      if (!/^\d+$/.test(statusId)) {
+        return false;
+      }
+      const pathname = windowRef.location && windowRef.location.pathname;
+      return new RegExp(`/status/${statusId}/(?:photo|video)/\\d+`).test(pathname || "");
+    }
     function resolvePostMediaItems(postContainer, fallbackItems) {
-      if (!isVideoDownloadEnabled()) {
+      const isViewerMainArticle = isMediaViewerMainArticle(postContainer);
+      if (!isVideoDownloadEnabled() && !isViewerMainArticle) {
         return fallbackItems;
       }
       const statusId = getPostId(postContainer);
       if (!statusId) {
         return fallbackItems;
       }
-      if (fallbackItems.some((item) => item.kind === "gif") || !shouldResolveEmptyMediaItems(postContainer)) {
+      if (!isViewerMainArticle && (fallbackItems.some((item) => item.kind === "gif") || !shouldResolveEmptyMediaItems(postContainer))) {
         return fallbackItems;
       }
       return getXMediaItemsById(statusId).then((mediaItems) => {
@@ -1863,23 +1883,26 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           return fallbackItems;
         }
         const apiByUrl = new Map(
-          mediaItems.map((item) => [(item.videoUrl || item.imageUrl || "").split("?")[0], item])
+          mediaItems.map((item) => [getMediaUrlKey(item.videoUrl || item.imageUrl), item])
         );
         if (fallbackItems.some((item) => item.kind === "video")) {
           return fallbackItems.map((item) => {
             if (item.kind !== "video") {
               return item;
             }
-            const apiItem = apiByUrl.get((item.videoUrl || item.imageUrl || "").split("?")[0]);
+            const apiItem = apiByUrl.get(getMediaUrlKey(item.videoUrl || item.imageUrl));
             return apiItem && apiItem.kind === "gif" ? apiItem : item;
           });
         }
         const existingKeys = new Set(
-          fallbackItems.map((item) => (item.videoUrl || item.imageUrl || "").split("?")[0])
+          fallbackItems.map((item) => getMediaUrlKey(item.videoUrl || item.imageUrl))
         );
         const merged = fallbackItems.concat(
-          mediaItems.filter((item) => !existingKeys.has((item.videoUrl || item.imageUrl || "").split("?")[0]))
+          mediaItems.filter((item) => !existingKeys.has(getMediaUrlKey(item.videoUrl || item.imageUrl)))
         );
+        if (!isVideoDownloadEnabled() && isViewerMainArticle) {
+          return merged.filter((item) => item.kind !== "video");
+        }
         return merged;
       });
     }
@@ -1928,10 +1951,16 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       return currentMatch ? currentMatch[1] : `x_${Date.now()}`;
     }
     function shouldResolveEmptyMediaItems(postContainer) {
-      if (!isVideoDownloadEnabled() || !/^\d+$/.test(getPostId(postContainer))) {
+      if (!/^\d+$/.test(getPostId(postContainer))) {
         return false;
       }
       if (!postContainer || typeof postContainer.querySelector !== "function") {
+        return false;
+      }
+      if (isMediaViewerMainArticle(postContainer)) {
+        return true;
+      }
+      if (!isVideoDownloadEnabled()) {
         return false;
       }
       return !!postContainer.querySelector(
@@ -1971,6 +2000,15 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       const result = status?.data?.tweetResult?.result;
       const media = result?.legacy?.extended_entities?.media || [];
       const quotedMedia = result?.quoted_status_result?.result?.legacy?.extended_entities?.media || [];
+      const ownPhotos = media.filter((item) => item?.type === "photo").map((item, index) => {
+        return createMediaItem({
+          id: item.id_str || `graphql-photo-${index + 1}`,
+          kind: "image",
+          label: `图片 ${index + 1}`,
+          url: getOriginalImageUrl(item.media_url_https),
+          fallbackExt: ".jpg"
+        });
+      }).filter(Boolean);
       const quotedPhotos = quotedMedia.map((item, index) => {
         if (item?.type !== "photo") {
           return null;
@@ -2000,7 +2038,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           fallbackExt: ".mp4"
         });
       }).filter(Boolean);
-      return quotedPhotos.concat(videos);
+      return ownPhotos.concat(quotedPhotos, videos);
     }
     async function getXMediaItemsById(tweetId) {
       try {

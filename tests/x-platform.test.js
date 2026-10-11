@@ -829,3 +829,295 @@ test("ui creates an initial X download button for GIF media discovered from DOM 
     assert.ok(btn);
     assert.equal(btn.innerHTML, "↓1");
 });
+
+function createViewerArticle({ statusId, inLayers = true }) {
+    return {
+        closest(selector) {
+            return inLayers && selector === "#layers" ? {} : null;
+        },
+        querySelectorAll(selector) {
+            if (selector === "time") {
+                return [{
+                    closest(sel) {
+                        return sel.includes("/status/")
+                            ? { href: `https://x.com/someone/status/${statusId}` }
+                            : null;
+                    }
+                }];
+            }
+            return [];
+        },
+        querySelector() {
+            return null;
+        }
+    };
+}
+
+function createXPlatformForViewer({ configOverrides = {}, pathname, response }) {
+    let fetchCount = 0;
+    const platform = createXPlatform({
+        config: { ...CONFIG, DEBUG: false, ...configOverrides },
+        windowRef: {
+            location: {
+                hostname: "x.com",
+                pathname
+            }
+        },
+        log() {},
+        fetchRef: async () => {
+            fetchCount++;
+            return {
+                ok: true,
+                json: async () => response
+            };
+        },
+        getFileExtensionFromUrl(url, fallback = ".jpg") {
+            const match = url.split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        }
+    });
+    return { platform, getFetchCount: () => fetchCount };
+}
+
+const photoViewerStatusId = "2108945148247744602";
+const videoViewerStatusId = "2108443410713772335";
+
+const photoStatusResponse = {
+    data: {
+        tweetResult: {
+            result: {
+                legacy: {
+                    extended_entities: {
+                        media: [
+                            {
+                                id_str: "photo-1",
+                                type: "photo",
+                                media_url_https: "https://pbs.twimg.com/media/PhotoA.jpg"
+                            },
+                            {
+                                id_str: "photo-2",
+                                type: "photo",
+                                media_url_https: "https://pbs.twimg.com/media/PhotoB.jpg"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+};
+
+const videoStatusResponse = {
+    data: {
+        tweetResult: {
+            result: {
+                legacy: {
+                    extended_entities: {
+                        media: [
+                            {
+                                id_str: "video-1",
+                                type: "video",
+                                video_info: {
+                                    variants: [
+                                        {
+                                            bitrate: 832000,
+                                            content_type: "video/mp4",
+                                            url: "https://video.twimg.com/amplify_video/demo/832.mp4"
+                                        },
+                                        {
+                                            bitrate: 2176000,
+                                            content_type: "video/mp4",
+                                            url: "https://video.twimg.com/amplify_video/demo/720.mp4"
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+};
+
+test("media viewer main article resolves own photos via API with video download disabled", async () => {
+    const { platform, getFetchCount } = createXPlatformForViewer({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: false },
+        pathname: `/leo114119/status/${photoViewerStatusId}/photo/1`,
+        response: photoStatusResponse
+    });
+    const viewerArticle = createViewerArticle({ statusId: photoViewerStatusId });
+
+    assert.equal(platform.shouldResolveEmptyMediaItems(viewerArticle), true);
+
+    const mediaItems = await platform.resolvePostMediaItems(viewerArticle, []);
+
+    assert.equal(getFetchCount(), 1);
+    assert.equal(mediaItems.length, 2);
+    assert.equal(mediaItems[0].kind, "image");
+    assert.equal(mediaItems[0].imageUrl, "https://pbs.twimg.com/media/PhotoA.jpg?name=orig");
+    assert.equal(mediaItems[1].kind, "image");
+    assert.equal(mediaItems[1].imageUrl, "https://pbs.twimg.com/media/PhotoB.jpg?name=orig");
+});
+
+test("media viewer main article hides video-only tweets when video download is disabled", async () => {
+    const { platform, getFetchCount } = createXPlatformForViewer({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: false },
+        pathname: `/AI_oldwang/status/${videoViewerStatusId}/video/1`,
+        response: videoStatusResponse
+    });
+    const viewerArticle = createViewerArticle({ statusId: videoViewerStatusId });
+
+    const mediaItems = await platform.resolvePostMediaItems(viewerArticle, []);
+
+    assert.equal(getFetchCount(), 1);
+    assert.deepEqual(mediaItems, []);
+});
+
+test("media viewer main article keeps videos when video download is enabled", async () => {
+    const { platform } = createXPlatformForViewer({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        pathname: `/AI_oldwang/status/${videoViewerStatusId}/video/1`,
+        response: videoStatusResponse
+    });
+    const viewerArticle = createViewerArticle({ statusId: videoViewerStatusId });
+
+    const mediaItems = await platform.resolvePostMediaItems(viewerArticle, []);
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/demo/720.mp4");
+});
+
+test("reply articles inside the media viewer never trigger API resolution with video download disabled", async () => {
+    const { platform, getFetchCount } = createXPlatformForViewer({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: false },
+        pathname: `/AI_oldwang/status/${videoViewerStatusId}/video/1`,
+        response: {}
+    });
+    const replyArticle = createViewerArticle({ statusId: "2108799767946162176" });
+    const photoItem = {
+        id: "p1",
+        kind: "image",
+        label: "图片 1",
+        imageUrl: "https://pbs.twimg.com/media/PhotoOne?format=jpg&name=orig",
+        videoUrl: null,
+        imageExt: ".jpg",
+        videoExt: ".mov"
+    };
+
+    assert.equal(platform.shouldResolveEmptyMediaItems(replyArticle), false);
+
+    const mediaItems = await platform.resolvePostMediaItems(replyArticle, [photoItem]);
+
+    assert.equal(getFetchCount(), 0);
+    assert.deepEqual(mediaItems, [photoItem]);
+});
+
+test("mixed posts do not duplicate photos whose DOM URLs omit the file extension", async () => {
+    const { platform, getFetchCount } = createXPlatformForViewer({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        pathname: "/TimJayas/status/2058971197417914571",
+        response: {
+            data: {
+                tweetResult: {
+                    result: {
+                        legacy: {
+                            extended_entities: {
+                                media: [
+                                    {
+                                        id_str: "photo-1",
+                                        type: "photo",
+                                        media_url_https: "https://pbs.twimg.com/media/PhotoOne.jpg"
+                                    },
+                                    {
+                                        id_str: "video-1",
+                                        type: "video",
+                                        video_info: {
+                                            variants: [{
+                                                bitrate: 832000,
+                                                content_type: "video/mp4",
+                                                url: "https://video.twimg.com/amplify_video/demo/832.mp4"
+                                            }]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    const post = createStatusPostWithVideo();
+    const domPhotoItem = {
+        id: "dom-photo-1",
+        kind: "image",
+        label: "图片 1",
+        imageUrl: "https://pbs.twimg.com/media/PhotoOne?format=jpg&name=orig",
+        videoUrl: null,
+        imageExt: ".jpg",
+        videoExt: ".mov"
+    };
+
+    const mediaItems = await platform.resolvePostMediaItems(post, [domPhotoItem]);
+
+    assert.equal(getFetchCount(), 1);
+    assert.equal(mediaItems.length, 2);
+    assert.equal(mediaItems[0].kind, "image");
+    assert.equal(mediaItems[0].imageUrl, "https://pbs.twimg.com/media/PhotoOne?format=jpg&name=orig");
+    assert.equal(mediaItems[1].kind, "video");
+});
+
+test("x platform API result lists own photos before quoted photos and videos", () => {
+    const platform = createXPlatformForTests();
+    const mediaItems = platform.getXMediaItemsFromStatus({
+        data: {
+            tweetResult: {
+                result: {
+                    legacy: {
+                        extended_entities: {
+                            media: [
+                                {
+                                    id_str: "video-1",
+                                    type: "animated_gif",
+                                    video_info: {
+                                        variants: [{
+                                            bitrate: 1280000,
+                                            content_type: "video/mp4",
+                                            url: "https://video.twimg.com/tweet_video/GifOne.mp4"
+                                        }]
+                                    }
+                                },
+                                {
+                                    id_str: "photo-1",
+                                    type: "photo",
+                                    media_url_https: "https://pbs.twimg.com/media/PhotoA.jpg"
+                                }
+                            ]
+                        }
+                    },
+                    quoted_status_result: {
+                        result: {
+                            legacy: {
+                                extended_entities: {
+                                    media: [{
+                                        id_str: "quoted-photo-1",
+                                        type: "photo",
+                                        media_url_https: "https://pbs.twimg.com/media/QuotedPhoto.jpg"
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    assert.equal(mediaItems.length, 3);
+    assert.deepEqual(mediaItems.map((item) => item.kind), ["image", "image", "gif"]);
+    assert.equal(mediaItems[0].imageUrl, "https://pbs.twimg.com/media/PhotoA.jpg?name=orig");
+    assert.equal(mediaItems[1].imageUrl, "https://pbs.twimg.com/media/QuotedPhoto.jpg?name=orig");
+    assert.equal(mediaItems[2].imageUrl, "https://video.twimg.com/tweet_video/GifOne.mp4");
+});
