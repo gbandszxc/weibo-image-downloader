@@ -1,4 +1,4 @@
-const IMAGE_SIZE_PATTERNS = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"];
+const IMAGE_SIZE_PATTERNS = ["thumb180", "thumb300", "square", "bmiddle", "mw690", "mw1024", "orj360", "orj480", "webp720"] as const;
 const VIDEO_FALLBACK_KEYS = [
     "mp4_2160p_mp4",
     "mp4_1080p_mp4",
@@ -12,7 +12,172 @@ const VIDEO_FALLBACK_KEYS = [
     "stream_url_hd",
     "mp4_sd_url",
     "stream_url"
-];
+] as const;
+
+export type WeiboMediaKind = "image" | "gif" | "livephoto" | "video";
+
+export interface WeiboMediaItem {
+    id: string;
+    kind: WeiboMediaKind;
+    label: string;
+    imageUrl: string | null;
+    videoUrl: string | null;
+    imageExt: string;
+    videoExt: string;
+}
+
+export interface WeiboPicVariant {
+    url?: string;
+}
+
+export interface WeiboPlaybackItem {
+    meta?: {
+        quality_index?: unknown;
+    } | null;
+    play_info?: {
+        url?: string;
+        bitrate?: unknown;
+        width?: unknown;
+        height?: unknown;
+    } | null;
+}
+
+export interface WeiboMediaInfo {
+    playback_list?: WeiboPlaybackItem[] | null;
+    [key: string]: unknown;
+}
+
+export interface WeiboPicInfo {
+    type?: unknown;
+    url?: string;
+    pid?: string;
+    video?: string;
+    videoSrc?: string;
+    media_info?: WeiboMediaInfo | null;
+    pic_info?: WeiboPicInfo | null;
+    pic_big?: string | null;
+    pic_middle?: string | null;
+    pic_small?: string | null;
+    largest?: WeiboPicVariant | string | null;
+    original?: WeiboPicVariant | string | null;
+    large?: WeiboPicVariant | string | null;
+    bmiddle?: WeiboPicVariant | string | null;
+    thumbnail?: WeiboPicVariant | string | null;
+}
+
+export interface WeiboMixMediaData extends WeiboPicInfo {
+    object_type?: unknown;
+    id?: string;
+    media_id?: string;
+    stream_url_hd?: string;
+    stream_url?: string;
+}
+
+export interface WeiboMixMediaItem {
+    type?: unknown;
+    data?: WeiboMixMediaData | null;
+}
+
+export interface WeiboPageInfo {
+    type?: unknown;
+    object_type?: unknown;
+    media_info?: WeiboMediaInfo | null;
+}
+
+export interface WeiboStatus {
+    mid?: string;
+    idstr?: string;
+    mblogid?: string;
+    pic_ids?: string[];
+    pics?: WeiboPicInfo[];
+    pic_infos?: Record<string, WeiboPicInfo>;
+    mix_media_info?: {
+        items?: WeiboMixMediaItem[];
+    } | null;
+    retweeted_status?: WeiboStatus | null;
+    page_info?: WeiboPageInfo | null;
+}
+
+export interface WeiboVueInstance {
+    _props?: {
+        item?: WeiboStatus | null;
+    };
+    item?: WeiboStatus | null;
+    $options?: {
+        propsData?: {
+            item?: WeiboStatus | null;
+        };
+    };
+}
+
+export type WeiboVueElement = Element & {
+    __vue__?: WeiboVueInstance;
+};
+
+export interface WeiboPlatformConfig {
+    ENABLE_VIDEO_DOWNLOAD?: boolean;
+}
+
+export interface WeiboPlatformWindow {
+    location: {
+        hostname: string;
+        pathname?: string;
+    };
+    open(url?: string | URL, target?: string, features?: string): unknown;
+    MutationObserver?: typeof MutationObserver;
+}
+
+export interface WeiboGmXmlhttpRequestDetails {
+    method: "GET";
+    url: string;
+    anonymous: boolean;
+    withCredentials: boolean;
+    headers: Record<string, string>;
+    onload(response: { status: number; responseText: string }): void;
+    onerror(error?: { error?: string; message?: string }): void;
+    ontimeout(): void;
+}
+
+export type WeiboGmXmlhttpRequest = (details: WeiboGmXmlhttpRequestDetails) => unknown;
+
+export interface WeiboPlatformDeps {
+    config?: WeiboPlatformConfig;
+    windowRef: WeiboPlatformWindow;
+    fetchRef: typeof fetch;
+    gmXmlhttpRequest?: WeiboGmXmlhttpRequest | null;
+    log: (...args: unknown[]) => void;
+    getFileBasenameFromUrl: (url: unknown, fallback: string) => string;
+    getFileExtensionFromUrl: (url: unknown, fallback: string) => string;
+}
+
+export interface WeiboPlatform {
+    id: string;
+    displayName: string;
+    isSearchPage(): boolean;
+    isAvatarImage(url: string | null | undefined): boolean;
+    getOriginalImageUrl(url: unknown): string | null;
+    getBestWeiboImageUrl(picInfo: WeiboPicInfo | null | undefined): string | null;
+    getWeiboMixMediaItems(status: WeiboStatus | null | undefined): WeiboMediaItem[];
+    createWeiboMediaItem(picId: string, picInfo: WeiboPicInfo | null | undefined, index: number): WeiboMediaItem | null;
+    getWeiboMediaSourceStatus(status: WeiboStatus | null | undefined): WeiboStatus | null;
+    getWeiboMediaItemsFromStatus(status: WeiboStatus | null | undefined): WeiboMediaItem[];
+    getDomMediaItems(postContainer: Element): WeiboMediaItem[] | null;
+    fetchWeiboStatus(statusId: string | null | undefined): Promise<WeiboStatus | null>;
+    getWeiboMediaItemsById(statusId: string | null | undefined): Promise<WeiboMediaItem[]>;
+    isVideoThumbnailImage(img: Element | null | undefined): boolean;
+    findImagesInPost(container: Element): HTMLImageElement[];
+    selectPreferredMediaItems<T>(fallbackItems: T[], resolvedMediaItems: T[], apiResolved: boolean): T[];
+    resolvePostMediaItems(postContainer: Element, fallbackItems: WeiboMediaItem[]): Promise<WeiboMediaItem[]>;
+    getPostSelectors(): string[];
+    shouldSkipPost(post: Element | null | undefined): boolean;
+    shouldResolveEmptyMediaItems(postContainer: Element): boolean;
+    getPostId(postContainer: Element): string;
+    insertDownloadButton(options: { post: Element; btn: HTMLElement }): boolean;
+    getPostUrl(article: Element | null | undefined): string | null;
+    injectGotoOriginalMenuItem(popMain: HTMLElement, article: Element | null | undefined, documentRef: Document): void;
+    afterInjectDownloadButtons(options: { documentRef: Document }): void;
+    initObservers(options: { documentRef: Document }): void;
+}
 
 export function createWeiboPlatform({
     config = {},
@@ -22,7 +187,7 @@ export function createWeiboPlatform({
     log,
     getFileBasenameFromUrl,
     getFileExtensionFromUrl
-}) {
+}: WeiboPlatformDeps): WeiboPlatform {
     const imageSelectors = [
         "img.woo-picture-img",
         ".picture img",
@@ -45,21 +210,21 @@ export function createWeiboPlatform({
         ".woo-nickname",
         ".name"
     ];
-    const weiboStatusCache = new Map();
+    const weiboStatusCache = new Map<string, Promise<WeiboStatus | null>>();
 
-    function isVideoDownloadEnabled() {
+    function isVideoDownloadEnabled(): boolean {
         return !!config.ENABLE_VIDEO_DOWNLOAD;
     }
 
-    function isSearchPage() {
+    function isSearchPage(): boolean {
         return windowRef.location.hostname === "s.weibo.com";
     }
 
-    function isMobileWeiboPage() {
+    function isMobileWeiboPage(): boolean {
         return windowRef.location.hostname === "m.weibo.cn" || windowRef.location.hostname === "www.m.weibo.cn";
     }
 
-    function isAvatarImage(url) {
+    function isAvatarImage(url: string | null | undefined): boolean {
         if (!url) {
             return false;
         }
@@ -70,7 +235,7 @@ export function createWeiboPlatform({
             url.includes("_online");
     }
 
-    function getOriginalImageUrl(url) {
+    function getOriginalImageUrl(url: unknown): string | null {
         if (!url || typeof url !== "string") {
             return null;
         }
@@ -101,17 +266,17 @@ export function createWeiboPlatform({
         return url;
     }
 
-    function getBestWeiboImageUrl(picInfo) {
+    function getBestWeiboImageUrl(picInfo: WeiboPicInfo | null | undefined): string | null {
         if (!picInfo || typeof picInfo !== "object") {
             return null;
         }
 
         const candidates = [
-            picInfo.largest && picInfo.largest.url,
-            picInfo.original && picInfo.original.url,
-            picInfo.large && picInfo.large.url,
-            picInfo.bmiddle && picInfo.bmiddle.url,
-            picInfo.thumbnail && picInfo.thumbnail.url,
+            picInfo.largest && (picInfo.largest as WeiboPicVariant).url,
+            picInfo.original && (picInfo.original as WeiboPicVariant).url,
+            picInfo.large && (picInfo.large as WeiboPicVariant).url,
+            picInfo.bmiddle && (picInfo.bmiddle as WeiboPicVariant).url,
+            picInfo.thumbnail && (picInfo.thumbnail as WeiboPicVariant).url,
             picInfo.url
         ];
 
@@ -119,13 +284,13 @@ export function createWeiboPlatform({
         return getOriginalImageUrl(imageUrl) || imageUrl || null;
     }
 
-    function getBestWeiboVideoUrl(mediaInfo) {
+    function getBestWeiboVideoUrl(mediaInfo: WeiboMediaInfo | null | undefined): string | null {
         if (!mediaInfo || typeof mediaInfo !== "object") {
             return null;
         }
 
         const playbackList = Array.isArray(mediaInfo.playback_list) ? mediaInfo.playback_list : [];
-        const playbackCandidates = playbackList
+        const playbackCandidates = (playbackList
             .map((item) => {
                 const playInfo = item && item.play_info;
                 const url = playInfo && playInfo.url;
@@ -134,14 +299,14 @@ export function createWeiboPlatform({
                 }
 
                 const qualityIndex = Number(item.meta && item.meta.quality_index) || 0;
-                const bitrate = Number(playInfo.bitrate) || 0;
-                const pixels = (Number(playInfo.width) || 0) * (Number(playInfo.height) || 0);
+                const bitrate = Number(playInfo!.bitrate) || 0;
+                const pixels = (Number(playInfo!.width) || 0) * (Number(playInfo!.height) || 0);
                 return {
                     url,
                     score: qualityIndex * 1000000000 + pixels * 1000 + bitrate
                 };
             })
-            .filter(Boolean)
+            .filter(Boolean) as { url: string; score: number }[])
             .sort((a, b) => b.score - a.score);
 
         if (playbackCandidates.length > 0) {
@@ -157,7 +322,7 @@ export function createWeiboPlatform({
         return null;
     }
 
-    function createWeiboVideoMediaItem({ id, videoUrl, index }) {
+    function createWeiboVideoMediaItem({ id, videoUrl, index }: { id: string; videoUrl: string | null | undefined; index: number }): WeiboMediaItem | null {
         if (!videoUrl) {
             return null;
         }
@@ -173,7 +338,7 @@ export function createWeiboPlatform({
         };
     }
 
-    function getWeiboMixMediaItems(status) {
+    function getWeiboMixMediaItems(status: WeiboStatus | null | undefined): WeiboMediaItem[] {
         const mixMediaItems = status && status.mix_media_info && Array.isArray(status.mix_media_info.items)
             ? status.mix_media_info.items
             : [];
@@ -219,10 +384,10 @@ export function createWeiboPlatform({
                 imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
                 videoExt: ".mov"
             };
-        }).filter(Boolean);
+        }).filter(Boolean) as WeiboMediaItem[];
     }
 
-    function createWeiboMediaItem(picId, picInfo, index) {
+    function createWeiboMediaItem(picId: string, picInfo: WeiboPicInfo | null | undefined, index: number): WeiboMediaItem | null {
         if (!picInfo || typeof picInfo !== "object") {
             return null;
         }
@@ -255,8 +420,8 @@ export function createWeiboPlatform({
         };
     }
 
-    function getWeiboMobileMediaItems(status) {
-        const pics = Array.isArray(status && status.pics) ? status.pics : [];
+    function getWeiboMobileMediaItems(status: WeiboStatus | null | undefined): WeiboMediaItem[] {
+        const pics = Array.isArray(status?.pics) ? status.pics : [];
         if (pics.length === 0) {
             return [];
         }
@@ -284,10 +449,10 @@ export function createWeiboPlatform({
                 pic,
                 index
             );
-        }).filter(Boolean);
+        }).filter(Boolean) as WeiboMediaItem[];
     }
 
-    function getWeiboMediaSourceStatus(status) {
+    function getWeiboMediaSourceStatus(status: WeiboStatus | null | undefined): WeiboStatus | null {
         if (!status || typeof status !== "object") {
             return null;
         }
@@ -306,15 +471,15 @@ export function createWeiboPlatform({
         return status;
     }
 
-    function getWeiboMediaItemsFromStatus(status) {
+    function getWeiboMediaItemsFromStatus(status: WeiboStatus | null | undefined): WeiboMediaItem[] {
         const mediaSourceStatus = getWeiboMediaSourceStatus(status);
         if (!mediaSourceStatus || typeof mediaSourceStatus !== "object") {
             return [];
         }
 
         const picIds = Array.isArray(mediaSourceStatus.pic_ids) ? mediaSourceStatus.pic_ids : [];
-        const picInfos = mediaSourceStatus.pic_infos || {};
-        const directMediaItems = picIds.map((picId, index) => createWeiboMediaItem(picId, picInfos[picId], index)).filter(Boolean);
+        const picInfos = (mediaSourceStatus.pic_infos || {}) as Record<string, WeiboPicInfo>;
+        const directMediaItems = picIds.map((picId, index) => createWeiboMediaItem(picId, picInfos[picId], index)).filter(Boolean) as WeiboMediaItem[];
         if (directMediaItems.length > 0) {
             return directMediaItems;
         }
@@ -333,7 +498,7 @@ export function createWeiboPlatform({
             return [];
         }
 
-        const pageInfo = mediaSourceStatus.page_info || {};
+        const pageInfo = (mediaSourceStatus.page_info || {}) as WeiboPageInfo;
         const pageInfoType = typeof pageInfo.type === "string" ? pageInfo.type.toLowerCase() : "";
         const objectType = typeof pageInfo.object_type === "string" ? pageInfo.object_type.toLowerCase() : "";
         if (pageInfoType === "video" || pageInfoType === "11" || objectType === "video") {
@@ -348,19 +513,19 @@ export function createWeiboPlatform({
         return [];
     }
 
-    async function fetchWeiboStatus(statusId) {
+    async function fetchWeiboStatus(statusId: string | null | undefined): Promise<WeiboStatus | null> {
         if (!statusId) {
             return null;
         }
 
         if (weiboStatusCache.has(statusId)) {
-            return weiboStatusCache.get(statusId);
+            return weiboStatusCache.get(statusId)!;
         }
 
         const statusUrl = `${isSearchPage() ? "https://weibo.com" : ""}/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`;
         const request = (async () => {
             if (isSearchPage() && typeof gmXmlhttpRequest === "function") {
-                return new Promise((resolve, reject) => {
+                return new Promise<WeiboStatus | null>((resolve, reject) => {
                     try {
                         gmXmlhttpRequest({
                             method: "GET",
@@ -428,12 +593,12 @@ export function createWeiboPlatform({
         }
     }
 
-    async function getWeiboMediaItemsById(statusId) {
+    async function getWeiboMediaItemsById(statusId: string | null | undefined): Promise<WeiboMediaItem[]> {
         const status = await fetchWeiboStatus(statusId);
         return getWeiboMediaItemsFromStatus(status);
     }
 
-    function isVideoThumbnailImage(img) {
+    function isVideoThumbnailImage(img: Element | null | undefined): boolean {
         if (!img || typeof img.closest !== "function") {
             return false;
         }
@@ -446,7 +611,7 @@ export function createWeiboPlatform({
         return !!pictureMain.querySelector('[class*="_videotime_"], [class*="_videobox_"], .woo-font--play');
     }
 
-    function isArticleCoverImage(img) {
+    function isArticleCoverImage(img: Element | null | undefined): boolean {
         if (!img || typeof img.closest !== "function") {
             return false;
         }
@@ -456,12 +621,12 @@ export function createWeiboPlatform({
         return !!img.closest('a[href*="ttarticle"]');
     }
 
-    function findImagesInPost(container) {
-        const images = [];
+    function findImagesInPost(container: Element): HTMLImageElement[] {
+        const images: HTMLImageElement[] = [];
 
         for (const selector of imageSelectors) {
             try {
-                const elements = container.querySelectorAll(selector);
+                const elements = container.querySelectorAll<HTMLImageElement>(selector);
                 elements.forEach((img) => {
                     if (!img.src) {
                         return;
@@ -489,14 +654,14 @@ export function createWeiboPlatform({
                     images.push(img);
                 });
             } catch (error) {
-                log("微博图片选择器执行失败:", error.message);
+                log("微博图片选择器执行失败:", (error as Error).message);
             }
         }
 
         return images;
     }
 
-    function getVueStatusItem(postContainer) {
+    function getVueStatusItem(postContainer: Element): WeiboStatus | null {
         const candidateNodes = [
             postContainer,
             typeof postContainer.querySelector === "function" ? postContainer.querySelector(".card-wrap") : null,
@@ -504,7 +669,7 @@ export function createWeiboPlatform({
         ].filter(Boolean);
 
         for (const node of candidateNodes) {
-            const vueInstance = node && node.__vue__;
+            const vueInstance = node && (node as WeiboVueElement).__vue__;
             const item = vueInstance && (
                 (vueInstance._props && vueInstance._props.item) ||
                 vueInstance.item ||
@@ -519,7 +684,7 @@ export function createWeiboPlatform({
         return null;
     }
 
-    function getDomMediaItems(postContainer) {
+    function getDomMediaItems(postContainer: Element): WeiboMediaItem[] | null {
         if (!isMobileWeiboPage()) {
             return null;
         }
@@ -532,17 +697,17 @@ export function createWeiboPlatform({
         return getWeiboMediaItemsFromStatus(status);
     }
 
-    function selectPreferredMediaItems(fallbackItems, resolvedMediaItems, apiResolved) {
+    function selectPreferredMediaItems<T>(fallbackItems: T[], resolvedMediaItems: T[], apiResolved: boolean): T[] {
         return apiResolved ? resolvedMediaItems : fallbackItems;
     }
 
-    function getStatusLookupId(postContainer) {
+    function getStatusLookupId(postContainer: Element): string | null {
         const mid = postContainer.getAttribute("mid") || postContainer.getAttribute("data-mid");
         if (mid) {
             return mid;
         }
 
-        const links = postContainer.querySelectorAll("a[href]");
+        const links = postContainer.querySelectorAll<HTMLAnchorElement>("a[href]");
         for (const link of links) {
             const href = link.href || "";
             const match = href.match(/weibo\.com\/(?:u\/)?\d+\/([A-Za-z0-9]+)/);
@@ -554,7 +719,7 @@ export function createWeiboPlatform({
         return null;
     }
 
-    async function resolvePostMediaItems(postContainer, fallbackItems) {
+    async function resolvePostMediaItems(postContainer: Element, fallbackItems: WeiboMediaItem[]): Promise<WeiboMediaItem[]> {
         if (isMobileWeiboPage()) {
             const status = getVueStatusItem(postContainer);
             if (!status) {
@@ -574,13 +739,13 @@ export function createWeiboPlatform({
             const mediaItems = await getWeiboMediaItemsById(statusId);
             return selectPreferredMediaItems(fallbackItems, mediaItems, true);
         } catch (error) {
-            log("微博接口解析失败，回退DOM:", error.message);
+            log("微博接口解析失败，回退DOM:", (error as Error).message);
         }
 
         return selectPreferredMediaItems(fallbackItems, [], false);
     }
 
-    function getPostSelectors() {
+    function getPostSelectors(): string[] {
         if (isMobileWeiboPage()) {
             return mobilePostSelectors;
         }
@@ -588,7 +753,7 @@ export function createWeiboPlatform({
         return postSelectors;
     }
 
-    function shouldSkipPost(post) {
+    function shouldSkipPost(post: Element | null | undefined): boolean {
         if (isMobileWeiboPage()) {
             return !post || typeof post.matches !== "function" || !post.matches(".card.m-panel.card9");
         }
@@ -596,11 +761,11 @@ export function createWeiboPlatform({
         return false;
     }
 
-    function shouldResolveEmptyMediaItems(postContainer) {
+    function shouldResolveEmptyMediaItems(postContainer: Element): boolean {
         return isVideoDownloadEnabled() && !!getStatusLookupId(postContainer);
     }
 
-    function getPostId(postContainer) {
+    function getPostId(postContainer: Element): string {
         if (isMobileWeiboPage()) {
             const status = getVueStatusItem(postContainer);
             if (status && status.mid) {
@@ -613,8 +778,8 @@ export function createWeiboPlatform({
             `weibo_${Date.now()}`;
     }
 
-    function insertMobileDownloadButton(post, btn) {
-        const nameRow = post.querySelector("header.weibo-top .m-text-box h3.m-text-cut");
+    function insertMobileDownloadButton(post: Element, btn: HTMLElement): boolean {
+        const nameRow = post.querySelector<HTMLElement>("header.weibo-top .m-text-box h3.m-text-cut");
         if (nameRow) {
             nameRow.style.display = "inline-flex";
             nameRow.style.alignItems = "center";
@@ -633,7 +798,7 @@ export function createWeiboPlatform({
         return false;
     }
 
-    function insertDownloadButton({ post, btn }) {
+    function insertDownloadButton({ post, btn }: { post: Element; btn: HTMLElement }): boolean {
         if (isMobileWeiboPage()) {
             return insertMobileDownloadButton(post, btn);
         }
@@ -641,7 +806,7 @@ export function createWeiboPlatform({
         if (isSearchPage()) {
             const infoEl = post.querySelector(".content .info");
             if (infoEl) {
-                const nameDiv = Array.from(infoEl.children).find((el) => !el.classList.contains("menu"));
+                const nameDiv = Array.from(infoEl.children).find((el): el is HTMLDivElement => !el.classList.contains("menu"));
                 if (nameDiv) {
                     nameDiv.style.display = "flex";
                     nameDiv.style.alignItems = "center";
@@ -683,12 +848,12 @@ export function createWeiboPlatform({
         return false;
     }
 
-    function getPostUrl(article) {
+    function getPostUrl(article: Element | null | undefined): string | null {
         if (!article) {
             return null;
         }
 
-        const links = article.querySelectorAll("a[href]");
+        const links = article.querySelectorAll<HTMLAnchorElement>("a[href]");
         for (const link of links) {
             const href = link.href;
             if (/weibo\.com\/\d+\/\w+/.test(href) && !href.includes("/u/")) {
@@ -699,7 +864,7 @@ export function createWeiboPlatform({
         return null;
     }
 
-    function injectGotoOriginalMenuItem(popMain, article, documentRef) {
+    function injectGotoOriginalMenuItem(popMain: HTMLElement, article: Element | null | undefined, documentRef: Document): void {
         if (!popMain || popMain.dataset.gotoInjected) {
             return;
         }
@@ -734,9 +899,9 @@ export function createWeiboPlatform({
         popMain.dataset.gotoInjected = "1";
     }
 
-    function injectSearchPageGotoOriginal({ documentRef }) {
-        documentRef.querySelectorAll('div[action-type="feed_list_item"]').forEach((post) => {
-            const menuUl = post.querySelector('ul[node-type="fl_menu_right"]');
+    function injectSearchPageGotoOriginal({ documentRef }: { documentRef: Document }): void {
+        documentRef.querySelectorAll<HTMLDivElement>('div[action-type="feed_list_item"]').forEach((post) => {
+            const menuUl = post.querySelector<HTMLUListElement>('ul[node-type="fl_menu_right"]');
             if (!menuUl || menuUl.dataset.gotoInjected) {
                 return;
             }
@@ -762,13 +927,13 @@ export function createWeiboPlatform({
         });
     }
 
-    function afterInjectDownloadButtons({ documentRef }) {
+    function afterInjectDownloadButtons({ documentRef }: { documentRef: Document }): void {
         if (isSearchPage()) {
             injectSearchPageGotoOriginal({ documentRef });
         }
     }
 
-    function initObservers({ documentRef }) {
+    function initObservers({ documentRef }: { documentRef: Document }): void {
         const MutationObserverRef = windowRef.MutationObserver || MutationObserver;
         const menuObserver = new MutationObserverRef((mutations) => {
             for (const mutation of mutations) {
@@ -780,7 +945,7 @@ export function createWeiboPlatform({
                     if (node.classList.contains("woo-pop-main")) {
                         const article = node.closest("article");
                         if (article && node.textContent.includes("分享")) {
-                            injectGotoOriginalMenuItem(node, article, documentRef);
+                            injectGotoOriginalMenuItem(node as HTMLElement, article, documentRef);
                         }
                     }
                 }
