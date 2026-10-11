@@ -1,0 +1,36 @@
+{
+  "capturedAt": "2026-10-11",
+  "description": "chrome-devtools 从示例详情页提取的最小媒体结构；不依赖登录或网络即可回归识别逻辑。",
+  "posts": [
+    {
+      "url": "https://x.com/798145343h/status/2108864783457882235",
+      "container": { "data-testid": "videoComponent", "textContent": "GIF" },
+      "video": {
+        "src": "https://video.twimg.com/tweet_video/HUQxLK0XAAA9baV.mp4",
+        "currentSrc": "https://video.twimg.com/tweet_video/HUQxLK0XAAA9baV.mp4",
+        "poster": "https://pbs.twimg.com/tweet_video_thumb/HUQxLK0XAAA9baV.jpg",
+        "aria-label": "嵌入式视频",
+        "type": "video/mp4",
+        "loop": false,
+        "videoWidth": 400,
+        "videoHeight": 400,
+        "duration": 4.47
+      }
+    },
+    {
+      "url": "https://x.com/798145343h/status/2108866623780335872",
+      "container": { "data-testid": "videoComponent", "textContent": "GIF" },
+      "video": {
+        "src": "https://video.twimg.com/tweet_video/HUQyHxxWgAAiH2Q.mp4",
+        "currentSrc": "https://video.twimg.com/tweet_video/HUQyHxxWgAAiH2Q.mp4",
+        "poster": "https://pbs.twimg.com/tweet_video_thumb/HUQyHxxWgAAiH2Q.jpg",
+        "aria-label": "嵌入式视频",
+        "type": "video/mp4",
+        "loop": false,
+        "videoWidth": 400,
+        "videoHeight": 400,
+        "duration": 4.47
+      }
+    }
+  ]
+}

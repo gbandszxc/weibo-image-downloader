@@ -53,6 +53,7 @@ const metadataLines = [
 ];
 
 const metadata = metadataLines.join("\n");
+const gifencLicense = await readFile(path.join(projectRoot, "node_modules", "gifenc", "LICENSE.md"), "utf8");
 
 const buildOptions = {
   entryPoints: [entryFile],
@@ -66,7 +67,7 @@ const buildOptions = {
   loader: {
     ".css": "text"
   },
-  banner: { js: `${metadata}\n` }
+  banner: { js: `${metadata}\n\n/* gifenc (MIT)\n${gifencLicense}*/\n` }
 };
 
 await mkdir(path.dirname(outputFile), { recursive: true });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { CONFIG } from "../src/config.js";
 import { createUtils } from "../src/utils.js";
+import { createGifVideoMock } from "./helpers/gif-video-mock.js";
 
 function createTestUtils({
     gmDownload = null,
@@ -10,7 +11,8 @@ function createTestUtils({
     fetchRef = async () => {
         throw new Error("fetch not mocked");
     },
-    windowOverrides = {}
+    windowOverrides = {},
+    configOverrides = {}
 } = {}) {
     const clicks = [];
     const appendedNodes = [];
@@ -71,7 +73,8 @@ function createTestUtils({
     const utils = createUtils({
         config: {
             ...CONFIG,
-            DEBUG: false
+            DEBUG: false,
+            ...configOverrides
         },
         windowRef,
         fetchRef,
@@ -127,6 +130,93 @@ test("downloadImage falls back to blob GM_download instead of opening tabs", asy
     assert.ok(gmCalls[1].url instanceof Blob);
     assert.equal(openCalls.length, 0);
     assert.equal(clicks.length, 0);
+});
+
+test("X GIF conversion defaults on and only changes X GIF download jobs", () => {
+    const items = [
+        { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/demo.mp4", imageExt: ".mp4" },
+        { kind: "image", imageUrl: "https://pbs.twimg.com/media/demo.jpg", imageExt: ".jpg" },
+        { kind: "video", videoUrl: "https://video.twimg.com/amplify_video/demo.mp4", videoExt: ".mp4" },
+        { kind: "gif", imageUrl: "https://example.com/already.gif", imageExt: ".gif" }
+    ];
+    const { utils } = createTestUtils({ windowOverrides: { location: { hostname: "x.com" } } });
+    assert.equal(CONFIG.X_GIF_AUTO_CONVERT, true);
+    assert.deepEqual(utils.buildMediaDownloadJobs(items, "123"), [
+        { type: "image", url: items[0].imageUrl, filename: "x_123_1.gif", convertToGif: true },
+        { type: "image", url: items[1].imageUrl, filename: "x_123_2.jpg" },
+        { type: "video", url: items[2].videoUrl, filename: "x_123_3.mp4" },
+        { type: "image", url: items[3].imageUrl, filename: "x_123_4.gif" }
+    ]);
+    const disabled = createTestUtils({
+        windowOverrides: { location: { hostname: "x.com" } },
+        configOverrides: { X_GIF_AUTO_CONVERT: false }
+    });
+    assert.equal(disabled.utils.buildMediaDownloadJobs(items, "123")[0].filename, "x_123_1.mp4");
+    assert.equal(disabled.utils.buildMediaDownloadJobs(items, "123")[0].convertToGif, undefined);
+    const weibo = createTestUtils();
+    assert.equal(weibo.utils.buildMediaDownloadJobs(items, "123")[0].convertToGif, undefined);
+});
+
+test("X GIF downloads fetch MP4 bytes and save a real GIF blob through the shared downloader", async () => {
+    const mock = createGifVideoMock();
+    const downloads = [];
+    const { utils, toastMessages } = createTestUtils({
+        windowOverrides: mock.windowRef,
+        gmXmlhttpRequest(details) {
+            assert.equal(details.responseType, "blob");
+            queueMicrotask(() => details.onload({ status: 200, response: new Blob(["mp4"]) }));
+        },
+        gmDownload(details) {
+            downloads.push(details);
+            queueMicrotask(details.onload);
+        }
+    });
+    await utils.downloadMediaItems([
+        { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/demo.mp4", imageExt: ".mp4" }
+    ], "123");
+    assert.equal(downloads.length, 1);
+    assert.equal(downloads[0].name, "x_123_1.gif");
+    assert.equal(downloads[0].url.type, "image/gif");
+    assert.equal(new TextDecoder().decode((await downloads[0].url.arrayBuffer()).slice(0, 6)), "GIF89a");
+    assert.equal(toastMessages.at(-1), "已下载 1 张图片");
+});
+
+test("failed X GIF conversion never saves an MP4 named GIF and continues other jobs", async () => {
+    const mock = createGifVideoMock({ failOn: "load" });
+    const downloads = [];
+    const { utils, toastMessages } = createTestUtils({
+        windowOverrides: mock.windowRef,
+        configOverrides: { DELAY_MS: 0 },
+        fetchRef: async () => ({ ok: true, blob: async () => new Blob(["broken mp4"]) }),
+        gmDownload(details) {
+            downloads.push(details);
+            queueMicrotask(details.onload);
+        }
+    });
+    await utils.downloadMediaItems([
+        { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/broken.mp4", imageExt: ".mp4" },
+        { kind: "image", imageUrl: "https://pbs.twimg.com/media/photo.jpg", imageExt: ".jpg" }
+    ], "123");
+    assert.deepEqual(downloads.map((job) => job.name), ["x_123_2.jpg"]);
+    assert.match(toastMessages.at(-1), /已下载 1 个文件，1 个失败；X GIF转换或保存失败/);
+    assert.deepEqual(mock.revokedUrls, ["blob:gif-source"]);
+});
+
+test("disabled X GIF conversion downloads the original MP4 without decoding", async () => {
+    const downloads = [];
+    const { utils } = createTestUtils({
+        windowOverrides: { location: { hostname: "x.com" } },
+        configOverrides: { X_GIF_AUTO_CONVERT: false },
+        gmDownload(details) {
+            downloads.push(details);
+            queueMicrotask(details.onload);
+        }
+    });
+    await utils.downloadMediaItems([
+        { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/demo.mp4", imageExt: ".mp4" }
+    ], "123");
+    assert.equal(downloads[0].url, "https://video.twimg.com/tweet_video/demo.mp4");
+    assert.equal(downloads[0].name, "x_123_1.mp4");
 });
 
 test("downloadMediaItems reports failures instead of opening fallback tabs", async () => {

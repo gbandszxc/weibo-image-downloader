@@ -1,4 +1,5 @@
 import { createPlatformAdapter } from "./platforms/index.js";
+import { convertXVideoToGif } from "./x-gif.js";
 
 export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui }) {
     let platformLabel = "weibo";
@@ -84,11 +85,17 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             const baseName = `${platform}_${postId}_${index + 1}`;
 
             if (item.imageUrl) {
-                jobs.push({
+                const job = {
                     type: "image",
                     url: item.imageUrl,
                     filename: `${baseName}${item.imageExt || getFileExtensionFromUrl(item.imageUrl, ".jpg")}`
-                });
+                };
+                if (platform === "x" && item.kind === "gif" && config.X_GIF_AUTO_CONVERT &&
+                    getFileExtensionFromUrl(item.imageUrl, item.imageExt) !== ".gif") {
+                    job.convertToGif = true;
+                    job.filename = `${baseName}.gif`;
+                }
+                jobs.push(job);
             }
 
             if (item.videoUrl) {
@@ -297,6 +304,26 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return downloadMediaItems(normalizeLegacyMediaItems(urls), postId);
     }
 
+    async function downloadXGif(url, filename) {
+        try {
+            let blob;
+            try {
+                blob = typeof gmXmlhttpRequest === "function"
+                    ? await fetchBlobWithXmlHttpRequest(url)
+                    : await fetchBlobWithWindowFetch(url);
+            } catch (error) {
+                if (typeof gmXmlhttpRequest !== "function") {
+                    throw error;
+                }
+                blob = await fetchBlobWithWindowFetch(url);
+            }
+            return await downloadBlob(await convertXVideoToGif(blob, windowRef), filename);
+        } catch (error) {
+            log("X GIF转换失败:", filename, error.message);
+            return false;
+        }
+    }
+
     async function downloadMediaItems(mediaItems, postId) {
         if (!mediaItems || mediaItems.length === 0) {
             if (ui && typeof ui.showToast === "function") {
@@ -317,14 +344,20 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
 
         let successCount = 0;
         let failedCount = 0;
+        let failedGifCount = 0;
 
         for (let i = 0; i < jobs.length; i++) {
             const job = jobs[i];
-            const success = await downloadImage(job.url, job.filename);
+            const success = job.convertToGif
+                ? await downloadXGif(job.url, job.filename)
+                : await downloadImage(job.url, job.filename);
             if (success) {
                 successCount++;
             } else {
                 failedCount++;
+                if (job.convertToGif) {
+                    failedGifCount++;
+                }
             }
             if (i < jobs.length - 1) {
                 await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
@@ -349,6 +382,9 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             message = `已下载 ${successCount} 个文件，${failedCount} 个失败`;
         }
 
+        if (failedGifCount > 0) {
+            message += "；X GIF转换或保存失败，可关闭自动转换下载 MP4 源";
+        }
         log(message);
         if (ui && typeof ui.showToast === "function") {
             ui.showToast(message);

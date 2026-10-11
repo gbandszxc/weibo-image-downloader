@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { CONFIG } from "../src/config.js";
 import { createUi } from "../src/ui.js";
@@ -91,6 +92,26 @@ function createButtonElement() {
         remove() {}
     };
 }
+
+test("captured X GIF posts remain GIF items with video download disabled", () => {
+    const fixture = JSON.parse(readFileSync(new URL("./fixtures/x-gif-dom.json", import.meta.url), "utf8"));
+    const platform = createXPlatformForTests();
+    for (const post of fixture.posts) {
+        const mediaItems = platform.getDomMediaItems(createQueryContainer({
+            'article img[src*="twimg.com"]': [{ src: post.video.poster }],
+            video: [{
+                ...post.video,
+                closest(selector) {
+                    return selector === '[data-testid="videoComponent"]' ? post.container : null;
+                }
+            }]
+        }));
+        assert.equal(mediaItems.length, 1);
+        assert.equal(mediaItems[0].kind, "gif");
+        assert.equal(mediaItems[0].imageUrl, post.video.src);
+        assert.equal(mediaItems[0].imageExt, ".mp4");
+    }
+});
 
 test("x platform keeps photo items, converts GIF videos to downloadable media, and skips pure videos", () => {
     const platform = createXPlatformForTests();

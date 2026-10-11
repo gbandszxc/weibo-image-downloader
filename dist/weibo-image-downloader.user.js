@@ -31,9 +31,871 @@
 // @license      MIT
 // ==/UserScript==
 
+/* gifenc (MIT)
+The MIT License (MIT)
+Copyright (c) 2017 Matt DesLauriers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+
 (() => {
+  var __create = Object.create;
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __getProtoOf = Object.getPrototypeOf;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __commonJS = (cb, mod) => function __require() {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+    // If the importer is in node compatibility mode or this is not an ESM
+    // file that has been converted to a CommonJS file using a Babel-
+    // compatible transform (i.e. "__esModule" has not been set), then set
+    // "default" to the CommonJS "module.exports" for node compatibility.
+    isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+    mod
+  ));
+
+  // node_modules/gifenc/dist/gifenc.js
+  var require_gifenc = __commonJS({
+    "node_modules/gifenc/dist/gifenc.js"(exports) {
+      var __defProp2 = Object.defineProperty;
+      var __markAsModule = (target) => __defProp2(target, "__esModule", { value: true });
+      var __export = (target, all) => {
+        for (var name in all)
+          __defProp2(target, name, { get: all[name], enumerable: true });
+      };
+      __markAsModule(exports);
+      __export(exports, {
+        GIFEncoder: () => GIFEncoder3,
+        applyPalette: () => applyPalette2,
+        default: () => src_default,
+        nearestColor: () => nearestColor,
+        nearestColorIndex: () => nearestColorIndex,
+        nearestColorIndexWithDistance: () => nearestColorIndexWithDistance,
+        prequantize: () => prequantize,
+        quantize: () => quantize2,
+        snapColorsToPalette: () => snapColorsToPalette
+      });
+      var constants_default = {
+        signature: "GIF",
+        version: "89a",
+        trailer: 59,
+        extensionIntroducer: 33,
+        applicationExtensionLabel: 255,
+        graphicControlExtensionLabel: 249,
+        imageSeparator: 44,
+        signatureSize: 3,
+        versionSize: 3,
+        globalColorTableFlagMask: 128,
+        colorResolutionMask: 112,
+        sortFlagMask: 8,
+        globalColorTableSizeMask: 7,
+        applicationIdentifierSize: 8,
+        applicationAuthCodeSize: 3,
+        disposalMethodMask: 28,
+        userInputFlagMask: 2,
+        transparentColorFlagMask: 1,
+        localColorTableFlagMask: 128,
+        interlaceFlagMask: 64,
+        idSortFlagMask: 32,
+        localColorTableSizeMask: 7
+      };
+      function createStream(initialCapacity = 256) {
+        let cursor = 0;
+        let contents = new Uint8Array(initialCapacity);
+        return {
+          get buffer() {
+            return contents.buffer;
+          },
+          reset() {
+            cursor = 0;
+          },
+          bytesView() {
+            return contents.subarray(0, cursor);
+          },
+          bytes() {
+            return contents.slice(0, cursor);
+          },
+          writeByte(byte) {
+            expand(cursor + 1);
+            contents[cursor] = byte;
+            cursor++;
+          },
+          writeBytes(data, offset = 0, byteLength = data.length) {
+            expand(cursor + byteLength);
+            for (let i = 0; i < byteLength; i++) {
+              contents[cursor++] = data[i + offset];
+            }
+          },
+          writeBytesView(data, offset = 0, byteLength = data.byteLength) {
+            expand(cursor + byteLength);
+            contents.set(data.subarray(offset, offset + byteLength), cursor);
+            cursor += byteLength;
+          }
+        };
+        function expand(newCapacity) {
+          var prevCapacity = contents.length;
+          if (prevCapacity >= newCapacity)
+            return;
+          var CAPACITY_DOUBLING_MAX = 1024 * 1024;
+          newCapacity = Math.max(newCapacity, prevCapacity * (prevCapacity < CAPACITY_DOUBLING_MAX ? 2 : 1.125) >>> 0);
+          if (prevCapacity != 0)
+            newCapacity = Math.max(newCapacity, 256);
+          const oldContents = contents;
+          contents = new Uint8Array(newCapacity);
+          if (cursor > 0)
+            contents.set(oldContents.subarray(0, cursor), 0);
+        }
+      }
+      var BITS = 12;
+      var DEFAULT_HSIZE = 5003;
+      var MASKS = [
+        0,
+        1,
+        3,
+        7,
+        15,
+        31,
+        63,
+        127,
+        255,
+        511,
+        1023,
+        2047,
+        4095,
+        8191,
+        16383,
+        32767,
+        65535
+      ];
+      function lzwEncode(width, height, pixels, colorDepth, outStream = createStream(512), accum = new Uint8Array(256), htab = new Int32Array(DEFAULT_HSIZE), codetab = new Int32Array(DEFAULT_HSIZE)) {
+        const hsize = htab.length;
+        const initCodeSize = Math.max(2, colorDepth);
+        accum.fill(0);
+        codetab.fill(0);
+        htab.fill(-1);
+        let cur_accum = 0;
+        let cur_bits = 0;
+        const init_bits = initCodeSize + 1;
+        const g_init_bits = init_bits;
+        let clear_flg = false;
+        let n_bits = g_init_bits;
+        let maxcode = (1 << n_bits) - 1;
+        const ClearCode = 1 << init_bits - 1;
+        const EOFCode = ClearCode + 1;
+        let free_ent = ClearCode + 2;
+        let a_count = 0;
+        let ent = pixels[0];
+        let hshift = 0;
+        for (let fcode = hsize; fcode < 65536; fcode *= 2) {
+          ++hshift;
+        }
+        hshift = 8 - hshift;
+        outStream.writeByte(initCodeSize);
+        output(ClearCode);
+        const length = pixels.length;
+        for (let idx = 1; idx < length; idx++) {
+          next_block: {
+            const c = pixels[idx];
+            const fcode = (c << BITS) + ent;
+            let i = c << hshift ^ ent;
+            if (htab[i] === fcode) {
+              ent = codetab[i];
+              break next_block;
+            }
+            const disp = i === 0 ? 1 : hsize - i;
+            while (htab[i] >= 0) {
+              i -= disp;
+              if (i < 0)
+                i += hsize;
+              if (htab[i] === fcode) {
+                ent = codetab[i];
+                break next_block;
+              }
+            }
+            output(ent);
+            ent = c;
+            if (free_ent < 1 << BITS) {
+              codetab[i] = free_ent++;
+              htab[i] = fcode;
+            } else {
+              htab.fill(-1);
+              free_ent = ClearCode + 2;
+              clear_flg = true;
+              output(ClearCode);
+            }
+          }
+        }
+        output(ent);
+        output(EOFCode);
+        outStream.writeByte(0);
+        return outStream.bytesView();
+        function output(code) {
+          cur_accum &= MASKS[cur_bits];
+          if (cur_bits > 0)
+            cur_accum |= code << cur_bits;
+          else
+            cur_accum = code;
+          cur_bits += n_bits;
+          while (cur_bits >= 8) {
+            accum[a_count++] = cur_accum & 255;
+            if (a_count >= 254) {
+              outStream.writeByte(a_count);
+              outStream.writeBytesView(accum, 0, a_count);
+              a_count = 0;
+            }
+            cur_accum >>= 8;
+            cur_bits -= 8;
+          }
+          if (free_ent > maxcode || clear_flg) {
+            if (clear_flg) {
+              n_bits = g_init_bits;
+              maxcode = (1 << n_bits) - 1;
+              clear_flg = false;
+            } else {
+              ++n_bits;
+              maxcode = n_bits === BITS ? 1 << n_bits : (1 << n_bits) - 1;
+            }
+          }
+          if (code == EOFCode) {
+            while (cur_bits > 0) {
+              accum[a_count++] = cur_accum & 255;
+              if (a_count >= 254) {
+                outStream.writeByte(a_count);
+                outStream.writeBytesView(accum, 0, a_count);
+                a_count = 0;
+              }
+              cur_accum >>= 8;
+              cur_bits -= 8;
+            }
+            if (a_count > 0) {
+              outStream.writeByte(a_count);
+              outStream.writeBytesView(accum, 0, a_count);
+              a_count = 0;
+            }
+          }
+        }
+      }
+      var lzwEncode_default = lzwEncode;
+      function rgb888_to_rgb565(r, g, b) {
+        return r << 8 & 63488 | g << 2 & 992 | b >> 3;
+      }
+      function rgba8888_to_rgba4444(r, g, b, a) {
+        return r >> 4 | g & 240 | (b & 240) << 4 | (a & 240) << 8;
+      }
+      function rgb888_to_rgb444(r, g, b) {
+        return r >> 4 << 8 | g & 240 | b >> 4;
+      }
+      function clamp(value, min, max) {
+        return value < min ? min : value > max ? max : value;
+      }
+      function sqr(value) {
+        return value * value;
+      }
+      function find_nn(bins, idx, hasAlpha) {
+        var nn = 0;
+        var err = 1e100;
+        const bin1 = bins[idx];
+        const n1 = bin1.cnt;
+        const wa = bin1.ac;
+        const wr = bin1.rc;
+        const wg = bin1.gc;
+        const wb = bin1.bc;
+        for (var i = bin1.fw; i != 0; i = bins[i].fw) {
+          const bin = bins[i];
+          const n2 = bin.cnt;
+          const nerr2 = n1 * n2 / (n1 + n2);
+          if (nerr2 >= err)
+            continue;
+          var nerr = 0;
+          if (hasAlpha) {
+            nerr += nerr2 * sqr(bin.ac - wa);
+            if (nerr >= err)
+              continue;
+          }
+          nerr += nerr2 * sqr(bin.rc - wr);
+          if (nerr >= err)
+            continue;
+          nerr += nerr2 * sqr(bin.gc - wg);
+          if (nerr >= err)
+            continue;
+          nerr += nerr2 * sqr(bin.bc - wb);
+          if (nerr >= err)
+            continue;
+          err = nerr;
+          nn = i;
+        }
+        bin1.err = err;
+        bin1.nn = nn;
+      }
+      function create_bin() {
+        return {
+          ac: 0,
+          rc: 0,
+          gc: 0,
+          bc: 0,
+          cnt: 0,
+          nn: 0,
+          fw: 0,
+          bk: 0,
+          tm: 0,
+          mtm: 0,
+          err: 0
+        };
+      }
+      function create_bin_list(data, format) {
+        const bincount = format === "rgb444" ? 4096 : 65536;
+        const bins = new Array(bincount);
+        const size = data.length;
+        if (format === "rgba4444") {
+          for (let i = 0; i < size; ++i) {
+            const color = data[i];
+            const a = color >> 24 & 255;
+            const b = color >> 16 & 255;
+            const g = color >> 8 & 255;
+            const r = color & 255;
+            const index = rgba8888_to_rgba4444(r, g, b, a);
+            let bin = index in bins ? bins[index] : bins[index] = create_bin();
+            bin.rc += r;
+            bin.gc += g;
+            bin.bc += b;
+            bin.ac += a;
+            bin.cnt++;
+          }
+        } else if (format === "rgb444") {
+          for (let i = 0; i < size; ++i) {
+            const color = data[i];
+            const b = color >> 16 & 255;
+            const g = color >> 8 & 255;
+            const r = color & 255;
+            const index = rgb888_to_rgb444(r, g, b);
+            let bin = index in bins ? bins[index] : bins[index] = create_bin();
+            bin.rc += r;
+            bin.gc += g;
+            bin.bc += b;
+            bin.cnt++;
+          }
+        } else {
+          for (let i = 0; i < size; ++i) {
+            const color = data[i];
+            const b = color >> 16 & 255;
+            const g = color >> 8 & 255;
+            const r = color & 255;
+            const index = rgb888_to_rgb565(r, g, b);
+            let bin = index in bins ? bins[index] : bins[index] = create_bin();
+            bin.rc += r;
+            bin.gc += g;
+            bin.bc += b;
+            bin.cnt++;
+          }
+        }
+        return bins;
+      }
+      function quantize2(rgba, maxColors, opts = {}) {
+        const {
+          format = "rgb565",
+          clearAlpha = true,
+          clearAlphaColor = 0,
+          clearAlphaThreshold = 0,
+          oneBitAlpha = false
+        } = opts;
+        if (!rgba || !rgba.buffer) {
+          throw new Error("quantize() expected RGBA Uint8Array data");
+        }
+        if (!(rgba instanceof Uint8Array) && !(rgba instanceof Uint8ClampedArray)) {
+          throw new Error("quantize() expected RGBA Uint8Array data");
+        }
+        const data = new Uint32Array(rgba.buffer);
+        let useSqrt = opts.useSqrt !== false;
+        const hasAlpha = format === "rgba4444";
+        const bins = create_bin_list(data, format);
+        const bincount = bins.length;
+        const bincountMinusOne = bincount - 1;
+        const heap = new Uint32Array(bincount + 1);
+        var maxbins = 0;
+        for (var i = 0; i < bincount; ++i) {
+          const bin = bins[i];
+          if (bin != null) {
+            var d = 1 / bin.cnt;
+            if (hasAlpha)
+              bin.ac *= d;
+            bin.rc *= d;
+            bin.gc *= d;
+            bin.bc *= d;
+            bins[maxbins++] = bin;
+          }
+        }
+        if (sqr(maxColors) / maxbins < 0.022) {
+          useSqrt = false;
+        }
+        var i = 0;
+        for (; i < maxbins - 1; ++i) {
+          bins[i].fw = i + 1;
+          bins[i + 1].bk = i;
+          if (useSqrt)
+            bins[i].cnt = Math.sqrt(bins[i].cnt);
+        }
+        if (useSqrt)
+          bins[i].cnt = Math.sqrt(bins[i].cnt);
+        var h, l, l2;
+        for (i = 0; i < maxbins; ++i) {
+          find_nn(bins, i, false);
+          var err = bins[i].err;
+          for (l = ++heap[0]; l > 1; l = l2) {
+            l2 = l >> 1;
+            if (bins[h = heap[l2]].err <= err)
+              break;
+            heap[l] = h;
+          }
+          heap[l] = i;
+        }
+        var extbins = maxbins - maxColors;
+        for (i = 0; i < extbins; ) {
+          var tb;
+          for (; ; ) {
+            var b1 = heap[1];
+            tb = bins[b1];
+            if (tb.tm >= tb.mtm && bins[tb.nn].mtm <= tb.tm)
+              break;
+            if (tb.mtm == bincountMinusOne)
+              b1 = heap[1] = heap[heap[0]--];
+            else {
+              find_nn(bins, b1, false);
+              tb.tm = i;
+            }
+            var err = bins[b1].err;
+            for (l = 1; (l2 = l + l) <= heap[0]; l = l2) {
+              if (l2 < heap[0] && bins[heap[l2]].err > bins[heap[l2 + 1]].err)
+                l2++;
+              if (err <= bins[h = heap[l2]].err)
+                break;
+              heap[l] = h;
+            }
+            heap[l] = b1;
+          }
+          var nb = bins[tb.nn];
+          var n1 = tb.cnt;
+          var n2 = nb.cnt;
+          var d = 1 / (n1 + n2);
+          if (hasAlpha)
+            tb.ac = d * (n1 * tb.ac + n2 * nb.ac);
+          tb.rc = d * (n1 * tb.rc + n2 * nb.rc);
+          tb.gc = d * (n1 * tb.gc + n2 * nb.gc);
+          tb.bc = d * (n1 * tb.bc + n2 * nb.bc);
+          tb.cnt += nb.cnt;
+          tb.mtm = ++i;
+          bins[nb.bk].fw = nb.fw;
+          bins[nb.fw].bk = nb.bk;
+          nb.mtm = bincountMinusOne;
+        }
+        let palette = [];
+        var k = 0;
+        for (i = 0; ; ++k) {
+          let r = clamp(Math.round(bins[i].rc), 0, 255);
+          let g = clamp(Math.round(bins[i].gc), 0, 255);
+          let b = clamp(Math.round(bins[i].bc), 0, 255);
+          let a = 255;
+          if (hasAlpha) {
+            a = clamp(Math.round(bins[i].ac), 0, 255);
+            if (oneBitAlpha) {
+              const threshold = typeof oneBitAlpha === "number" ? oneBitAlpha : 127;
+              a = a <= threshold ? 0 : 255;
+            }
+            if (clearAlpha && a <= clearAlphaThreshold) {
+              r = g = b = clearAlphaColor;
+              a = 0;
+            }
+          }
+          const color = hasAlpha ? [r, g, b, a] : [r, g, b];
+          const exists = existsInPalette(palette, color);
+          if (!exists)
+            palette.push(color);
+          if ((i = bins[i].fw) == 0)
+            break;
+        }
+        return palette;
+      }
+      function existsInPalette(palette, color) {
+        for (let i = 0; i < palette.length; i++) {
+          const p = palette[i];
+          let matchesRGB = p[0] === color[0] && p[1] === color[1] && p[2] === color[2];
+          let matchesAlpha = p.length >= 4 && color.length >= 4 ? p[3] === color[3] : true;
+          if (matchesRGB && matchesAlpha)
+            return true;
+        }
+        return false;
+      }
+      function euclideanDistanceSquared(a, b) {
+        var sum = 0;
+        var n;
+        for (n = 0; n < a.length; n++) {
+          const dx = a[n] - b[n];
+          sum += dx * dx;
+        }
+        return sum;
+      }
+      function roundStep(byte, step) {
+        return step > 1 ? Math.round(byte / step) * step : byte;
+      }
+      function prequantize(rgba, { roundRGB = 5, roundAlpha = 10, oneBitAlpha = null } = {}) {
+        const data = new Uint32Array(rgba.buffer);
+        for (let i = 0; i < data.length; i++) {
+          const color = data[i];
+          let a = color >> 24 & 255;
+          let b = color >> 16 & 255;
+          let g = color >> 8 & 255;
+          let r = color & 255;
+          a = roundStep(a, roundAlpha);
+          if (oneBitAlpha) {
+            const threshold = typeof oneBitAlpha === "number" ? oneBitAlpha : 127;
+            a = a <= threshold ? 0 : 255;
+          }
+          r = roundStep(r, roundRGB);
+          g = roundStep(g, roundRGB);
+          b = roundStep(b, roundRGB);
+          data[i] = a << 24 | b << 16 | g << 8 | r << 0;
+        }
+      }
+      function applyPalette2(rgba, palette, format = "rgb565") {
+        if (!rgba || !rgba.buffer) {
+          throw new Error("quantize() expected RGBA Uint8Array data");
+        }
+        if (!(rgba instanceof Uint8Array) && !(rgba instanceof Uint8ClampedArray)) {
+          throw new Error("quantize() expected RGBA Uint8Array data");
+        }
+        if (palette.length > 256) {
+          throw new Error("applyPalette() only works with 256 colors or less");
+        }
+        const data = new Uint32Array(rgba.buffer);
+        const length = data.length;
+        const bincount = format === "rgb444" ? 4096 : 65536;
+        const index = new Uint8Array(length);
+        const cache = new Array(bincount);
+        const hasAlpha = format === "rgba4444";
+        if (format === "rgba4444") {
+          for (let i = 0; i < length; i++) {
+            const color = data[i];
+            const a = color >> 24 & 255;
+            const b = color >> 16 & 255;
+            const g = color >> 8 & 255;
+            const r = color & 255;
+            const key = rgba8888_to_rgba4444(r, g, b, a);
+            const idx = key in cache ? cache[key] : cache[key] = nearestColorIndexRGBA(r, g, b, a, palette);
+            index[i] = idx;
+          }
+        } else {
+          const rgb888_to_key = format === "rgb444" ? rgb888_to_rgb444 : rgb888_to_rgb565;
+          for (let i = 0; i < length; i++) {
+            const color = data[i];
+            const b = color >> 16 & 255;
+            const g = color >> 8 & 255;
+            const r = color & 255;
+            const key = rgb888_to_key(r, g, b);
+            const idx = key in cache ? cache[key] : cache[key] = nearestColorIndexRGB(r, g, b, palette);
+            index[i] = idx;
+          }
+        }
+        return index;
+      }
+      function nearestColorIndexRGBA(r, g, b, a, palette) {
+        let k = 0;
+        let mindist = 1e100;
+        for (let i = 0; i < palette.length; i++) {
+          const px2 = palette[i];
+          const a2 = px2[3];
+          let curdist = sqr2(a2 - a);
+          if (curdist > mindist)
+            continue;
+          const r2 = px2[0];
+          curdist += sqr2(r2 - r);
+          if (curdist > mindist)
+            continue;
+          const g2 = px2[1];
+          curdist += sqr2(g2 - g);
+          if (curdist > mindist)
+            continue;
+          const b2 = px2[2];
+          curdist += sqr2(b2 - b);
+          if (curdist > mindist)
+            continue;
+          mindist = curdist;
+          k = i;
+        }
+        return k;
+      }
+      function nearestColorIndexRGB(r, g, b, palette) {
+        let k = 0;
+        let mindist = 1e100;
+        for (let i = 0; i < palette.length; i++) {
+          const px2 = palette[i];
+          const r2 = px2[0];
+          let curdist = sqr2(r2 - r);
+          if (curdist > mindist)
+            continue;
+          const g2 = px2[1];
+          curdist += sqr2(g2 - g);
+          if (curdist > mindist)
+            continue;
+          const b2 = px2[2];
+          curdist += sqr2(b2 - b);
+          if (curdist > mindist)
+            continue;
+          mindist = curdist;
+          k = i;
+        }
+        return k;
+      }
+      function snapColorsToPalette(palette, knownColors, threshold = 5) {
+        if (!palette.length || !knownColors.length)
+          return;
+        const paletteRGB = palette.map((p) => p.slice(0, 3));
+        const thresholdSq = threshold * threshold;
+        const dim = palette[0].length;
+        for (let i = 0; i < knownColors.length; i++) {
+          let color = knownColors[i];
+          if (color.length < dim) {
+            color = [color[0], color[1], color[2], 255];
+          } else if (color.length > dim) {
+            color = color.slice(0, 3);
+          } else {
+            color = color.slice();
+          }
+          const r = nearestColorIndexWithDistance(paletteRGB, color.slice(0, 3), euclideanDistanceSquared);
+          const idx = r[0];
+          const distanceSq = r[1];
+          if (distanceSq > 0 && distanceSq <= thresholdSq) {
+            palette[idx] = color;
+          }
+        }
+      }
+      function sqr2(a) {
+        return a * a;
+      }
+      function nearestColorIndex(colors, pixel, distanceFn = euclideanDistanceSquared) {
+        let minDist = Infinity;
+        let minDistIndex = -1;
+        for (let j = 0; j < colors.length; j++) {
+          const paletteColor = colors[j];
+          const dist = distanceFn(pixel, paletteColor);
+          if (dist < minDist) {
+            minDist = dist;
+            minDistIndex = j;
+          }
+        }
+        return minDistIndex;
+      }
+      function nearestColorIndexWithDistance(colors, pixel, distanceFn = euclideanDistanceSquared) {
+        let minDist = Infinity;
+        let minDistIndex = -1;
+        for (let j = 0; j < colors.length; j++) {
+          const paletteColor = colors[j];
+          const dist = distanceFn(pixel, paletteColor);
+          if (dist < minDist) {
+            minDist = dist;
+            minDistIndex = j;
+          }
+        }
+        return [minDistIndex, minDist];
+      }
+      function nearestColor(colors, pixel, distanceFn = euclideanDistanceSquared) {
+        return colors[nearestColorIndex(colors, pixel, distanceFn)];
+      }
+      function GIFEncoder3(opt = {}) {
+        const { initialCapacity = 4096, auto = true } = opt;
+        const stream = createStream(initialCapacity);
+        const HSIZE = 5003;
+        const accum = new Uint8Array(256);
+        const htab = new Int32Array(HSIZE);
+        const codetab = new Int32Array(HSIZE);
+        let hasInit = false;
+        return {
+          reset() {
+            stream.reset();
+            hasInit = false;
+          },
+          finish() {
+            stream.writeByte(constants_default.trailer);
+          },
+          bytes() {
+            return stream.bytes();
+          },
+          bytesView() {
+            return stream.bytesView();
+          },
+          get buffer() {
+            return stream.buffer;
+          },
+          get stream() {
+            return stream;
+          },
+          writeHeader,
+          writeFrame(index, width, height, opts = {}) {
+            const {
+              transparent = false,
+              transparentIndex = 0,
+              delay = 0,
+              palette = null,
+              repeat = 0,
+              colorDepth = 8,
+              dispose = -1
+            } = opts;
+            let first = false;
+            if (auto) {
+              if (!hasInit) {
+                first = true;
+                writeHeader();
+                hasInit = true;
+              }
+            } else {
+              first = Boolean(opts.first);
+            }
+            width = Math.max(0, Math.floor(width));
+            height = Math.max(0, Math.floor(height));
+            if (first) {
+              if (!palette) {
+                throw new Error("First frame must include a { palette } option");
+              }
+              encodeLogicalScreenDescriptor(stream, width, height, palette, colorDepth);
+              encodeColorTable(stream, palette);
+              if (repeat >= 0) {
+                encodeNetscapeExt(stream, repeat);
+              }
+            }
+            const delayTime = Math.round(delay / 10);
+            encodeGraphicControlExt(stream, dispose, delayTime, transparent, transparentIndex);
+            const useLocalColorTable = Boolean(palette) && !first;
+            encodeImageDescriptor(stream, width, height, useLocalColorTable ? palette : null);
+            if (useLocalColorTable)
+              encodeColorTable(stream, palette);
+            encodePixels(stream, index, width, height, colorDepth, accum, htab, codetab);
+          }
+        };
+        function writeHeader() {
+          writeUTFBytes(stream, "GIF89a");
+        }
+      }
+      function encodeGraphicControlExt(stream, dispose, delay, transparent, transparentIndex) {
+        stream.writeByte(33);
+        stream.writeByte(249);
+        stream.writeByte(4);
+        if (transparentIndex < 0) {
+          transparentIndex = 0;
+          transparent = false;
+        }
+        var transp, disp;
+        if (!transparent) {
+          transp = 0;
+          disp = 0;
+        } else {
+          transp = 1;
+          disp = 2;
+        }
+        if (dispose >= 0) {
+          disp = dispose & 7;
+        }
+        disp <<= 2;
+        const userInput = 0;
+        stream.writeByte(0 | disp | userInput | transp);
+        writeUInt16(stream, delay);
+        stream.writeByte(transparentIndex || 0);
+        stream.writeByte(0);
+      }
+      function encodeLogicalScreenDescriptor(stream, width, height, palette, colorDepth = 8) {
+        const globalColorTableFlag = 1;
+        const sortFlag = 0;
+        const globalColorTableSize = colorTableSize(palette.length) - 1;
+        const fields = globalColorTableFlag << 7 | colorDepth - 1 << 4 | sortFlag << 3 | globalColorTableSize;
+        const backgroundColorIndex = 0;
+        const pixelAspectRatio = 0;
+        writeUInt16(stream, width);
+        writeUInt16(stream, height);
+        stream.writeBytes([fields, backgroundColorIndex, pixelAspectRatio]);
+      }
+      function encodeNetscapeExt(stream, repeat) {
+        stream.writeByte(33);
+        stream.writeByte(255);
+        stream.writeByte(11);
+        writeUTFBytes(stream, "NETSCAPE2.0");
+        stream.writeByte(3);
+        stream.writeByte(1);
+        writeUInt16(stream, repeat);
+        stream.writeByte(0);
+      }
+      function encodeColorTable(stream, palette) {
+        const colorTableLength = 1 << colorTableSize(palette.length);
+        for (let i = 0; i < colorTableLength; i++) {
+          let color = [0, 0, 0];
+          if (i < palette.length) {
+            color = palette[i];
+          }
+          stream.writeByte(color[0]);
+          stream.writeByte(color[1]);
+          stream.writeByte(color[2]);
+        }
+      }
+      function encodeImageDescriptor(stream, width, height, localPalette) {
+        stream.writeByte(44);
+        writeUInt16(stream, 0);
+        writeUInt16(stream, 0);
+        writeUInt16(stream, width);
+        writeUInt16(stream, height);
+        if (localPalette) {
+          const interlace = 0;
+          const sorted = 0;
+          const palSize = colorTableSize(localPalette.length) - 1;
+          stream.writeByte(128 | interlace | sorted | 0 | palSize);
+        } else {
+          stream.writeByte(0);
+        }
+      }
+      function encodePixels(stream, index, width, height, colorDepth = 8, accum, htab, codetab) {
+        lzwEncode_default(width, height, index, colorDepth, stream, accum, htab, codetab);
+      }
+      function writeUInt16(stream, short) {
+        stream.writeByte(short & 255);
+        stream.writeByte(short >> 8 & 255);
+      }
+      function writeUTFBytes(stream, text) {
+        for (var i = 0; i < text.length; i++) {
+          stream.writeByte(text.charCodeAt(i));
+        }
+      }
+      function colorTableSize(length) {
+        return Math.max(Math.ceil(Math.log2(length)), 1);
+      }
+      var src_default = GIFEncoder3;
+    }
+  });
+
   // src/style.css
-  var style_default = '#weibo-img-toast {\n    position: fixed;\n    top: 20px;\n    left: 50%;\n    transform: translateX(-50%);\n    background: rgba(0, 0, 0, 0.75);\n    color: #fff;\n    padding: 10px 20px;\n    border-radius: 4px;\n    font-size: 14px;\n    z-index: 2147483647;\n    display: flex;\n    align-items: center;\n    gap: 10px;\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);\n}\n\n#weibo-img-toast .close-btn {\n    font-size: 18px;\n    cursor: pointer;\n    opacity: 0.7;\n    line-height: 1;\n}\n\n#weibo-img-toast .close-btn:hover {\n    opacity: 1;\n}\n\n.weibo-img-select-overlay {\n    position: fixed;\n    inset: 0;\n    background: rgba(15, 23, 42, 0.24);\n    backdrop-filter: blur(10px);\n    z-index: 2147483647;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    padding: 16px;\n    box-sizing: border-box;\n}\n\n.weibo-img-select-modal {\n    width: 100%;\n    max-width: 448px;\n    max-height: 80vh;\n    background: #ffffff;\n    border: 1px solid rgba(255, 130, 0, 0.12);\n    border-radius: 16px;\n    box-shadow: none;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n}\n\n.weibo-img-select-header {\n    padding: 16px 18px 14px;\n    border-bottom: 1px solid rgba(255, 130, 0, 0.12);\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n}\n\n.weibo-img-select-header-title {\n    font-size: 15px;\n    font-weight: 600;\n    color: #1f2937;\n}\n\n.weibo-img-select-toggle-btn {\n    height: 30px;\n    padding: 0 12px;\n    border: 1px solid rgba(148, 163, 184, 0.35);\n    border-radius: 999px;\n    background: #ffffff;\n    color: #c2410c;\n    font-size: 12px;\n    font-weight: 600;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    text-align: center;\n    line-height: 1;\n    cursor: pointer;\n    box-sizing: border-box;\n    white-space: nowrap;\n    transition: background-color 0.2s ease;\n}\n\n.weibo-img-select-toggle-btn:hover {\n    background: #f8fafc;\n}\n\n.weibo-img-select-list {\n    padding: 14px 18px 18px;\n    overflow: auto;\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));\n    gap: 12px;\n}\n\n.weibo-img-select-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n    height: 48px;\n    padding: 10px 12px;\n    border: 1px solid rgba(255, 130, 0, 0.14);\n    border-radius: 12px;\n    background: #ffffff;\n    box-shadow: none;\n    user-select: none;\n    font-size: 14px;\n    color: #374151;\n    transition: border-color 0.2s ease, transform 0.2s ease;\n    box-sizing: border-box;\n}\n\n.weibo-img-select-item:hover {\n    border-color: rgba(255, 130, 0, 0.32);\n    box-shadow: none;\n    transform: translateY(-1px);\n}\n\n.weibo-img-select-item-video {\n    border-color: rgba(59, 130, 246, 0.28);\n    background: #ffffff;\n}\n\n.weibo-img-select-item-video:hover {\n    border-color: rgba(59, 130, 246, 0.42);\n    box-shadow: none;\n}\n\n.weibo-img-select-item input {\n    flex: 0 0 auto;\n    width: 16px;\n    height: 16px;\n    margin: 0;\n    display: block;\n    accent-color: #ff8200;\n}\n\n.weibo-img-select-item-video input {\n    accent-color: #2563eb;\n}\n\n.weibo-img-select-item-text {\n    display: inline-flex;\n    align-items: center;\n    min-width: 0;\n    min-height: 16px;\n    line-height: 16px;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n    font-weight: 600;\n    letter-spacing: 0.01em;\n}\n\n.weibo-img-select-item-text-video {\n    color: #1d4ed8;\n}\n\n.weibo-img-select-actions {\n    padding: 14px 18px 18px;\n    border-top: 1px solid rgba(255, 130, 0, 0.12);\n    display: flex;\n    justify-content: flex-end;\n    gap: 8px;\n}\n\n.weibo-img-select-btn {\n    min-width: 90px;\n    height: 34px;\n    padding: 0 14px;\n    border-radius: 999px;\n    border: 1px solid transparent;\n    font-size: 13px;\n    font-weight: 600;\n    cursor: pointer;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    text-align: center;\n    line-height: 1;\n    box-sizing: border-box;\n    transition: background-color 0.2s ease;\n}\n\n.weibo-img-select-modal button {\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n    vertical-align: middle;\n}\n\n.weibo-img-select-btn-cancel {\n    background: #fff;\n    border-color: rgba(148, 163, 184, 0.35);\n    color: #475569;\n}\n\n.weibo-img-select-btn-cancel:hover {\n    background: #f8fafc;\n}\n\n.weibo-img-select-btn-confirm {\n    background: #ff8200;\n    color: #fff;\n    box-shadow: none;\n}\n\n.weibo-img-select-btn-confirm:hover {\n    background: #ff7600;\n}\n\n.weibo-img-download-btn {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: auto !important;\n    height: 20px;\n    padding: 0 6px !important;\n    margin-left: 8px;\n    background: #ff8200;\n    color: white;\n    border-radius: 3px;\n    font-size: 11px;\n    font-weight: bold;\n    cursor: pointer;\n    vertical-align: middle;\n    white-space: nowrap;\n    box-sizing: content-box;\n}\n\n.weibo-img-download-btn:hover {\n    background: #ff6a00;\n}\n';
+  var style_default = '#weibo-img-toast {\r\n    position: fixed;\r\n    top: 20px;\r\n    left: 50%;\r\n    transform: translateX(-50%);\r\n    background: rgba(0, 0, 0, 0.75);\r\n    color: #fff;\r\n    padding: 10px 20px;\r\n    border-radius: 4px;\r\n    font-size: 14px;\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 10px;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);\r\n}\r\n\r\n#weibo-img-toast .close-btn {\r\n    font-size: 18px;\r\n    cursor: pointer;\r\n    opacity: 0.7;\r\n    line-height: 1;\r\n}\r\n\r\n#weibo-img-toast .close-btn:hover {\r\n    opacity: 1;\r\n}\r\n\r\n.weibo-img-select-overlay {\r\n    position: fixed;\r\n    inset: 0;\r\n    background: rgba(15, 23, 42, 0.24);\r\n    backdrop-filter: blur(10px);\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    padding: 16px;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal {\n    width: 100%;\n    max-width: 448px;\n    max-height: 80vh;\n    background: #ffffff;\n    border: 1px solid rgba(255, 130, 0, 0.12);\n    border-radius: 16px;\n    box-shadow: none;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n}\n\r\n.weibo-img-select-header {\r\n    padding: 16px 18px 14px;\r\n    border-bottom: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: space-between;\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-header-title {\r\n    font-size: 15px;\r\n    font-weight: 600;\r\n    color: #1f2937;\r\n}\r\n\r\n.weibo-img-select-toggle-btn {\n    height: 30px;\n    padding: 0 12px;\n    border: 1px solid rgba(148, 163, 184, 0.35);\n    border-radius: 999px;\n    background: #ffffff;\n    color: #c2410c;\n    font-size: 12px;\r\n    font-weight: 600;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    cursor: pointer;\n    box-sizing: border-box;\n    white-space: nowrap;\n    transition: background-color 0.2s ease;\n}\n\n.weibo-img-select-toggle-btn:hover {\n    background: #f8fafc;\n}\n\r\n.weibo-img-select-list {\r\n    padding: 14px 18px 18px;\r\n    overflow: auto;\r\n    display: grid;\r\n    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n    height: 48px;\n    padding: 10px 12px;\n    border: 1px solid rgba(255, 130, 0, 0.14);\n    border-radius: 12px;\n    background: #ffffff;\n    box-shadow: none;\n    user-select: none;\r\n    font-size: 14px;\n    color: #374151;\n    transition: border-color 0.2s ease, transform 0.2s ease;\n    box-sizing: border-box;\n}\n\r\n.weibo-img-select-item:hover {\n    border-color: rgba(255, 130, 0, 0.32);\n    box-shadow: none;\n    transform: translateY(-1px);\n}\n\n.weibo-img-select-item-video {\n    border-color: rgba(59, 130, 246, 0.28);\n    background: #ffffff;\n}\n\n.weibo-img-select-item-video:hover {\n    border-color: rgba(59, 130, 246, 0.42);\n    box-shadow: none;\n}\n\n.weibo-img-select-item input {\n    flex: 0 0 auto;\n    width: 16px;\n    height: 16px;\n    margin: 0;\n    display: block;\n    accent-color: #ff8200;\n}\n\n.weibo-img-select-item-video input {\n    accent-color: #2563eb;\n}\n\r\n.weibo-img-select-item-text {\n    display: inline-flex;\n    align-items: center;\n    min-width: 0;\n    min-height: 16px;\n    line-height: 16px;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n    font-weight: 600;\n    letter-spacing: 0.01em;\n}\n\n.weibo-img-select-item-text-video {\n    color: #1d4ed8;\n}\n\r\n.weibo-img-select-actions {\r\n    padding: 14px 18px 18px;\r\n    border-top: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    justify-content: flex-end;\r\n    gap: 8px;\r\n}\r\n\r\n.weibo-img-select-btn {\r\n    min-width: 90px;\r\n    height: 34px;\r\n    padding: 0 14px;\r\n    border-radius: 999px;\r\n    border: 1px solid transparent;\r\n    font-size: 13px;\r\n    font-weight: 600;\r\n    cursor: pointer;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\n    line-height: 1;\n    box-sizing: border-box;\n    transition: background-color 0.2s ease;\n}\n\r\n.weibo-img-select-modal button {\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    vertical-align: middle;\r\n}\r\n\r\n.weibo-img-select-btn-cancel {\n    background: #fff;\n    border-color: rgba(148, 163, 184, 0.35);\n    color: #475569;\n}\n\n.weibo-img-select-btn-cancel:hover {\n    background: #f8fafc;\n}\n\n.weibo-img-select-btn-confirm {\n    background: #ff8200;\n    color: #fff;\n    box-shadow: none;\n}\n\n.weibo-img-select-btn-confirm:hover {\n    background: #ff7600;\n}\n\r\n.weibo-img-download-btn {\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    width: auto !important;\r\n    height: 20px;\r\n    padding: 0 6px !important;\r\n    margin-left: 8px;\r\n    background: #ff8200;\r\n    color: white;\r\n    border-radius: 3px;\r\n    font-size: 11px;\r\n    font-weight: bold;\r\n    cursor: pointer;\r\n    vertical-align: middle;\r\n    white-space: nowrap;\r\n    box-sizing: content-box;\r\n}\r\n\r\n.weibo-img-download-btn:hover {\r\n    background: #ff6a00;\r\n}\r\n';
 
   // src/config.js
   var CONFIG = {
@@ -41,6 +903,8 @@
     LONG_PRESS_MS: 500,
     VIDEO_DOWNLOAD_SETTING_KEY: "weiboImageDownloader.enableVideoDownload",
     ENABLE_VIDEO_DOWNLOAD: false,
+    X_GIF_AUTO_CONVERT_SETTING_KEY: "weiboImageDownloader.xGifAutoConvert",
+    X_GIF_AUTO_CONVERT: true,
     DEBUG: true
   };
 
@@ -1187,6 +2051,163 @@
     return createWeiboPlatform(deps);
   }
 
+  // src/x-gif.js
+  var gifenc = __toESM(require_gifenc(), 1);
+  var { GIFEncoder: GIFEncoder2, quantize, applyPalette } = gifenc.GIFEncoder ? gifenc : gifenc.default;
+  function waitForVideo(video, eventName, action) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error("视频解码超时")), 3e4);
+      function finish(error) {
+        clearTimeout(timer);
+        video.removeEventListener(eventName, onReady);
+        video.removeEventListener("error", onError);
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      }
+      function onReady() {
+        finish();
+      }
+      function onError() {
+        finish(new Error("浏览器无法解码此 GIF 视频源"));
+      }
+      video.addEventListener(eventName, onReady);
+      video.addEventListener("error", onError);
+      try {
+        action();
+      } catch (error) {
+        finish(error);
+      }
+    });
+  }
+  function getChangedFrame(index, palette, width, height, previousPixels) {
+    const colors = palette.map(([r, g, b]) => r | g << 8 | b << 16);
+    const pixels = Uint32Array.from(index, (color) => colors[color]);
+    let left = width;
+    let top = height;
+    let right = -1;
+    let bottom = -1;
+    const usedColors = new Uint8Array(256);
+    for (let i = 0; i < pixels.length; i++) {
+      if (!previousPixels || pixels[i] !== previousPixels[i]) {
+        const x = i % width;
+        const y = Math.floor(i / width);
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x);
+        bottom = Math.max(bottom, y);
+        usedColors[index[i]] = 1;
+      }
+    }
+    if (right < 0) {
+      return { pixels, frame: null };
+    }
+    const transparentIndex = previousPixels ? usedColors.indexOf(0) : -1;
+    if (transparentIndex === palette.length) {
+      palette.push([0, 0, 0]);
+    }
+    const frameWidth = right - left + 1;
+    const frameHeight = bottom - top + 1;
+    const cropped = new Uint8Array(frameWidth * frameHeight);
+    for (let y = 0; y < frameHeight; y++) {
+      for (let x = 0; x < frameWidth; x++) {
+        const source = (top + y) * width + left + x;
+        cropped[y * frameWidth + x] = transparentIndex >= 0 && pixels[source] === previousPixels[source] ? transparentIndex : index[source];
+      }
+    }
+    return {
+      pixels,
+      frame: { index: cropped, palette, width: frameWidth, height: frameHeight, left, top, transparentIndex }
+    };
+  }
+  function writeGifFrame(gif, frame) {
+    const start = gif.bytesView().length;
+    gif.writeFrame(frame.index, frame.width, frame.height, {
+      palette: frame.palette,
+      delay: frame.delay,
+      repeat: 0,
+      colorDepth: Math.max(2, Math.ceil(Math.log2(frame.palette.length))),
+      dispose: 1,
+      transparent: frame.transparentIndex >= 0,
+      transparentIndex: frame.transparentIndex
+    });
+    if (start > 0) {
+      if (gif.bytesView()[start + 8] !== 44) {
+        throw new Error("GIF 编码器的帧结构不兼容");
+      }
+      const view = new DataView(gif.buffer);
+      view.setUint16(start + 9, frame.left, true);
+      view.setUint16(start + 11, frame.top, true);
+    }
+  }
+  async function convertXVideoToGif(blob, windowRef) {
+    const video = windowRef.document.createElement("video");
+    const sourceUrl = windowRef.URL.createObjectURL(blob);
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    try {
+      await waitForVideo(video, "loadeddata", () => {
+        video.src = sourceUrl;
+        video.load();
+      });
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      if (!Number.isFinite(video.duration) || video.duration <= 0 || !width || !height || width > 65535 || height > 65535) {
+        throw new Error("GIF 视频源的时长或尺寸无效");
+      }
+      const canvas = windowRef.document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        throw new Error("浏览器不支持 Canvas 2D");
+      }
+      const gif = GIFEncoder2();
+      const frameDelay = 50;
+      const durationMs = Math.max(10, Math.round(video.duration * 100) * 10);
+      const frameCount = Math.ceil(durationMs / frameDelay);
+      let previousPixels = null;
+      let pendingFrame = null;
+      for (let frame = 0; frame < frameCount; frame++) {
+        const time = frame * frameDelay / 1e3;
+        if (video.currentTime !== time) {
+          await waitForVideo(video, "seeked", () => {
+            video.currentTime = time;
+          });
+        }
+        context.drawImage(video, 0, 0, width, height);
+        const { data } = context.getImageData(0, 0, width, height);
+        const palette = quantize(data, 256);
+        const changed = getChangedFrame(applyPalette(data, palette), palette, width, height, previousPixels);
+        const delay = Math.min(frameDelay, durationMs - frame * frameDelay);
+        previousPixels = changed.pixels;
+        if (!changed.frame) {
+          if (pendingFrame.delay + delay > 655350) {
+            writeGifFrame(gif, pendingFrame);
+            pendingFrame.delay = 0;
+          }
+          pendingFrame.delay += delay;
+          continue;
+        }
+        if (pendingFrame) {
+          writeGifFrame(gif, pendingFrame);
+        }
+        pendingFrame = { ...changed.frame, delay };
+      }
+      writeGifFrame(gif, pendingFrame);
+      gif.finish();
+      return new Blob([gif.bytesView()], { type: "image/gif" });
+    } finally {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      windowRef.URL.revokeObjectURL(sourceUrl);
+    }
+  }
+
   // src/utils.js
   function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui: ui2 }) {
     let platformLabel = "weibo";
@@ -1258,11 +2279,16 @@
         }
         const baseName = `${platform2}_${postId}_${index + 1}`;
         if (item.imageUrl) {
-          jobs.push({
+          const job = {
             type: "image",
             url: item.imageUrl,
             filename: `${baseName}${item.imageExt || getFileExtensionFromUrl(item.imageUrl, ".jpg")}`
-          });
+          };
+          if (platform2 === "x" && item.kind === "gif" && config.X_GIF_AUTO_CONVERT && getFileExtensionFromUrl(item.imageUrl, item.imageExt) !== ".gif") {
+            job.convertToGif = true;
+            job.filename = `${baseName}.gif`;
+          }
+          jobs.push(job);
         }
         if (item.videoUrl) {
           const isStandaloneVideo = item.kind === "video";
@@ -1441,6 +2467,23 @@
     async function downloadAllImages(urls, postId) {
       return downloadMediaItems(normalizeLegacyMediaItems(urls), postId);
     }
+    async function downloadXGif(url, filename) {
+      try {
+        let blob;
+        try {
+          blob = typeof gmXmlhttpRequest === "function" ? await fetchBlobWithXmlHttpRequest(url) : await fetchBlobWithWindowFetch(url);
+        } catch (error) {
+          if (typeof gmXmlhttpRequest !== "function") {
+            throw error;
+          }
+          blob = await fetchBlobWithWindowFetch(url);
+        }
+        return await downloadBlob(await convertXVideoToGif(blob, windowRef), filename);
+      } catch (error) {
+        log("X GIF转换失败:", filename, error.message);
+        return false;
+      }
+    }
     async function downloadMediaItems(mediaItems, postId) {
       if (!mediaItems || mediaItems.length === 0) {
         if (ui2 && typeof ui2.showToast === "function") {
@@ -1458,13 +2501,17 @@
       log(`开始下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件...`);
       let successCount = 0;
       let failedCount = 0;
+      let failedGifCount = 0;
       for (let i = 0; i < jobs.length; i++) {
         const job = jobs[i];
-        const success = await downloadImage(job.url, job.filename);
+        const success = job.convertToGif ? await downloadXGif(job.url, job.filename) : await downloadImage(job.url, job.filename);
         if (success) {
           successCount++;
         } else {
           failedCount++;
+          if (job.convertToGif) {
+            failedGifCount++;
+          }
         }
         if (i < jobs.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
@@ -1484,6 +2531,9 @@
         message = `下载失败，共 ${failedCount} 个文件未完成`;
       } else {
         message = `已下载 ${successCount} 个文件，${failedCount} 个失败`;
+      }
+      if (failedGifCount > 0) {
+        message += "；X GIF转换或保存失败，可关闭自动转换下载 MP4 源";
       }
       log(message);
       if (ui2 && typeof ui2.showToast === "function") {
@@ -1905,7 +2955,8 @@
   var styleId = "weibo-image-downloader-style";
   var runtimeConfig = {
     ...CONFIG,
-    ENABLE_VIDEO_DOWNLOAD: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, CONFIG.ENABLE_VIDEO_DOWNLOAD)) : CONFIG.ENABLE_VIDEO_DOWNLOAD
+    ENABLE_VIDEO_DOWNLOAD: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, CONFIG.ENABLE_VIDEO_DOWNLOAD)) : CONFIG.ENABLE_VIDEO_DOWNLOAD,
+    X_GIF_AUTO_CONVERT: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY, CONFIG.X_GIF_AUTO_CONVERT)) : CONFIG.X_GIF_AUTO_CONVERT
   };
   function injectStyles() {
     if (document.getElementById(styleId)) {
@@ -2000,6 +3051,25 @@
         }
       });
       videoDownloadMenuRegistered = true;
+    }, registerXGifMenu = function() {
+      if (xGifMenuRegistered) {
+        if (xGifMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
+          return;
+        }
+        GM_unregisterMenuCommand(xGifMenuId);
+      }
+      xGifMenuId = GM_registerMenuCommand(
+        `X平台GIF自动转换：[${runtimeConfig.X_GIF_AUTO_CONVERT ? "开启" : "关闭"}]`,
+        () => {
+          runtimeConfig.X_GIF_AUTO_CONVERT = !runtimeConfig.X_GIF_AUTO_CONVERT;
+          if (typeof GM_setValue === "function") {
+            GM_setValue(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY, runtimeConfig.X_GIF_AUTO_CONVERT);
+          }
+          registerXGifMenu();
+          ui.showToast(`X平台GIF自动转换已${runtimeConfig.X_GIF_AUTO_CONVERT ? "开启" : "关闭"}`);
+        }
+      );
+      xGifMenuRegistered = true;
     };
     let videoDownloadMenuId = null;
     let videoDownloadMenuRegistered = false;
@@ -2007,5 +3077,8 @@
       ui.refreshDownloadButtons();
     });
     registerVideoDownloadMenu();
+    let xGifMenuId = null;
+    let xGifMenuRegistered = false;
+    registerXGifMenu();
   }
 })();

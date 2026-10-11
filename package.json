@@ -11,6 +11,10 @@
     "verify:dist": "bun run scripts/verify-dist.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.25.3"
+    "esbuild": "^0.25.3",
+    "omggif": "1.0.10"
+  },
+  "dependencies": {
+    "gifenc": "1.0.3"
   }
 }

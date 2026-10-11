@@ -8,7 +8,10 @@ const runtimeConfig = {
     ...CONFIG,
     ENABLE_VIDEO_DOWNLOAD: typeof GM_getValue === "function"
         ? Boolean(GM_getValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, CONFIG.ENABLE_VIDEO_DOWNLOAD))
-        : CONFIG.ENABLE_VIDEO_DOWNLOAD
+        : CONFIG.ENABLE_VIDEO_DOWNLOAD,
+    X_GIF_AUTO_CONVERT: typeof GM_getValue === "function"
+        ? Boolean(GM_getValue(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY, CONFIG.X_GIF_AUTO_CONVERT))
+        : CONFIG.X_GIF_AUTO_CONVERT
 };
 
 function injectStyles() {
@@ -131,4 +134,28 @@ if (typeof GM_registerMenuCommand === "function") {
     });
 
     registerVideoDownloadMenu();
+
+    let xGifMenuId = null;
+    let xGifMenuRegistered = false;
+    function registerXGifMenu() {
+        if (xGifMenuRegistered) {
+            if (xGifMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
+                return;
+            }
+            GM_unregisterMenuCommand(xGifMenuId);
+        }
+        xGifMenuId = GM_registerMenuCommand(
+            `X平台GIF自动转换：[${runtimeConfig.X_GIF_AUTO_CONVERT ? "开启" : "关闭"}]`,
+            () => {
+                runtimeConfig.X_GIF_AUTO_CONVERT = !runtimeConfig.X_GIF_AUTO_CONVERT;
+                if (typeof GM_setValue === "function") {
+                    GM_setValue(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY, runtimeConfig.X_GIF_AUTO_CONVERT);
+                }
+                registerXGifMenu();
+                ui.showToast(`X平台GIF自动转换已${runtimeConfig.X_GIF_AUTO_CONVERT ? "开启" : "关闭"}`);
+            }
+        );
+        xGifMenuRegistered = true;
+    }
+    registerXGifMenu();
 }

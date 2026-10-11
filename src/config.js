@@ -3,6 +3,8 @@ export const CONFIG = {
     LONG_PRESS_MS: 500,
     VIDEO_DOWNLOAD_SETTING_KEY: "weiboImageDownloader.enableVideoDownload",
     ENABLE_VIDEO_DOWNLOAD: false,
+    X_GIF_AUTO_CONVERT_SETTING_KEY: "weiboImageDownloader.xGifAutoConvert",
+    X_GIF_AUTO_CONVERT: true,
     DEBUG: true
 };
 
