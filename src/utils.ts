@@ -1,16 +1,100 @@
-import { createPlatformAdapter } from "./platforms/index.js";
-import { convertXVideoToGif } from "./x-gif.js";
+import { createPlatformAdapter } from "./platforms/index.ts";
+import type { PlatformAdapter } from "./platforms/index.ts";
+import { convertXVideoToGif } from "./x-gif.ts";
+import type { WeiboMediaItem, WeiboPlatformWindow } from "./platforms/weibo.ts";
+import type { XMediaItem, XPlatformWindowRef } from "./platforms/x.ts";
+import type { GifWindowLike } from "./x-gif-workers.ts";
 
-export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui }) {
+/** createUtils 与平台工厂共同依赖的 window 结构子集（允许传入裁剪过的伪 window）。 */
+export type UtilsWindowRef = WeiboPlatformWindow & XPlatformWindowRef & GifWindowLike;
+
+/** 两个平台媒体项的结构联合；本模块只消费 imageUrl/videoUrl/kind/ext 等公共字段。 */
+export type UtilsMediaItem = WeiboMediaItem | XMediaItem;
+
+export interface UtilsConfig {
+    DEBUG?: boolean;
+    DELAY_MS: number;
+    ENABLE_VIDEO_DOWNLOAD?: boolean;
+    X_GIF_AUTO_CONVERT?: boolean;
+}
+
+export interface GmDownloadOptions {
+    url: string | Blob;
+    name: string;
+    headers: Record<string, string>;
+    saveAs: boolean;
+    onload(): void;
+    onerror(error: { error?: string; message?: string }): void;
+    onprogress: () => void;
+}
+
+export type GmDownload = (options: GmDownloadOptions) => unknown;
+
+/** 下载 Blob 用的 GM_xmlhttpRequest 请求结构；方法语法保持参数双变以兼容各平台的请求类型。 */
+export interface GmBlobRequestDetails {
+    method: "GET";
+    url: string;
+    headers: Record<string, string>;
+    responseType?: "blob";
+    onload(response: { status: number; response?: unknown }): void;
+    onerror(error?: { error?: string; message?: string }): void;
+    ontimeout(): void;
+}
+
+export type GmXmlBlobRequest = (details: GmBlobRequestDetails) => unknown;
+
+export interface UtilsUi {
+    showToast?: (message: string) => void;
+}
+
+export interface UtilsDeps {
+    config: UtilsConfig;
+    windowRef: UtilsWindowRef;
+    fetchRef: typeof fetch;
+    gmDownload?: GmDownload | null;
+    gmXmlhttpRequest?: GmXmlBlobRequest | null;
+    ui?: UtilsUi | null;
+}
+
+export interface MediaDownloadJob {
+    type: "image" | "video";
+    url: string;
+    filename: string;
+    convertToGif?: boolean;
+}
+
+export interface DownloadResult {
+    successCount: number;
+    failedCount: number;
+    handedOffCount: number;
+}
+
+export interface Utils {
+    getCurrentPlatform(): string;
+    getCurrentPlatformDisplayName(): string;
+    getPlatformAdapter(): PlatformAdapter;
+    log(...args: unknown[]): void;
+    getOriginalImageUrl(url: unknown): string | null;
+    getFileExtensionFromUrl(url: unknown, fallback?: string): string;
+    getFileBasenameFromUrl(url: unknown, fallback: string): string;
+    getFilename(postId: string, index: number): string;
+    buildMediaDownloadJobs(mediaItems: readonly UtilsMediaItem[], postId: string): MediaDownloadJob[];
+    downloadImage(url: string, filename: string): Promise<boolean | "started">;
+    downloadImageFallback(url: string, filename: string): Promise<boolean | "started">;
+    downloadAllImages(urls: readonly (string | null)[] | null | undefined, postId: string): Promise<DownloadResult>;
+    downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string): Promise<DownloadResult>;
+}
+
+export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui }: UtilsDeps): Utils {
     let platformLabel = "weibo";
 
-    function log(...args) {
+    function log(...args: unknown[]): void {
         if (config.DEBUG) {
             console.log(`[${platformLabel} Downloader]`, ...args);
         }
     }
 
-    function getFileExtensionFromUrl(url, fallback = ".jpg") {
+    function getFileExtensionFromUrl(url: unknown, fallback = ".jpg"): string {
         if (!url || typeof url !== "string") {
             return fallback;
         }
@@ -27,7 +111,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
     }
 
-    function getFileBasenameFromUrl(url, fallback) {
+    function getFileBasenameFromUrl(url: unknown, fallback: string): string {
         if (!url || typeof url !== "string") {
             return fallback;
         }
@@ -56,26 +140,26 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
     });
     platformLabel = platform.id;
 
-    function getCurrentPlatform() {
+    function getCurrentPlatform(): string {
         return platform.id;
     }
 
-    function getCurrentPlatformDisplayName() {
+    function getCurrentPlatformDisplayName(): string {
         return platform.displayName || platform.id;
     }
 
-    function getOriginalImageUrl(url) {
+    function getOriginalImageUrl(url: unknown): string | null {
         return platform.getOriginalImageUrl(url);
     }
 
-    function getFilename(postId, index) {
+    function getFilename(postId: string, index: number): string {
         const platform = getCurrentPlatform();
         return `${platform}_${postId}_${index}.jpg`;
     }
 
-    function buildMediaDownloadJobs(mediaItems, postId) {
+    function buildMediaDownloadJobs(mediaItems: readonly UtilsMediaItem[], postId: string): MediaDownloadJob[] {
         const platform = getCurrentPlatform();
-        const jobs = [];
+        const jobs: MediaDownloadJob[] = [];
 
         mediaItems.forEach((item, index) => {
             if (!item || typeof item !== "object") {
@@ -85,7 +169,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             const baseName = `${platform}_${postId}_${index + 1}`;
 
             if (item.imageUrl) {
-                const job = {
+                const job: MediaDownloadJob = {
                     type: "image",
                     url: item.imageUrl,
                     filename: `${baseName}${item.imageExt || getFileExtensionFromUrl(item.imageUrl, ".jpg")}`
@@ -111,8 +195,8 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return jobs;
     }
 
-    function normalizeLegacyMediaItems(urls) {
-        return (urls || []).map((url, index) => ({
+    function normalizeLegacyMediaItems(urls: readonly (string | null)[] | null | undefined): UtilsMediaItem[] {
+        return (urls || []).map((url, index): UtilsMediaItem => ({
             id: `legacy-${index + 1}`,
             kind: "image",
             label: `图片 ${index + 1}`,
@@ -123,7 +207,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }));
     }
 
-    function getDownloadRequestHeaders(url) {
+    function getDownloadRequestHeaders(url: unknown): Record<string, string> {
         if (!url || typeof url !== "string") {
             return {};
         }
@@ -143,13 +227,13 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return {};
     }
 
-    async function tryGmDownload(resource, filename) {
+    async function tryGmDownload(resource: string | Blob, filename: string): Promise<boolean> {
         if (typeof gmDownload !== "function") {
             return false;
         }
 
         try {
-            return await new Promise((resolve) => {
+            return await new Promise<boolean>((resolve) => {
                 try {
                     const downloadId = gmDownload({
                         url: resource,
@@ -171,17 +255,17 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                         resolve(false);
                     }
                 } catch (error) {
-                    log("GM_download异常:", error.message);
+                    log("GM_download异常:", (error as Error).message);
                     resolve(false);
                 }
             });
         } catch (error) {
-            log("GM_download异常，尝试备用方案:", error.message);
+            log("GM_download异常，尝试备用方案:", (error as Error).message);
             return false;
         }
     }
 
-    function downloadBlobWithAnchor(blob, filename) {
+    function downloadBlobWithAnchor(blob: Blob, filename: string): "started" {
         const blobUrl = windowRef.URL.createObjectURL(blob);
         const anchor = windowRef.document.createElement("a");
         anchor.href = blobUrl;
@@ -202,14 +286,14 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return "started";
     }
 
-    async function fetchBlobWithXmlHttpRequest(url) {
+    async function fetchBlobWithXmlHttpRequest(url: string): Promise<Blob | null> {
         if (typeof gmXmlhttpRequest !== "function") {
             return null;
         }
 
         const headers = getDownloadRequestHeaders(url);
 
-        return new Promise((resolve, reject) => {
+        return new Promise<Blob>((resolve, reject) => {
             try {
                 gmXmlhttpRequest({
                     method: "GET",
@@ -218,7 +302,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                     responseType: "blob",
                     onload(response) {
                         if (response.status >= 200 && response.status < 300 && response.response) {
-                            resolve(response.response);
+                            resolve(response.response as Blob);
                             return;
                         }
 
@@ -237,7 +321,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         });
     }
 
-    async function fetchBlobWithWindowFetch(url) {
+    async function fetchBlobWithWindowFetch(url: string): Promise<Blob> {
         const response = await fetchRef(url, {
             credentials: platform.id === "x" ? "omit" : "include"
         });
@@ -249,7 +333,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return response.blob();
     }
 
-    async function downloadBlob(blob, filename) {
+    async function downloadBlob(blob: Blob, filename: string): Promise<boolean | "started"> {
         const gmSuccess = await tryGmDownload(blob, filename);
         if (gmSuccess) {
             return true;
@@ -258,7 +342,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return downloadBlobWithAnchor(blob, filename);
     }
 
-    async function downloadImage(url, filename) {
+    async function downloadImage(url: string, filename: string): Promise<boolean | "started"> {
         const directDownloadSuccess = await tryGmDownload(url, filename);
         if (directDownloadSuccess) {
             return true;
@@ -268,9 +352,9 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return downloadImageFallback(url, filename);
     }
 
-    async function downloadImageFallback(url, filename) {
+    async function downloadImageFallback(url: string, filename: string): Promise<boolean | "started"> {
         try {
-            let blob = null;
+            let blob: Blob | null = null;
 
             if (typeof gmXmlhttpRequest === "function") {
                 blob = await fetchBlobWithXmlHttpRequest(url);
@@ -278,7 +362,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                 blob = await fetchBlobWithWindowFetch(url);
             }
 
-            return downloadBlob(blob, filename);
+            return downloadBlob(blob!, filename);
         } catch (primaryError) {
             if (typeof gmXmlhttpRequest === "function") {
                 try {
@@ -288,25 +372,25 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                     log(
                         "二进制兜底下载失败:",
                         filename,
-                        primaryError?.message || "未知错误",
-                        secondaryError?.message || "未知错误"
+                        (primaryError as Error | undefined)?.message || "未知错误",
+                        (secondaryError as Error | undefined)?.message || "未知错误"
                     );
                     return false;
                 }
             }
 
-            log("二进制兜底下载失败:", filename, primaryError?.message || "未知错误");
+            log("二进制兜底下载失败:", filename, (primaryError as Error | undefined)?.message || "未知错误");
             return false;
         }
     }
 
-    async function downloadAllImages(urls, postId) {
+    async function downloadAllImages(urls: readonly (string | null)[] | null | undefined, postId: string): Promise<DownloadResult> {
         return downloadMediaItems(normalizeLegacyMediaItems(urls), postId);
     }
 
-    async function downloadXGif(url, filename) {
+    async function downloadXGif(url: string, filename: string): Promise<boolean | "started"> {
         try {
-            let blob;
+            let blob: Blob | null;
             try {
                 blob = typeof gmXmlhttpRequest === "function"
                     ? await fetchBlobWithXmlHttpRequest(url)
@@ -317,14 +401,14 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                 }
                 blob = await fetchBlobWithWindowFetch(url);
             }
-            return await downloadBlob(await convertXVideoToGif(blob, windowRef), filename);
+            return await downloadBlob(await convertXVideoToGif(blob!, windowRef), filename);
         } catch (error) {
-            log("X GIF转换失败:", filename, error.message);
+            log("X GIF转换失败:", filename, (error as Error).message);
             return false;
         }
     }
 
-    async function downloadMediaItems(mediaItems, postId) {
+    async function downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string): Promise<DownloadResult> {
         if (!mediaItems || mediaItems.length === 0) {
             if (ui && typeof ui.showToast === "function") {
                 ui.showToast("未找到图片");
