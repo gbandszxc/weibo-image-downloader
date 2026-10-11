@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createWeiboPlatform } from "../src/platforms/weibo.ts";
 import { createXPlatform } from "../src/platforms/x.ts";
 
-function createWeiboPlatformForLocation({ hostname, pathname = "/" }) {
+function createWeiboPlatformForLocation({ hostname, pathname = "/" }: { hostname: string; pathname?: string }) {
     return createWeiboPlatform({
         windowRef: {
             location: { hostname, pathname },
@@ -29,7 +29,7 @@ function createXPlatformForTests() {
             location: {
                 hostname: "x.com",
                 pathname: "/home"
-            }
+            } as Location
         },
         log() {},
         getFileExtensionFromUrl(_url, fallback = ".jpg") {
@@ -38,28 +38,28 @@ function createXPlatformForTests() {
     });
 }
 
-function createAppendRecorder(label) {
+function createAppendRecorder(label: string) {
     return {
         label,
-        appended: [],
+        appended: [] as unknown[],
         styles: {},
         classList: {
-            contains(className) {
+            contains(className: string) {
                 return className === "menu" ? label === "menu" : false;
             }
         },
-        appendChild(node) {
+        appendChild(node: unknown) {
             this.appended.push(node);
         },
-        style: {}
+        style: {} as Record<string, string>
     };
 }
 
-function createInsertRecorder(label) {
+function createInsertRecorder(label: string) {
     return {
         label,
-        calls: [],
-        insertBefore(node, before) {
+        calls: [] as { node: unknown; before: unknown }[],
+        insertBefore(node: unknown, before: unknown) {
             this.calls.push({ node, before });
         }
     };
@@ -68,12 +68,12 @@ function createInsertRecorder(label) {
 test("button placement matches current weibo and x page rules", async (t) => {
     await t.test("weibo timeline inserts before icons-plus block", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "weibo.com" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const parent = createInsertRecorder("timeline-parent");
         const iconsPlusEl = { id: "icons-plus", parentNode: parent };
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === 'div[class*="_iconsPlus_"]') {
                     return iconsPlusEl;
                 }
@@ -82,7 +82,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -92,11 +92,11 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("weibo user page appends into header nickname area", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "weibo.com" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const headerEl = createAppendRecorder("woo-nickname");
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === ".woo-nickname") {
                     return headerEl;
                 }
@@ -105,7 +105,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -115,11 +115,11 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("weibo detail page appends into suffix box", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "weibo.com" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const suffixBox = createAppendRecorder("suffix-box");
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === 'div[class*="_suffixbox"]') {
                     return suffixBox;
                 }
@@ -128,7 +128,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -138,7 +138,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("weibo search page appends to author info row and normalizes layout", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "s.weibo.com" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const nameDiv = createAppendRecorder("name");
         const menuDiv = createAppendRecorder("menu");
         const infoEl = {
@@ -146,7 +146,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
         };
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === ".content .info") {
                     return infoEl;
                 }
@@ -155,7 +155,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -168,7 +168,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("weibo retweet row inserts after the '转发微博' label", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "weibo.com" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const parent = createInsertRecorder("retweet-parent");
         const retweetSpan = {
             textContent: "转发微博",
@@ -180,13 +180,13 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelector() {
                 return null;
             },
-            querySelectorAll(selector) {
+            querySelectorAll(selector: string) {
                 if (selector === "span") {
                     return [retweetSpan];
                 }
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -196,11 +196,11 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("mobile weibo timeline appends into the username row", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const nameRow = createAppendRecorder("mobile-name-row");
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
                     return nameRow;
                 }
@@ -209,7 +209,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -223,11 +223,11 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("mobile weibo profile appends to username row when there is no follow block", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/profile/7971151006" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const nameRow = createAppendRecorder("mobile-profile-name-row");
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
                     return nameRow;
                 }
@@ -236,7 +236,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -246,11 +246,11 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("mobile weibo search uses the username row placement", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/search" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const nameRow = createAppendRecorder("mobile-search-name-row");
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
                     return nameRow;
                 }
@@ -259,7 +259,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -269,11 +269,11 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("mobile weibo falls back to appending the whole header when the username row is unavailable", () => {
         const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/search" });
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const header = createAppendRecorder("mobile-search-header");
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === "header.weibo-top .m-text-box h3.m-text-cut") {
                     return null;
                 }
@@ -285,7 +285,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
             querySelectorAll() {
                 return [];
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -297,16 +297,16 @@ test("button placement matches current weibo and x page rules", async (t) => {
         const platform = createWeiboPlatformForLocation({ hostname: "m.weibo.cn", pathname: "/profile/7971151006" });
 
         const nestedArticle = {
-            matches(selector) {
+            matches(selector: string) {
                 return selector === "article.weibo-main";
             }
-        };
+        } as unknown as Element;
 
         const rootCard = {
-            matches(selector) {
+            matches(selector: string) {
                 return selector === ".card.m-panel.card9";
             }
-        };
+        } as unknown as Element;
 
         assert.equal(platform.shouldSkipPost(nestedArticle), true);
         assert.equal(platform.shouldSkipPost(rootCard), false);
@@ -314,7 +314,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("x timeline inserts into header row beside user name", () => {
         const platform = createXPlatformForTests();
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const headerRow = createInsertRecorder("header-row");
         const userNameParent = {
             nextSibling: { id: "header-after" },
@@ -322,13 +322,13 @@ test("button placement matches current weibo and x page rules", async (t) => {
         };
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === '[data-testid="User-Name"]') {
                     return { parentElement: userNameParent };
                 }
                 return null;
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -338,7 +338,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("x user page shares the same header-row placement as timeline", () => {
         const platform = createXPlatformForTests();
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const headerRow = createInsertRecorder("profile-header-row");
         const userNameParent = {
             nextSibling: null,
@@ -346,13 +346,13 @@ test("button placement matches current weibo and x page rules", async (t) => {
         };
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === '[data-testid="User-Name"]') {
                     return { parentElement: userNameParent };
                 }
                 return null;
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -362,7 +362,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("x detail page prefers the top header row instead of the bottom timestamp row", () => {
         const platform = createXPlatformForTests();
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const headerRow = createInsertRecorder("detail-header-row");
         const timeRow = createInsertRecorder("detail-time-row");
         const userNameParent = {
@@ -375,7 +375,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
         };
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === '[data-testid="User-Name"]') {
                     return { parentElement: userNameParent };
                 }
@@ -384,7 +384,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
                 }
                 return null;
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -395,7 +395,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("x falls back to the time row when header row is unavailable", () => {
         const platform = createXPlatformForTests();
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const timeRow = createInsertRecorder("time-row");
         const timeParent = {
             nextElementSibling: { id: "after-time" },
@@ -404,13 +404,13 @@ test("button placement matches current weibo and x page rules", async (t) => {
         };
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === "time") {
                     return { parentElement: timeParent };
                 }
                 return null;
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 
@@ -420,7 +420,7 @@ test("button placement matches current weibo and x page rules", async (t) => {
 
     await t.test("x finally falls back to the action group when neither header nor time row exists", () => {
         const platform = createXPlatformForTests();
-        const btn = { id: "btn" };
+        const btn = { id: "btn" } as HTMLElement;
         const actionParent = createInsertRecorder("action-parent");
         const actionGroup = {
             id: "group",
@@ -428,13 +428,13 @@ test("button placement matches current weibo and x page rules", async (t) => {
         };
 
         const post = {
-            querySelector(selector) {
+            querySelector(selector: string) {
                 if (selector === '[role="group"]') {
                     return actionGroup;
                 }
                 return null;
             }
-        };
+        } as unknown as Element;
 
         const inserted = platform.insertDownloadButton({ post, btn });
 

@@ -25,13 +25,13 @@ test("X GIF menu uses the persisted setting and saves toggles immediately", asyn
             createElement() { return { appendChild() {} }; },
             body: { appendChild() {} }
         };
-        vm.runInNewContext(outputFiles[0].text, {
+        vm.runInNewContext(outputFiles![0].text, {
             document,
             window: { document, location: { hostname: "x.com" }, fetch() {} },
-            GM_getValue(key, fallback) { return settings.has(key) ? settings.get(key) : fallback; },
-            GM_setValue(key, value) { settings.set(key, value); },
-            GM_registerMenuCommand(text, callback) { menus.set(++menuId, { text, callback }); return menuId; },
-            GM_unregisterMenuCommand(id) { menus.delete(id); },
+            GM_getValue(key: string, fallback: unknown) { return settings.has(key) ? settings.get(key) : fallback; },
+            GM_setValue(key: string, value: unknown) { settings.set(key, value); },
+            GM_registerMenuCommand(text: string, callback: () => void) { menus.set(++menuId, { text, callback }); return menuId; },
+            GM_unregisterMenuCommand(id: number) { menus.delete(id); },
             setTimeout() {},
             console
         });

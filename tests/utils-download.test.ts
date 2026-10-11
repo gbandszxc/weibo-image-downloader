@@ -3,7 +3,20 @@ import assert from "node:assert/strict";
 
 import { CONFIG } from "../src/config.ts";
 import { createUtils } from "../src/utils.ts";
-import { createGifVideoMock } from "./helpers/gif-video-mock.js";
+import type { GmBlobRequestDetails, GmDownload, GmDownloadOptions, GmXmlBlobRequest, UtilsConfig, UtilsMediaItem, UtilsWindowRef } from "../src/utils.ts";
+import { createGifVideoMock } from "./helpers/gif-video-mock.ts";
+
+interface TestUtilsOptions {
+    gmDownload?: GmDownload | null;
+    gmXmlhttpRequest?: GmXmlBlobRequest | null;
+    fetchRef?: typeof fetch;
+    windowOverrides?: Record<string, unknown>;
+    configOverrides?: Partial<UtilsConfig>;
+}
+
+function asMediaItems(items: readonly Partial<UtilsMediaItem>[]): UtilsMediaItem[] {
+    return items as UtilsMediaItem[];
+}
 
 function createTestUtils({
     gmDownload = null,
@@ -13,23 +26,23 @@ function createTestUtils({
     },
     windowOverrides = {},
     configOverrides = {}
-} = {}) {
-    const clicks = [];
-    const appendedNodes = [];
-    const removedNodes = [];
+}: TestUtilsOptions = {}) {
+    const clicks: { href: string; download: string }[] = [];
+    const appendedNodes: unknown[] = [];
+    const removedNodes: unknown[] = [];
 
     const documentRef = {
         body: {
-            appendChild(node) {
+            appendChild(node: { parentNode: unknown }) {
                 appendedNodes.push(node);
                 node.parentNode = this;
             },
-            removeChild(node) {
+            removeChild(node: { parentNode: unknown }) {
                 removedNodes.push(node);
                 node.parentNode = null;
             }
         },
-        createElement(tagName) {
+        createElement(tagName: string) {
             return {
                 tagName,
                 href: "",
@@ -45,31 +58,31 @@ function createTestUtils({
         }
     };
 
-    const openCalls = [];
-    const createObjectUrlCalls = [];
-    const revokeObjectUrlCalls = [];
+    const openCalls: unknown[][] = [];
+    const createObjectUrlCalls: Blob[] = [];
+    const revokeObjectUrlCalls: string[] = [];
 
     const windowRef = {
         location: {
             hostname: "weibo.com"
         },
         URL: {
-            createObjectURL(blob) {
+            createObjectURL(blob: Blob) {
                 createObjectUrlCalls.push(blob);
                 return "blob:test-url";
             },
-            revokeObjectURL(url) {
+            revokeObjectURL(url: string) {
                 revokeObjectUrlCalls.push(url);
             }
         },
         document: documentRef,
-        open(...args) {
+        open(...args: unknown[]) {
             openCalls.push(args);
         },
         ...windowOverrides
-    };
+    } as unknown as UtilsWindowRef;
 
-    const toastMessages = [];
+    const toastMessages: string[] = [];
     const utils = createUtils({
         config: {
             ...CONFIG,
@@ -100,7 +113,7 @@ function createTestUtils({
 }
 
 test("downloadImage falls back to blob GM_download instead of opening tabs", async () => {
-    const gmCalls = [];
+    const gmCalls: GmDownloadOptions[] = [];
     const blob = new Blob(["image-data"], { type: "image/jpeg" });
     const { utils, openCalls, clicks } = createTestUtils({
         gmDownload(details) {
@@ -119,7 +132,7 @@ test("downloadImage falls back to blob GM_download instead of opening tabs", asy
         fetchRef: async () => ({
             ok: true,
             blob: async () => blob
-        })
+        } as Response)
     });
 
     const success = await utils.downloadImage("https://wx2.sinaimg.cn/large/demo.jpg", "weibo_demo_1.jpg");
@@ -133,12 +146,12 @@ test("downloadImage falls back to blob GM_download instead of opening tabs", asy
 });
 
 test("X GIF conversion defaults on and only changes X GIF download jobs", () => {
-    const items = [
+    const items = asMediaItems([
         { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/demo.mp4", imageExt: ".mp4" },
         { kind: "image", imageUrl: "https://pbs.twimg.com/media/demo.jpg", imageExt: ".jpg" },
         { kind: "video", videoUrl: "https://video.twimg.com/amplify_video/demo.mp4", videoExt: ".mp4" },
         { kind: "gif", imageUrl: "https://example.com/already.gif", imageExt: ".gif" }
-    ];
+    ]);
     const { utils } = createTestUtils({ windowOverrides: { location: { hostname: "x.com" } } });
     assert.equal(CONFIG.X_GIF_AUTO_CONVERT, true);
     assert.deepEqual(utils.buildMediaDownloadJobs(items, "123"), [
@@ -159,7 +172,7 @@ test("X GIF conversion defaults on and only changes X GIF download jobs", () => 
 
 test("X GIF downloads fetch MP4 bytes and save a real GIF blob through the shared downloader", async () => {
     const mock = createGifVideoMock();
-    const downloads = [];
+    const downloads: GmDownloadOptions[] = [];
     const { utils, toastMessages } = createTestUtils({
         windowOverrides: mock.windowRef,
         gmXmlhttpRequest(details) {
@@ -171,39 +184,39 @@ test("X GIF downloads fetch MP4 bytes and save a real GIF blob through the share
             queueMicrotask(details.onload);
         }
     });
-    await utils.downloadMediaItems([
+    await utils.downloadMediaItems(asMediaItems([
         { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/demo.mp4", imageExt: ".mp4" }
-    ], "123");
+    ]), "123");
     assert.equal(downloads.length, 1);
     assert.equal(downloads[0].name, "x_123_1.gif");
-    assert.equal(downloads[0].url.type, "image/gif");
-    assert.equal(new TextDecoder().decode((await downloads[0].url.arrayBuffer()).slice(0, 6)), "GIF89a");
-    assert.equal(toastMessages.at(-1), "已下载 1 张图片");
+    assert.equal((downloads[0].url as Blob).type, "image/gif");
+    assert.equal(new TextDecoder().decode((await (downloads[0].url as Blob).arrayBuffer()).slice(0, 6)), "GIF89a");
+    assert.equal(toastMessages[toastMessages.length - 1], "已下载 1 张图片");
 });
 
 test("failed X GIF conversion never saves an MP4 named GIF and continues other jobs", async () => {
     const mock = createGifVideoMock({ failOn: "load" });
-    const downloads = [];
+    const downloads: GmDownloadOptions[] = [];
     const { utils, toastMessages } = createTestUtils({
         windowOverrides: mock.windowRef,
         configOverrides: { DELAY_MS: 0 },
-        fetchRef: async () => ({ ok: true, blob: async () => new Blob(["broken mp4"]) }),
+        fetchRef: async () => ({ ok: true, blob: async () => new Blob(["broken mp4"]) } as Response),
         gmDownload(details) {
             downloads.push(details);
             queueMicrotask(details.onload);
         }
     });
-    await utils.downloadMediaItems([
+    await utils.downloadMediaItems(asMediaItems([
         { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/broken.mp4", imageExt: ".mp4" },
         { kind: "image", imageUrl: "https://pbs.twimg.com/media/photo.jpg", imageExt: ".jpg" }
-    ], "123");
+    ]), "123");
     assert.deepEqual(downloads.map((job) => job.name), ["x_123_2.jpg"]);
-    assert.match(toastMessages.at(-1), /已下载 1 个文件，1 个失败；X GIF转换或保存失败/);
+    assert.match(toastMessages[toastMessages.length - 1], /已下载 1 个文件，1 个失败；X GIF转换或保存失败/);
     assert.deepEqual(mock.revokedUrls, ["blob:gif-source"]);
 });
 
 test("disabled X GIF conversion downloads the original MP4 without decoding", async () => {
-    const downloads = [];
+    const downloads: GmDownloadOptions[] = [];
     const { utils } = createTestUtils({
         windowOverrides: { location: { hostname: "x.com" } },
         configOverrides: { X_GIF_AUTO_CONVERT: false },
@@ -212,9 +225,9 @@ test("disabled X GIF conversion downloads the original MP4 without decoding", as
             queueMicrotask(details.onload);
         }
     });
-    await utils.downloadMediaItems([
+    await utils.downloadMediaItems(asMediaItems([
         { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/demo.mp4", imageExt: ".mp4" }
-    ], "123");
+    ]), "123");
     assert.equal(downloads[0].url, "https://video.twimg.com/tweet_video/demo.mp4");
     assert.equal(downloads[0].name, "x_123_1.mp4");
 });
@@ -253,7 +266,7 @@ test("downloadMediaItems reports image and video counts separately", async () =>
         }
     });
 
-    await utils.downloadMediaItems([
+    await utils.downloadMediaItems(asMediaItems([
         {
             kind: "image",
             imageUrl: "https://pbs.twimg.com/media/demo.jpg?name=orig",
@@ -264,14 +277,14 @@ test("downloadMediaItems reports image and video counts separately", async () =>
             videoUrl: "https://video.twimg.com/amplify_video/demo.mp4",
             videoExt: ".mp4"
         }
-    ], "2084954812937117767");
+    ]), "2084954812937117767");
 
     assert.deepEqual(toastMessages, ["已下载 1 张图片和 1 个视频"]);
 });
 
 test("downloadImage uses GM_xmlhttpRequest blob fallback when direct download fails", async () => {
-    const gmCalls = [];
-    const xhrCalls = [];
+    const gmCalls: GmDownloadOptions[] = [];
+    const xhrCalls: GmBlobRequestDetails[] = [];
     const blob = new Blob(["detail-page-image"], { type: "image/jpeg" });
     const { utils, openCalls, clicks } = createTestUtils({
         gmDownload(details) {
@@ -324,11 +337,11 @@ test("downloadImage uses GM_xmlhttpRequest blob fallback when direct download fa
 
 test("browser anchor fallback reports initiation instead of claiming saved files", async () => {
     const { utils, clicks, toastMessages } = createTestUtils({
-        fetchRef: async () => ({ ok: true, blob: async () => new Blob(["image"]) })
+        fetchRef: async () => ({ ok: true, blob: async () => new Blob(["image"]) } as Response)
     });
-    const result = await utils.downloadMediaItems([
+    const result = await utils.downloadMediaItems(asMediaItems([
         { kind: "image", imageUrl: "https://pbs.twimg.com/media/demo.jpg", imageExt: ".jpg" }
-    ], "123");
+    ]), "123");
     assert.deepEqual(result, { successCount: 1, failedCount: 0, handedOffCount: 1 });
     assert.equal(clicks.length, 1);
     assert.deepEqual(toastMessages, ["已发起 1 个文件的下载；请查看浏览器下载列表"]);
@@ -342,8 +355,8 @@ test("X public media fallback omits credentials while Weibo retains them", async
         const { utils, clicks } = createTestUtils({
             windowOverrides: { location: { hostname } },
             fetchRef: async (_, options) => {
-                assert.equal(options.credentials, credentials);
-                return { ok: true, blob: async () => new Blob(["media"]) };
+                assert.equal(options!.credentials, credentials);
+                return { ok: true, blob: async () => new Blob(["media"]) } as Response;
             }
         });
         assert.equal(await utils.downloadImageFallback(url, "media"), "started");
