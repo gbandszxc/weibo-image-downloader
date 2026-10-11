@@ -2880,6 +2880,646 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     return concatBytes(jpegHead, xmpSegment, mpfSegment, jpegTail, patchedVideo);
   }
 
+  // src/apple-pair.ts
+  var APPLE_MAKER_HEADER = "Apple iOS\0";
+  var APPLE_MAKER_IFD_OFFSET = 14;
+  var APPLE_CONTENT_IDENTIFIER_TAG = 17;
+  var EXIF_MAKER_NOTE_TAG = 37500;
+  var EXIF_IFD_POINTER_TAG2 = 34665;
+  var QT_CONTENT_IDENTIFIER_KEY = "com.apple.quicktime.content.identifier";
+  var QT_STILL_IMAGE_TIME_KEY = "com.apple.quicktime.still-image-time";
+  var QT_DATA_TYPE_SINT8 = 21;
+  var QT_DATA_TYPE_UTF8 = 1;
+  var QT_STILL_IMAGE_TIME_VALUE = new Uint8Array([255]);
+  function concatBytes2(...parts) {
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+      out.set(part, offset);
+      offset += part.length;
+    }
+    return out;
+  }
+  function asciiBytes(text) {
+    const out = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) {
+      out[i] = text.charCodeAt(i) & 255;
+    }
+    return out;
+  }
+  function bytesToLatin12(bytes) {
+    let text = "";
+    for (let i = 0; i < bytes.length; i++) {
+      text += String.fromCharCode(bytes[i]);
+    }
+    return text;
+  }
+  function u32be(value) {
+    return Uint8Array.from([value >>> 24 & 255, value >>> 16 & 255, value >>> 8 & 255, value & 255]);
+  }
+  var UUID_PATTERN = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
+  function generateContentIdentifier() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID().toUpperCase();
+    }
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = bytes[6] & 15 | 64;
+    bytes[8] = bytes[8] & 63 | 128;
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`.toUpperCase();
+  }
+  var TIFF_TYPE_SIZES = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
+  function entryValueByteLength2(entry) {
+    return (TIFF_TYPE_SIZES[entry.type] || 1) * entry.count;
+  }
+  function findExifApp1(jpeg) {
+    if (jpeg.length < 4 || jpeg[0] !== 255 || jpeg[1] !== 216) {
+      return null;
+    }
+    let offset = 2;
+    while (offset + 4 <= jpeg.length) {
+      while (offset < jpeg.length - 1 && jpeg[offset] === 255 && jpeg[offset + 1] === 255) {
+        offset++;
+      }
+      if (jpeg[offset] !== 255) {
+        break;
+      }
+      const marker = jpeg[offset + 1];
+      if (marker !== 224 && (marker < 225 || marker > 239)) {
+        break;
+      }
+      const segmentLength = jpeg[offset + 2] << 8 | jpeg[offset + 3];
+      const segmentEnd = offset + 2 + segmentLength;
+      if (segmentLength < 2 || segmentEnd > jpeg.length) {
+        return null;
+      }
+      if (marker === 225 && bytesToLatin12(jpeg.subarray(offset + 4, offset + 10)) === "Exif\0\0") {
+        return { start: offset, end: segmentEnd };
+      }
+      offset = segmentEnd;
+    }
+    return null;
+  }
+  function readIfd2(view, offset, littleEndian) {
+    const count = view.getUint16(offset, littleEndian);
+    const entries = [];
+    for (let i = 0; i < count; i++) {
+      const entryOffset = offset + 2 + i * 12;
+      entries.push({
+        tag: view.getUint16(entryOffset, littleEndian),
+        type: view.getUint16(entryOffset + 2, littleEndian),
+        count: view.getUint32(entryOffset + 4, littleEndian),
+        offset: view.getUint32(entryOffset + 8, littleEndian)
+      });
+    }
+    return {
+      offset,
+      entries,
+      nextIfdOffset: view.getUint32(offset + 2 + count * 12, littleEndian),
+      tableEnd: offset + 2 + count * 12 + 4
+    };
+  }
+  function parseExifContext(jpeg) {
+    const segment = findExifApp1(jpeg);
+    if (!segment) {
+      return null;
+    }
+    const tiff = jpeg.subarray(segment.start + 10, segment.end);
+    if (tiff.length < 8) {
+      return null;
+    }
+    const littleEndian = tiff[0] === 73 && tiff[1] === 73;
+    const bigEndian = tiff[0] === 77 && tiff[1] === 77;
+    const magic = littleEndian ? tiff[3] << 8 | tiff[2] : tiff[2] << 8 | tiff[3];
+    if (!littleEndian && !bigEndian || magic !== 42) {
+      return null;
+    }
+    const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength);
+    const ifd0 = readIfd2(view, view.getUint32(4, littleEndian), littleEndian);
+    const exifPointer = ifd0.entries.find((entry) => entry.tag === EXIF_IFD_POINTER_TAG2);
+    if (!exifPointer || entryValueByteLength2(exifPointer) !== 4) {
+      return null;
+    }
+    const exifIfd = readIfd2(view, exifPointer.offset, littleEndian);
+    const makerEntry = exifIfd.entries.find((entry) => entry.tag === EXIF_MAKER_NOTE_TAG) || null;
+    let makerBytes = null;
+    if (makerEntry) {
+      const length = entryValueByteLength2(makerEntry);
+      if (length <= 4) {
+        makerBytes = null;
+      } else if (makerEntry.offset >= exifIfd.tableEnd && makerEntry.offset + length <= tiff.length) {
+        makerBytes = tiff.subarray(makerEntry.offset, makerEntry.offset + length);
+      } else {
+        return null;
+      }
+    }
+    return { segment, tiff, littleEndian, view, ifd0, exifIfd, makerEntry, makerBytes };
+  }
+  function readContentIdentifierFromContext(context) {
+    const maker = context.makerBytes;
+    if (!maker || maker.length < APPLE_MAKER_IFD_OFFSET + 2 || bytesToLatin12(maker.subarray(0, 10)) !== APPLE_MAKER_HEADER) {
+      return null;
+    }
+    const orderText = bytesToLatin12(maker.subarray(12, 14));
+    const littleEndian = orderText === "II";
+    if (!littleEndian && orderText !== "MM") {
+      return null;
+    }
+    const view = new DataView(maker.buffer, maker.byteOffset, maker.byteLength);
+    const ifd = readIfd2(view, APPLE_MAKER_IFD_OFFSET, littleEndian);
+    const entry = ifd.entries.find((item) => item.tag === APPLE_CONTENT_IDENTIFIER_TAG);
+    if (!entry || entry.type !== 2) {
+      return null;
+    }
+    let value;
+    try {
+      if (entryValueByteLength2(entry) <= 4) {
+        return null;
+      }
+      if (entry.offset + entry.count > maker.length) {
+        return null;
+      }
+      value = maker.subarray(entry.offset, entry.offset + entry.count);
+    } catch {
+      return null;
+    }
+    const text = bytesToLatin12(value).replace(/\0+$/, "").trim();
+    return UUID_PATTERN.test(text) ? text.toUpperCase() : null;
+  }
+  function readAppleContentIdentifier(jpeg) {
+    try {
+      const context = parseExifContext(jpeg);
+      return context ? readContentIdentifierFromContext(context) : null;
+    } catch {
+      return null;
+    }
+  }
+  function parseAppleMakerNote(maker) {
+    if (bytesToLatin12(maker.subarray(0, 10)) !== APPLE_MAKER_HEADER || maker.length < APPLE_MAKER_IFD_OFFSET + 2) {
+      return null;
+    }
+    const orderText = bytesToLatin12(maker.subarray(12, 14));
+    const littleEndian = orderText === "II";
+    if (!littleEndian && orderText !== "MM") {
+      return null;
+    }
+    const view = new DataView(maker.buffer, maker.byteOffset, maker.byteLength);
+    const ifd = readIfd2(view, APPLE_MAKER_IFD_OFFSET, littleEndian);
+    const entries = [];
+    for (const entry of ifd.entries) {
+      const length = entryValueByteLength2(entry);
+      const entryField = APPLE_MAKER_IFD_OFFSET + 2 + ifd.entries.indexOf(entry) * 12 + 8;
+      if (length <= 4) {
+        entries.push({ tag: entry.tag, type: entry.type, count: entry.count, value: maker.subarray(entryField, entryField + length) });
+      } else {
+        if (entry.offset + length > maker.length) {
+          return null;
+        }
+        entries.push({ tag: entry.tag, type: entry.type, count: entry.count, value: maker.subarray(entry.offset, entry.offset + length) });
+      }
+    }
+    return { version: maker.subarray(10, 12), littleEndian, entries };
+  }
+  function buildAppleMakerNote(existing, uuid, parentLittleEndian) {
+    const parsed = existing ? parseAppleMakerNote(existing) : null;
+    const littleEndian = parsed ? parsed.littleEndian : parentLittleEndian;
+    const version = parsed ? parsed.version : new Uint8Array([0, 1]);
+    const entries = parsed ? parsed.entries.filter((entry) => entry.tag !== APPLE_CONTENT_IDENTIFIER_TAG) : [];
+    const identifierValue = concatBytes2(asciiBytes(uuid.toUpperCase()), new Uint8Array([0]));
+    const insertIndex = entries.filter((entry) => entry.tag < APPLE_CONTENT_IDENTIFIER_TAG).length;
+    entries.splice(insertIndex, 0, {
+      tag: APPLE_CONTENT_IDENTIFIER_TAG,
+      type: 2,
+      count: identifierValue.length,
+      value: identifierValue
+    });
+    const tableEnd = APPLE_MAKER_IFD_OFFSET + 2 + entries.length * 12 + 4;
+    const dataOffsets = [];
+    let dataEnd = tableEnd;
+    for (const entry of entries) {
+      if (entry.value.length > 4) {
+        dataOffsets.push(dataEnd);
+        dataEnd += entry.value.length;
+      } else {
+        dataOffsets.push(-1);
+      }
+    }
+    const out = new Uint8Array(dataEnd);
+    out.set(asciiBytes(APPLE_MAKER_HEADER), 0);
+    out.set(version, 10);
+    out.set(asciiBytes(littleEndian ? "II" : "MM"), 12);
+    const view = new DataView(out.buffer);
+    const writeU16 = (offset, value) => view.setUint16(offset, value, littleEndian);
+    const writeU32 = (offset, value) => view.setUint32(offset, value, littleEndian);
+    writeU16(APPLE_MAKER_IFD_OFFSET, entries.length);
+    entries.forEach((entry, index) => {
+      const entryOffset = APPLE_MAKER_IFD_OFFSET + 2 + index * 12;
+      writeU16(entryOffset, entry.tag);
+      writeU16(entryOffset + 2, entry.type);
+      writeU32(entryOffset + 4, entry.count);
+      if (entry.value.length > 4) {
+        writeU32(entryOffset + 8, dataOffsets[index]);
+      } else {
+        out.fill(0, entryOffset + 8, entryOffset + 12);
+        out.set(entry.value, entryOffset + 8);
+      }
+    });
+    writeU32(APPLE_MAKER_IFD_OFFSET + 2 + entries.length * 12, 0);
+    entries.forEach((entry, index) => {
+      if (dataOffsets[index] >= 0) {
+        out.set(entry.value, dataOffsets[index]);
+      }
+    });
+    return out;
+  }
+  function upsertExifIfdEntry(jpeg, context, tag, valueBytes) {
+    const { segment, tiff, littleEndian, ifd0, exifIfd } = context;
+    const tiffStart = 10;
+    const existing = exifIfd.entries.find((entry) => entry.tag === tag);
+    let valueOffset;
+    let shift;
+    let newEntries;
+    if (existing) {
+      const existingLength = entryValueByteLength2(existing);
+      if (existingLength >= valueBytes.length && existingLength > 4 && existing.offset >= exifIfd.tableEnd && existing.offset + existingLength <= tiff.length) {
+        const patched2 = jpeg.slice();
+        const valueStart = segment.start + tiffStart + existing.offset;
+        patched2.set(valueBytes, valueStart);
+        patched2.fill(0, valueStart + valueBytes.length, valueStart + existingLength);
+        const entryField = segment.start + tiffStart + exifIfd.offset + 2 + exifIfd.entries.indexOf(existing) * 12;
+        const entryView = new DataView(patched2.buffer, patched2.byteOffset, patched2.byteLength);
+        entryView.setUint16(entryField + 2, 7, littleEndian);
+        entryView.setUint32(entryField + 4, valueBytes.length, littleEndian);
+        return patched2;
+      }
+      valueOffset = tiff.length;
+      shift = 0;
+      newEntries = exifIfd.entries.map((entry) => entry);
+    } else {
+      const insertIndex = exifIfd.entries.filter((entry) => entry.tag < tag).length;
+      newEntries = [...exifIfd.entries];
+      newEntries.splice(insertIndex, 0, { tag, type: 7, count: valueBytes.length, offset: 0 });
+      valueOffset = tiff.length + 12;
+      shift = 12;
+    }
+    const newTiffLength = tiff.length + shift + valueBytes.length;
+    const newTiff = new Uint8Array(newTiffLength);
+    const moveFrom = exifIfd.tableEnd - 4;
+    newTiff.set(tiff.subarray(0, moveFrom), 0);
+    newTiff.set(tiff.subarray(moveFrom), moveFrom + shift);
+    const newView = new DataView(newTiff.buffer);
+    const writeU16 = (offset, value) => newView.setUint16(offset, value, littleEndian);
+    const writeU32 = (offset, value) => newView.setUint32(offset, value, littleEndian);
+    const pointsPastTable = (value) => value >= exifIfd.tableEnd && value < tiff.length;
+    writeU16(exifIfd.offset, newEntries.length);
+    newEntries.forEach((entry, index) => {
+      const entryOffset = exifIfd.offset + 2 + index * 12;
+      const isTarget = entry.tag === tag;
+      writeU16(entryOffset, entry.tag);
+      writeU16(entryOffset + 2, isTarget ? 7 : entry.type);
+      writeU32(entryOffset + 4, isTarget ? valueBytes.length : entry.count);
+      if (isTarget) {
+        writeU32(entryOffset + 8, valueOffset);
+      } else {
+        const baseOffset = !isTarget && entry.offset >= exifIfd.tableEnd && entry.offset < tiff.length ? entry.offset + shift : entry.offset;
+        writeU32(entryOffset + 8, baseOffset);
+      }
+    });
+    const exifNext = exifIfd.nextIfdOffset;
+    writeU32(exifIfd.offset + 2 + newEntries.length * 12, pointsPastTable(exifNext) ? exifNext + shift : exifNext);
+    if (pointsPastTable(ifd0.nextIfdOffset)) {
+      writeU32(ifd0.offset + 2 + ifd0.entries.length * 12, ifd0.nextIfdOffset + shift);
+    }
+    ifd0.entries.forEach((entry, index) => {
+      if (pointsPastTable(entry.offset)) {
+        writeU32(ifd0.offset + 2 + index * 12 + 8, entry.offset + shift);
+      }
+    });
+    newTiff.set(valueBytes, valueOffset);
+    const newSegmentLength = 2 + 6 + newTiffLength;
+    const delta = newSegmentLength + 2 - (segment.end - segment.start);
+    const patched = new Uint8Array(jpeg.length + delta);
+    patched.set(jpeg.subarray(0, segment.start), 0);
+    patched[segment.start] = 255;
+    patched[segment.start + 1] = 225;
+    patched[segment.start + 2] = newSegmentLength >> 8 & 255;
+    patched[segment.start + 3] = newSegmentLength & 255;
+    patched.set(asciiBytes("Exif\0\0"), segment.start + 4);
+    patched.set(newTiff, segment.start + tiffStart);
+    patched.set(jpeg.subarray(segment.end), segment.start + tiffStart + newTiffLength);
+    return patched;
+  }
+  function injectAppleContentIdentifier(jpeg, uuid) {
+    try {
+      const context = parseExifContext(jpeg);
+      if (!context) {
+        return jpeg;
+      }
+      const makerNote = buildAppleMakerNote(context.makerBytes, uuid, context.littleEndian);
+      return upsertExifIfdEntry(jpeg, context, EXIF_MAKER_NOTE_TAG, makerNote);
+    } catch {
+      return jpeg;
+    }
+  }
+  var CONTAINER_BOX_TYPES = /* @__PURE__ */ new Set(["moov", "udta", "trak", "mdia", "minf", "stbl", "edts", "dinf"]);
+  var CHUNK_OFFSET_CONTAINER_TYPES = ["moov", "trak", "mdia", "minf", "stbl"];
+  function parseBoxes(bytes, start, end) {
+    const boxes = [];
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let pos = start;
+    while (pos + 8 <= end) {
+      let size = view.getUint32(pos);
+      let headerSize = 8;
+      if (size === 1) {
+        if (pos + 16 > end) {
+          break;
+        }
+        size = Number(view.getBigUint64(pos + 8));
+        headerSize = 16;
+      } else if (size === 0) {
+        size = end - pos;
+      }
+      if (size < headerSize || pos + size > end) {
+        break;
+      }
+      const type = bytesToLatin12(bytes.subarray(pos + 4, pos + 8));
+      const node = { type, start: pos, size, headerSize, children: [] };
+      if (CONTAINER_BOX_TYPES.has(type)) {
+        node.children = parseBoxes(bytes, pos + headerSize, pos + size);
+      }
+      boxes.push(node);
+      pos += size;
+    }
+    return boxes;
+  }
+  function findBox(boxes, type, depth = 1) {
+    for (const box of boxes) {
+      if (box.type === type) {
+        return box;
+      }
+      if (depth > 1) {
+        const found = findBox(box.children, type, depth - 1);
+        if (found) {
+          return found;
+        }
+      }
+    }
+    return null;
+  }
+  function readBoxBody(bytes, box) {
+    return bytes.subarray(box.start + box.headerSize, box.start + box.size);
+  }
+  function parseKeysBox(payload) {
+    if (payload.length < 8) {
+      return null;
+    }
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    const count = view.getUint32(4);
+    const keys = /* @__PURE__ */ new Map();
+    let pos = 8;
+    for (let index = 1; index <= count; index++) {
+      if (pos + 8 > payload.length) {
+        return null;
+      }
+      const entrySize = view.getUint32(pos);
+      if (entrySize < 8 || pos + entrySize > payload.length) {
+        return null;
+      }
+      const namespace = bytesToLatin12(payload.subarray(pos + 4, pos + 8));
+      if (namespace !== "mdta") {
+        return null;
+      }
+      keys.set(bytesToLatin12(payload.subarray(pos + 8, pos + entrySize)), index);
+      pos += entrySize;
+    }
+    return keys;
+  }
+  function parseIlstBox(payload) {
+    const items = [];
+    let pos = 0;
+    while (pos + 8 <= payload.length) {
+      const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+      const size = view.getUint32(pos);
+      if (size < 8 || pos + size > payload.length) {
+        break;
+      }
+      items.push({ index: view.getUint32(pos + 4), raw: payload.slice(pos, pos + size) });
+      pos += size;
+    }
+    return items;
+  }
+  function buildHdlrBox() {
+    const out = new Uint8Array(33);
+    out.set(u32be(33), 0);
+    out.set(asciiBytes("hdlr"), 4);
+    out.set(asciiBytes("mdta"), 16);
+    return out;
+  }
+  function buildKeysBox(names) {
+    const entries = names.map((name) => concatBytes2(u32be(8 + name.length), asciiBytes("mdta"), asciiBytes(name)));
+    const body = concatBytes2(u32be(0), u32be(names.length), ...entries);
+    return concatBytes2(u32be(8 + body.length), asciiBytes("keys"), body);
+  }
+  function buildIlstItem(keyIndex, dataTypeFlags, value) {
+    const dataBody = concatBytes2(u32be(dataTypeFlags), u32be(0), value);
+    const dataBox = concatBytes2(u32be(8 + dataBody.length), asciiBytes("data"), dataBody);
+    return concatBytes2(u32be(8 + dataBox.length), u32be(keyIndex), dataBox);
+  }
+  function buildBox(type, body, isoFullBox) {
+    const prefix = isoFullBox ? u32be(0) : new Uint8Array(0);
+    const full = concatBytes2(prefix, body);
+    return concatBytes2(u32be(8 + full.length), asciiBytes(type), full);
+  }
+  function patchChunkOffsets(moov, delta) {
+    const walk = (start, end, depth) => {
+      if (depth > 10) {
+        return;
+      }
+      const view = new DataView(moov.buffer, moov.byteOffset, moov.byteLength);
+      let pos = start;
+      while (pos + 8 <= end) {
+        const size = view.getUint32(pos);
+        if (size < 8 || pos + size > end) {
+          return;
+        }
+        const type = bytesToLatin12(moov.subarray(pos + 4, pos + 8));
+        if (type === "stco" && size >= 16) {
+          const count = view.getUint32(pos + 12);
+          for (let i = 0; i < count && pos + 16 + i * 4 + 4 <= pos + size; i++) {
+            const field = pos + 16 + i * 4;
+            view.setUint32(field, view.getUint32(field) + delta >>> 0);
+          }
+        } else if (type === "co64" && size >= 16) {
+          const count = view.getUint32(pos + 12);
+          for (let i = 0; i < count && pos + 16 + i * 8 + 8 <= pos + size; i++) {
+            const field = pos + 16 + i * 8;
+            view.setBigUint64(field, view.getBigUint64(field) + BigInt(delta));
+          }
+        } else if (CHUNK_OFFSET_CONTAINER_TYPES.includes(type)) {
+          walk(pos + 8, pos + size, depth + 1);
+        }
+        pos += size;
+      }
+    };
+    walk(8, moov.length, 0);
+  }
+  function isPlausibleBoxType(type) {
+    return [...type].every((ch) => ch >= " " && ch <= "~");
+  }
+  function injectLivePhotoVideoMetadata(video, uuid) {
+    try {
+      if (video.length < 16) {
+        return video;
+      }
+      const topLevel = parseBoxes(video, 0, video.length);
+      if (topLevel.length === 0) {
+        return video;
+      }
+      const view = new DataView(video.buffer, video.byteOffset, video.byteLength);
+      let mdatOffset = -1;
+      let moov = null;
+      let moovOffset = -1;
+      for (const box of topLevel) {
+        if (view.getUint32(box.start) === 1) {
+          return video;
+        }
+        if (box.type === "moov" && !moov) {
+          moov = box;
+          moovOffset = box.start;
+        }
+        if (box.type === "mdat" && mdatOffset < 0) {
+          mdatOffset = box.start;
+        }
+        if (box.type === "moof" || box.type === "sidx") {
+          return video;
+        }
+      }
+      if (!moov || moovOffset < 0) {
+        return video;
+      }
+      if (findBox(moov.children, "cmov", 2)) {
+        return video;
+      }
+      const udta = moov.children.find((box) => box.type === "udta") || null;
+      let meta = moov.children.find((box) => box.type === "meta") || (udta ? udta.children.find((box) => box.type === "meta") : void 0) || null;
+      let metaIsFullBox = false;
+      let metaChildren = [];
+      if (meta) {
+        for (const candidateFullBox of [false, true]) {
+          const bodyStart = meta.start + meta.headerSize + (candidateFullBox ? 4 : 0);
+          const children = parseBoxes(video, bodyStart, meta.start + meta.size);
+          const parsedEnd = children.reduce((sum, box) => sum + box.size, bodyStart);
+          if (children.length > 0 && parsedEnd === meta.start + meta.size && children.every((box) => box.headerSize === 8 && isPlausibleBoxType(box.type))) {
+            metaIsFullBox = candidateFullBox;
+            metaChildren = children;
+            break;
+          }
+        }
+        if (metaChildren.length === 0) {
+          return video;
+        }
+        const hdlr = metaChildren.find((box) => box.type === "hdlr");
+        if (hdlr) {
+          if (hdlr.headerSize !== 8) {
+            return video;
+          }
+          const handlerType = bytesToLatin12(video.subarray(hdlr.start + 16, hdlr.start + 20));
+          if (handlerType !== "mdta") {
+            return video;
+          }
+        }
+      } else {
+        const ftyp = topLevel.find((box) => box.type === "ftyp");
+        const majorBrand = ftyp ? bytesToLatin12(video.subarray(ftyp.start + 8, ftyp.start + 12)) : "";
+        metaIsFullBox = majorBrand !== "qt  ";
+      }
+      const keysBox = metaChildren.find((box) => box.type === "keys");
+      const ilstBox = metaChildren.find((box) => box.type === "ilst");
+      if (ilstBox && !keysBox) {
+        return video;
+      }
+      const existingKeys = keysBox ? parseKeysBox(readBoxBody(video, keysBox)) : null;
+      if (keysBox && !existingKeys) {
+        return video;
+      }
+      const existingItems = ilstBox ? parseIlstBox(readBoxBody(video, ilstBox)) : null;
+      const keyNames = existingKeys ? [...existingKeys.keys()] : [];
+      const keyIndex = new Map(existingKeys || []);
+      const plan = [
+        { key: QT_CONTENT_IDENTIFIER_KEY, flags: QT_DATA_TYPE_UTF8, value: asciiBytes(uuid.toUpperCase()) },
+        { key: QT_STILL_IMAGE_TIME_KEY, flags: QT_DATA_TYPE_SINT8, value: QT_STILL_IMAGE_TIME_VALUE }
+      ];
+      const targetIndexes = [];
+      for (const entry of plan) {
+        let index = keyIndex.get(entry.key);
+        if (!index) {
+          keyNames.push(entry.key);
+          index = keyNames.length;
+          keyIndex.set(entry.key, index);
+        }
+        targetIndexes.push(index);
+      }
+      const newKeysBox = buildKeysBox(keyNames);
+      const replacedSet = new Set(targetIndexes);
+      const preservedItems = (existingItems || []).filter((item) => !replacedSet.has(item.index)).map((item) => item.raw);
+      const newIlstBody = concatBytes2(
+        ...preservedItems,
+        ...plan.map((entry, position) => buildIlstItem(targetIndexes[position], entry.flags, entry.value))
+      );
+      const newIlstBox = concatBytes2(u32be(8 + newIlstBody.length), asciiBytes("ilst"), newIlstBody);
+      const metaChildBoxes = [];
+      if (!metaChildren.some((box) => box.type === "hdlr")) {
+        metaChildBoxes.push(buildHdlrBox());
+      }
+      for (const child of metaChildren) {
+        if (child.type === "keys" || child.type === "ilst") {
+          continue;
+        }
+        metaChildBoxes.push(video.slice(child.start, child.start + child.size));
+      }
+      metaChildBoxes.push(newKeysBox, newIlstBox);
+      const newMetaBox = buildBox("meta", concatBytes2(...metaChildBoxes), metaIsFullBox);
+      const rawCopy = (box) => video.slice(box.start, box.start + box.size);
+      let moovChildrenParts;
+      if (meta && udta && udta.children.includes(meta)) {
+        const udtaParts = udta.children.map((child) => child === meta ? newMetaBox : rawCopy(child));
+        const newUdta = concatBytes2(u32be(8 + udtaParts.reduce((sum, part) => sum + part.length, 0)), asciiBytes("udta"), ...udtaParts);
+        moovChildrenParts = moov.children.map((child) => child === udta ? newUdta : rawCopy(child));
+      } else if (meta) {
+        moovChildrenParts = moov.children.map((child) => child === meta ? newMetaBox : rawCopy(child));
+      } else if (udta) {
+        const udtaParts = [...udta.children.map(rawCopy), newMetaBox];
+        const newUdta = concatBytes2(u32be(8 + udtaParts.reduce((sum, part) => sum + part.length, 0)), asciiBytes("udta"), ...udtaParts);
+        moovChildrenParts = moov.children.map((child) => child === udta ? newUdta : rawCopy(child));
+      } else {
+        moovChildrenParts = [...moov.children.map(rawCopy), buildBox("udta", newMetaBox, false)];
+      }
+      const newMoovBody = concatBytes2(...moovChildrenParts);
+      const newMoov = concatBytes2(u32be(8 + newMoovBody.length), asciiBytes("moov"), newMoovBody);
+      const delta = newMoov.length - moov.size;
+      if (delta !== 0 && mdatOffset >= 0 && moovOffset < mdatOffset) {
+        patchChunkOffsets(newMoov, delta);
+      }
+      return concatBytes2(video.subarray(0, moovOffset), newMoov, video.subarray(moovOffset + moov.size));
+    } catch {
+      return video;
+    }
+  }
+  function pairAppleLivePhoto(jpeg, video, uuid) {
+    const pairUuid = (uuid || readAppleContentIdentifier(jpeg) || generateContentIdentifier()).toUpperCase();
+    const pairedJpeg = injectAppleContentIdentifier(jpeg, pairUuid);
+    const pairedVideo = injectLivePhotoVideoMetadata(video, pairUuid);
+    return {
+      jpeg: pairedJpeg,
+      video: pairedVideo,
+      uuid: pairUuid,
+      jpegPaired: pairedJpeg !== jpeg,
+      videoPaired: pairedVideo !== video
+    };
+  }
+
   // src/utils.ts
   function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui: ui2 }) {
     let platformLabel = "weibo";
@@ -2951,7 +3591,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         }
         const normalizedPostId = postId.startsWith(`${platform2}_`) ? postId.slice(platform2.length + 1) : postId;
         const baseName = `${platform2}_${normalizedPostId}_${index + 1}`;
-        const mergeLivePhoto = platform2 === "weibo" && item.kind === "livephoto" && !!item.videoUrl && !!config.LIVEPHOTO_AUTO_MERGE && getFileExtensionFromUrl(item.imageUrl, ".jpg") === ".jpg";
+        const isWeiboLivePhoto = platform2 === "weibo" && item.kind === "livephoto" && !!item.videoUrl;
+        const mergeLivePhoto = isWeiboLivePhoto && !!config.LIVEPHOTO_AUTO_MERGE && getFileExtensionFromUrl(item.imageUrl, ".jpg") === ".jpg";
         if (item.imageUrl) {
           const job = {
             type: "image",
@@ -2965,10 +3606,13 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           if (mergeLivePhoto) {
             job.livePhotoVideoUrl = item.videoUrl;
             job.filename = `${baseName}.MP.jpg`;
+          } else if (isWeiboLivePhoto) {
+            job.livePhotoVideoUrl = item.videoUrl;
+            job.livePhotoPair = true;
           }
           jobs.push(job);
         }
-        if (item.videoUrl && !mergeLivePhoto) {
+        if (item.videoUrl && !mergeLivePhoto && !isWeiboLivePhoto) {
           const isStandaloneVideo = item.kind === "video";
           jobs.push({
             type: "video",
@@ -3198,6 +3842,40 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         return false;
       }
     }
+    async function downloadPairedLivePhoto(imageUrl, videoUrl, filename) {
+      const [imageSettled, videoSettled] = await Promise.allSettled([
+        fetchMediaBlob(imageUrl),
+        fetchMediaBlob(videoUrl)
+      ]);
+      if (imageSettled.status === "rejected" && videoSettled.status === "rejected") {
+        log("LivePhoto配对拉流失败:", filename, imageSettled.reason?.message);
+        return null;
+      }
+      let imageResult = false;
+      let videoResult = false;
+      if (imageSettled.status === "fulfilled" && videoSettled.status === "fulfilled") {
+        const pair = pairAppleLivePhoto(
+          new Uint8Array(await imageSettled.value.arrayBuffer()),
+          new Uint8Array(await videoSettled.value.arrayBuffer())
+        );
+        const videoFilename2 = `${filename.replace(/\.[^.]+$/, "")}.mov`;
+        imageResult = await downloadBlob(new Blob([pair.jpeg], { type: "image/jpeg" }), filename);
+        videoResult = await downloadBlob(new Blob([pair.video], { type: "video/quicktime" }), videoFilename2);
+        return { image: imageResult, video: videoResult };
+      }
+      const videoFilename = `${filename.replace(/\.[^.]+$/, "")}.mov`;
+      if (imageSettled.status === "fulfilled") {
+        imageResult = await downloadBlob(imageSettled.value, filename);
+      } else {
+        log("LivePhoto图片拉流失败:", filename, imageSettled.reason?.message);
+      }
+      if (videoSettled.status === "fulfilled") {
+        videoResult = await downloadBlob(videoSettled.value, videoFilename);
+      } else {
+        log("LivePhoto视频拉流失败:", videoFilename, videoSettled.reason?.message);
+      }
+      return { image: imageResult, video: videoResult };
+    }
     async function downloadMediaItems(mediaItems, postId) {
       if (!mediaItems || mediaItems.length === 0) {
         if (ui2 && typeof ui2.showToast === "function") {
@@ -3227,6 +3905,21 @@ OR OTHER DEALINGS IN THE SOFTWARE.
             await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
           }
         };
+        if (job.livePhotoVideoUrl && job.livePhotoPair) {
+          const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
+          for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false, false]) {
+            if (outcome) {
+              successCount++;
+              if (outcome === "started") {
+                handedOffCount++;
+              }
+            } else {
+              failedCount++;
+            }
+          }
+          await delayBetweenJobs();
+          continue;
+        }
         if (job.livePhotoVideoUrl) {
           const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
           if (merged) {
@@ -3237,27 +3930,18 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           } else {
             failedLivePhotoMergeCount++;
             log("LivePhoto合并失败，回退为分别下载:", job.filename);
-            const videoFilename = `${job.filename.replace(/\.[a-z0-9]+$/i, "")}_live${getFileExtensionFromUrl(job.livePhotoVideoUrl, ".mov")}`;
-            const imageResult = await downloadImage(job.url, job.filename);
-            if (imageResult) {
-              successCount++;
-              livePhotoFallbackSavedCount++;
-              if (imageResult === "started") {
-                handedOffCount++;
+            const baseName = job.filename.replace(/(\.MP)?\.[a-z0-9]+$/i, "") || job.filename;
+            const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, `${baseName}.jpg`);
+            for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false, false]) {
+              if (outcome) {
+                successCount++;
+                livePhotoFallbackSavedCount++;
+                if (outcome === "started") {
+                  handedOffCount++;
+                }
+              } else {
+                failedCount++;
               }
-            } else {
-              failedCount++;
-            }
-            await delayBetweenJobs();
-            const videoResult = await downloadImage(job.livePhotoVideoUrl, videoFilename);
-            if (videoResult) {
-              successCount++;
-              livePhotoFallbackSavedCount++;
-              if (videoResult === "started") {
-                handedOffCount++;
-              }
-            } else {
-              failedCount++;
             }
           }
           await delayBetweenJobs();

@@ -25,7 +25,7 @@ A:
 - 微博：`weibo_{帖子ID}_{序号}.jpg`
 - 微博 GIF：`weibo_{帖子ID}_{序号}.gif`
 - 微博 live photo（默认合并）：`weibo_{帖子ID}_{序号}.MP.jpg`（单文件 Motion Photo）
-- 微博 live photo（关闭合并）：`weibo_{帖子ID}_{序号}.jpg` + `weibo_{帖子ID}_{序号}_live.mov`
+- 微博 live photo（关闭合并）：`weibo_{帖子ID}_{序号}.jpg` + `weibo_{帖子ID}_{序号}.mov`（同名配对，注入 Apple Live Photo 元数据）
 - 微博视频：`weibo_{帖子ID}_{序号}.mp4`
 - X 图片：`x_{帖子ID}_{序号}.jpg`
 - X GIF：`x_{帖子ID}_{序号}.gif`（关闭自动转换时为 `.mp4`）
@@ -37,4 +37,4 @@ A: 这是本机下载链路的问题，不是文件损坏：脚本传入了正�
 
 ### Q: 下载的微博 Live Photo 是什么文件？为什么打开不动态？
 
-A: 默认开启“微博LivePhoto自动合并”时，Live Photo 会被合并为单文件 Motion Photo（`.MP.jpg`，内嵌原视频，按 OPPO/Google 真机格式对齐）。Windows 11 照片（2023+）、Google 相册、OPPO/一加（ColorOS 14+）、小米 HyperOS 相册、飞牛相册（v0.8.45+）等支持的查看器会显示动态效果；Mac 预览、iOS 相册因 Apple 采用成对文件机制，不识别任何单文件动态照片，只显示静态封面（这是平台限制）；三星相册因依赖私有 SEFT 尾部、与 OPPO 布局互斥，暂不支持。如果想让所有软件都拿到原始文件，可在油猴菜单关闭“微博LivePhoto自动合并”，改为分别下载 `.jpg` 与 `.mov`。合并失败时脚本会自动回退为分别保存两个文件。另外注意：微信/QQ/部分云盘传输会重压缩图片并剥掉动态照片元数据，请用 USB 或“原图”方式传输。
+A: 默认开启“微博LivePhoto自动合并”时，Live Photo 会被合并为单文件 Motion Photo（`.MP.jpg`，内嵌原视频，按 OPPO/Google 真机格式对齐）。Windows 11 照片（2023+）、Google 相册、OPPO/一加（ColorOS 14+）、小米 HyperOS 相册、飞牛相册（v0.8.45+）等支持的查看器会显示动态效果；Mac 预览、iOS 相册因 Apple 采用成对文件机制，不识别任何单文件动态照片，只显示静态封面（这是平台限制）；三星相册因依赖私有 SEFT 尾部、与 OPPO 布局互斥，暂不支持。如果主要在 Apple 设备上看动态效果，可在油猴菜单关闭“微博LivePhoto自动合并”，脚本会保存**同名**的 `.jpg` 与 `.mov` 并注入 Apple Live Photo 配对元数据——把两个文件**一起**导入 iPhone/macOS 照片 App（AirDrop 整个文件夹、USB 或导入工具），即可作为 Live Photo 播放；只传其中一个文件或重命名任一侧都会破坏配对。合并失败时脚本会自动回退为这种配对保存方式。另外注意：微信/QQ/部分云盘传输会重压缩图片并剥掉动态照片元数据，请用 USB 或“原图”方式传输。

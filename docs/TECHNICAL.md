@@ -37,7 +37,7 @@
 
 ## 微博 Live Photo 合并（JPEG + MOV → 单文件 Motion Photo）
 
-「微博LivePhoto自动合并」开启时，脚本在浏览器本地把 Live Photo 的封面图与 `.mov` 视频合并为单文件 Motion Photo，命名为 `weibo_帖子ID_序号.MP.jpg`（遵循 Google Motion Photo 规范建议的 `*.MP.jpg` 模式），全程纯字节拼接，不重新编码、不转码。关闭该设置时回退为分别保存 `.jpg` 与 `_live.mov`；合并过程中任何一步失败（拉流失败、视频不是 ISO-BMFF 容器等）也会自动回退为分别保存，并在 toast 中提示。
+「微博LivePhoto自动合并」开启时，脚本在浏览器本地把 Live Photo 的封面图与 `.mov` 视频合并为单文件 Motion Photo，命名为 `weibo_帖子ID_序号.MP.jpg`（遵循 Google Motion Photo 规范建议的 `*.MP.jpg` 模式），全程纯字节拼接，不重新编码、不转码。关闭该设置时改为保存 **Apple Live Photo 配对文件**（同名 `.jpg` + `.mov`，见下节）；合并过程中任何一步失败（拉流失败、视频不是 ISO-BMFF 容器等）也会自动回退为配对保存，并在 toast 中提示。
 
 **输出文件布局**（实现位于 `src/livephoto.ts` 的 `buildMotionPhoto`，与用户 ColorOS 16 真机文件逐字节对照对齐）：
 
@@ -76,7 +76,16 @@ XMP 字段与 ColorOS 16 真机文件对齐（无 xpacket 包裹、无 MicroVide
 | 飞牛相册（fnOS v0.8.45+） | ✓ 理论兼容 | 官方支持安卓动态照片（华为/小米/OPPO/荣耀/三星/魅族），按 exiftool 路线解析 XMP |
 | 小米（HyperOS） | ✓ 理论兼容 | 官方文档：按 XMP 的 MotionPhoto 关键字索引；仅 HyperOS 支持第三方合成产物 |
 | 三星相册 | ✗ | 依赖 SEFT trailer，与 OPPO 布局互斥，本产物不写 |
-| macOS 预览/Quick Look、iOS 相册 | ✗ | Apple 为"成对文件 + ContentIdentifier"机制，不识别任何单文件动态照片，仅显示静态封面 |
+| macOS 预览/Quick Look、iOS 相册 | ✗（合并产物）✓（配对文件） | 单文件动态照片为平台限制；关闭合并时的同名 jpg+mov 配对文件一起导入照片 App 可作为 Live Photo 播放 |
 | IrfanView、ACDSee、Honeyview | ✗ | 按静态图处理；ImageGlass 9.3+ 可识别 |
 
 **传输与使用注意**：合并产物依赖 JPEG 内的 XMP/EXIF/MPF 元数据，微信普通图片、QQ、部分云盘传输会重压缩并剥掉这些段导致动态效果丢失——请使用 USB、"原图"方式或可直接保存的传输通道；落盘后等待相册重新扫描索引。
+
+## Apple Live Photo 配对保存（关闭合并 / 合并失败回退）
+
+Apple 生态（iOS 相册、macOS 照片）不识别任何单文件动态照片，其 Live Photo 是**成对文件机制**：同名 `.jpg`/`.HEIC` 与 `.mov` 同时导入，且两侧携带**同一个 16 字节 ContentIdentifier UUID** 时，照片 App 才会把它们关联为一个 Live Photo。实现位于 `src/apple-pair.ts`（`pairAppleLivePhoto`）。
+
+- **jpg 侧**：EXIF MakerNote（maker `"Apple iOS"`）中 tag `0x0011`（ContentIdentifier）写入 UUID 二进制值；已有 Apple MakerNote 时原位改写，没有则按 Apple 官方布局构造（header + MakerIFD），注入方式与合并路径的 UserComment 注入同为「条目表增长 + 表后偏移平移」；无 EXIF 或结构异常时静默放弃（该侧缺配对标记，不阻断下载）。配对 UUID 优先复用 jpg 已有 ContentIdentifier（微博转存图常保留 iPhone 原始值），缺失时用 `crypto.randomUUID()` 现场生成。
+- **mov 侧**：向 `moov/udta/meta(QuickTime 风格, hdlr='mdta')/keys+ilst` 注入 `com.apple.quicktime.content.identifier`（16 字节 binary data）与 `com.apple.quicktime.still-image-time`（int8 = -1，配合指示帧）；缺 `udta`/`meta`/`keys`/`ilst` 时逐级构造，祖先 box 尺寸全部重建。
+- **stco/co64 修复**：微博在线视频是 faststart 布局（moov 在 mdat 之前），moov 内插入元数据会使 mdat 及其后数据整体后移，必须给 moov 内全部 `stco`/`co64` 的 chunk 绝对偏移加上 delta，否则视频索引失效（与 qt-faststart 同思路）；box 出现 `size=1`（64 位 largesize）等无法安全重建的结构时放弃注入、保留原始视频。
+- **文件命名**：配对要求两侧同名（仅扩展名不同），关闭合并时保存为 `weibo_帖子ID_序号.jpg` + `weibo_帖子ID_序号.mov`（不再有 `_live` 后缀）；两个文件需**一起**导入照片 App（AirDrop 整个文件夹 / USB 同步 / 导入工具）才能配对成功，单传 jpg 或重命名任一侧都会破坏配对。

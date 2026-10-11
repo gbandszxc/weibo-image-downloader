@@ -361,7 +361,7 @@ test("Weibo LivePhoto auto merge defaults on and produces a single Motion Photo 
     ]);
 });
 
-test("disabled LivePhoto auto merge keeps the legacy image+video job pair", () => {
+test("disabled LivePhoto auto merge yields a single same-name jpg+mov pair job", () => {
     const items = asMediaItems([
         {
             kind: "livephoto",
@@ -375,8 +375,13 @@ test("disabled LivePhoto auto merge keeps the legacy image+video job pair", () =
         configOverrides: { LIVEPHOTO_AUTO_MERGE: false }
     });
     assert.deepEqual(utils.buildMediaDownloadJobs(items, "77"), [
-        { type: "image", url: items[0].imageUrl, filename: "weibo_77_1.jpg" },
-        { type: "video", url: items[0].videoUrl, filename: "weibo_77_1_live.mov" }
+        {
+            type: "image",
+            url: items[0].imageUrl,
+            filename: "weibo_77_1.jpg",
+            livePhotoPair: true,
+            livePhotoVideoUrl: items[0].videoUrl
+        }
     ]);
 });
 
@@ -414,7 +419,7 @@ test("LivePhoto merge downloads fetch image and video and save a single Motion P
     assert.equal(toastMessages[toastMessages.length - 1], "已发起 1 个文件的下载；请查看浏览器下载列表");
 });
 
-test("failed LivePhoto merge falls back to separate image and video downloads", async () => {
+test("failed LivePhoto merge falls back to a same-name jpg+mov pair download", async () => {
     const { utils, toastMessages, clicks } = createTestUtils({
         configOverrides: { DELAY_MS: 0 },
         gmXmlhttpRequest(details) {
@@ -436,8 +441,8 @@ test("failed LivePhoto merge falls back to separate image and video downloads", 
         }
     ]), "77");
     assert.deepEqual(clicks.map((click) => click.download), [
-        "weibo_77_1.MP.jpg",
-        "weibo_77_1.MP_live.mov"
+        "weibo_77_1.jpg",
+        "weibo_77_1.mov"
     ]);
     assert.match(toastMessages[toastMessages.length - 1], /已发起 2 个文件的下载；请查看浏览器下载列表；部分LivePhoto未能合并，已分别保存图片与视频$/);
 });

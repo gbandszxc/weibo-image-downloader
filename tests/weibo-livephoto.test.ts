@@ -712,18 +712,17 @@ test("live photo expands to a merged Motion Photo job by default and jpg+mov pai
         }
     });
     const legacyJobs = legacyUtils.buildMediaDownloadJobs(mediaItems, "5286555824429155");
-    assert.equal(legacyJobs.length, 6);
+    // 关闭合并：每个 LivePhoto 收敛为一个 job（图片文件名 + 配对视频地址），保存为同名 jpg+mov
+    assert.equal(legacyJobs.length, 3);
     assert.deepEqual(
         legacyJobs.map((job) => job.filename),
         [
             "weibo_5286555824429155_1.jpg",
-            "weibo_5286555824429155_1_live.mov",
             "weibo_5286555824429155_2.jpg",
-            "weibo_5286555824429155_2_live.mov",
-            "weibo_5286555824429155_3.jpg",
-            "weibo_5286555824429155_3_live.mov"
+            "weibo_5286555824429155_3.jpg"
         ]
     );
+    assert.ok(legacyJobs.every((job) => job.livePhotoPair && job.livePhotoVideoUrl));
 });
 
 test("retweeted status resolves original media order", () => {

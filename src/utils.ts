@@ -2,6 +2,7 @@ import { createPlatformAdapter } from "./platforms/index.ts";
 import type { PlatformAdapter } from "./platforms/index.ts";
 import { convertXVideoToGif } from "./x-gif.ts";
 import { buildMotionPhoto } from "./livephoto.ts";
+import { pairAppleLivePhoto } from "./apple-pair.ts";
 import type { WeiboMediaItem, WeiboPlatformWindow } from "./platforms/weibo.ts";
 import type { XMediaItem, XPlatformWindowRef } from "./platforms/x.ts";
 import type { GifWindowLike } from "./x-gif-workers.ts";
@@ -65,6 +66,8 @@ export interface MediaDownloadJob {
     convertToGif?: boolean;
     /** 开启 LivePhoto 自动合并时：与图片合并为单文件 Motion Photo 的视频地址 */
     livePhotoVideoUrl?: string;
+    /** 关闭自动合并时：与 livePhotoVideoUrl 分别保存并注入 Apple Live Photo 配对元数据（同名 jpg + mov） */
+    livePhotoPair?: boolean;
 }
 
 export interface DownloadResult {
@@ -173,10 +176,12 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             // 平台回退 postId 可能自带同名前缀（如 weibo_1791...），避免拼出 weibo_weibo_...
             const normalizedPostId = postId.startsWith(`${platform}_`) ? postId.slice(platform.length + 1) : postId;
             const baseName = `${platform}_${normalizedPostId}_${index + 1}`;
-            // 微博 LivePhoto：开启合并时输出单文件 Motion Photo（JPEG 内嵌视频），否则保存图片+视频两个文件
-            const mergeLivePhoto = platform === "weibo"
+            // 微博 LivePhoto：开启合并时输出单文件 Motion Photo（JPEG 内嵌视频），
+            // 关闭合并时输出 Apple Live Photo 配对文件（jpg + mov 同名、携带同一 ContentIdentifier）
+            const isWeiboLivePhoto = platform === "weibo"
                 && item.kind === "livephoto"
-                && !!item.videoUrl
+                && !!item.videoUrl;
+            const mergeLivePhoto = isWeiboLivePhoto
                 && !!config.LIVEPHOTO_AUTO_MERGE
                 && getFileExtensionFromUrl(item.imageUrl, ".jpg") === ".jpg";
 
@@ -195,11 +200,15 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                     job.livePhotoVideoUrl = item.videoUrl!;
                     // 官方 Motion Photo 规范建议产物命名为 *.MP.jpg
                     job.filename = `${baseName}.MP.jpg`;
+                } else if (isWeiboLivePhoto) {
+                    // Apple 配对要求 jpg 与 mov 同名（仅扩展名不同），故不再加 _live 后缀
+                    job.livePhotoVideoUrl = item.videoUrl!;
+                    job.livePhotoPair = true;
                 }
                 jobs.push(job);
             }
 
-            if (item.videoUrl && !mergeLivePhoto) {
+            if (item.videoUrl && !mergeLivePhoto && !isWeiboLivePhoto) {
                 const isStandaloneVideo = item.kind === "video";
                 jobs.push({
                     type: "video",
@@ -470,6 +479,57 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
     }
 
+    /** 配对保存结果：图片/视频各自的成功状态（false 表示该侧保存失败） */
+    interface PairedLivePhotoResult {
+        image: boolean | "started";
+        video: boolean | "started";
+    }
+
+    /**
+     * 将微博 LivePhoto 的图片与视频注入 Apple 配对元数据后按同名两文件保存
+     * （图片用传入的 filename，视频取同主干 + .mov）。任一侧注入失败只影响该侧的
+     * 配对标记，不会中断保存；单侧拉流失败时仍保存另一侧（无配对标记），
+     * 双侧都失败返回 null，由调用方按两个文件失败计。
+     */
+    async function downloadPairedLivePhoto(imageUrl: string, videoUrl: string, filename: string): Promise<PairedLivePhotoResult | null> {
+        const [imageSettled, videoSettled] = await Promise.allSettled([
+            fetchMediaBlob(imageUrl),
+            fetchMediaBlob(videoUrl)
+        ]);
+        if (imageSettled.status === "rejected" && videoSettled.status === "rejected") {
+            log("LivePhoto配对拉流失败:", filename, (imageSettled.reason as Error)?.message);
+            return null;
+        }
+
+        let imageResult: boolean | "started" = false;
+        let videoResult: boolean | "started" = false;
+        if (imageSettled.status === "fulfilled" && videoSettled.status === "fulfilled") {
+            // 现场配对：优先复用图片 EXIF 中已有的 Apple ContentIdentifier，缺失时生成新 UUID
+            const pair = pairAppleLivePhoto(
+                new Uint8Array(await imageSettled.value.arrayBuffer()),
+                new Uint8Array(await videoSettled.value.arrayBuffer())
+            );
+            const videoFilename = `${filename.replace(/\.[^.]+$/, "")}.mov`;
+            imageResult = await downloadBlob(new Blob([pair.jpeg as BlobPart], { type: "image/jpeg" }), filename);
+            videoResult = await downloadBlob(new Blob([pair.video as BlobPart], { type: "video/quicktime" }), videoFilename);
+            return { image: imageResult, video: videoResult };
+        }
+
+        // 单侧拉流失败：能下载的一侧按原始字节保存（缺少配对标记，但文件不丢）
+        const videoFilename = `${filename.replace(/\.[^.]+$/, "")}.mov`;
+        if (imageSettled.status === "fulfilled") {
+            imageResult = await downloadBlob(imageSettled.value, filename);
+        } else {
+            log("LivePhoto图片拉流失败:", filename, (imageSettled.reason as Error)?.message);
+        }
+        if (videoSettled.status === "fulfilled") {
+            videoResult = await downloadBlob(videoSettled.value, videoFilename);
+        } else {
+            log("LivePhoto视频拉流失败:", videoFilename, (videoSettled.reason as Error)?.message);
+        }
+        return { image: imageResult, video: videoResult };
+    }
+
     async function downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string): Promise<DownloadResult> {
         if (!mediaItems || mediaItems.length === 0) {
             if (ui && typeof ui.showToast === "function") {
@@ -504,6 +564,23 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                 }
             };
 
+            if (job.livePhotoVideoUrl && job.livePhotoPair) {
+                // 关闭合并：分开保存并注入 Apple Live Photo 配对元数据（jpg + mov 同名）
+                const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
+                for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false as const, false as const]) {
+                    if (outcome) {
+                        successCount++;
+                        if (outcome === "started") {
+                            handedOffCount++;
+                        }
+                    } else {
+                        failedCount++;
+                    }
+                }
+                await delayBetweenJobs();
+                continue;
+            }
+
             if (job.livePhotoVideoUrl) {
                 const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
                 if (merged) {
@@ -512,30 +589,21 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                         handedOffCount++;
                     }
                 } else {
-                    // 合并失败：回退为分别保存图片与视频（与关闭自动合并时的产物一致）
+                    // 合并失败：回退为 Apple 配对方式分别保存同名 jpg 与 mov（去掉 .MP/_live 标记）
                     failedLivePhotoMergeCount++;
                     log("LivePhoto合并失败，回退为分别下载:", job.filename);
-                    const videoFilename = `${job.filename.replace(/\.[a-z0-9]+$/i, "")}_live${getFileExtensionFromUrl(job.livePhotoVideoUrl, ".mov")}`;
-                    const imageResult = await downloadImage(job.url, job.filename);
-                    if (imageResult) {
-                        successCount++;
-                        livePhotoFallbackSavedCount++;
-                        if (imageResult === "started") {
-                            handedOffCount++;
+                    const baseName = job.filename.replace(/(\.MP)?\.[a-z0-9]+$/i, "") || job.filename;
+                    const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, `${baseName}.jpg`);
+                    for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false as const, false as const]) {
+                        if (outcome) {
+                            successCount++;
+                            livePhotoFallbackSavedCount++;
+                            if (outcome === "started") {
+                                handedOffCount++;
+                            }
+                        } else {
+                            failedCount++;
                         }
-                    } else {
-                        failedCount++;
-                    }
-                    await delayBetweenJobs();
-                    const videoResult = await downloadImage(job.livePhotoVideoUrl, videoFilename);
-                    if (videoResult) {
-                        successCount++;
-                        livePhotoFallbackSavedCount++;
-                        if (videoResult === "started") {
-                            handedOffCount++;
-                        }
-                    } else {
-                        failedCount++;
                     }
                 }
                 await delayBetweenJobs();
