@@ -13,7 +13,7 @@ bun run test:placement
 bun run verify:dist
 ```
 
-- `bun run typecheck` 使用 `tsc --noEmit` 校验类型；`bun run test` 通过 `node --experimental-strip-types` 直接运行，无需预编译
+- `bun run typecheck` 使用 TypeScript 7（Go 原生编译器，包名 `typescript@7`，bin 仍为 `tsc`）执行 `tsc --noEmit` 校验类型；TS7 起 `types` 默认为空数组，需在 `tsconfig.json` 显式声明依赖的 `@types` 包；`bun run test` 通过 `node --experimental-strip-types` 直接运行，无需预编译
 
 ## 目录与测试结构
 

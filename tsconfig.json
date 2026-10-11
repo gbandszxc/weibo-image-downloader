@@ -6,6 +6,9 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
 
+    /* TS7 起 types 默认为 []，不再自动引入 node_modules/@types，显式列出实际依赖 */
+    "types": ["node", "tampermonkey"],
+
     /* 类型检查强度 */
     "strict": true,
     "noUnusedLocals": true,

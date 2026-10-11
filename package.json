@@ -16,7 +16,7 @@
     "@types/tampermonkey": "5.5.0",
     "esbuild": "^0.25.3",
     "omggif": "1.0.10",
-    "typescript": "^5"
+    "typescript": "7"
   },
   "dependencies": {
     "gifenc": "1.0.3"
