@@ -99,5 +99,6 @@
 | --- | --- |
 | [更新日志](docs/CHANGELOG.md) | 各版本变更记录 |
 | [技术细节](docs/TECHNICAL.md) | 图片 URL 转换、下载策略、X 动图 GIF 转换实现与性能验证 |
+| [LivePhoto 格式逆向与实现](docs/LIVEPHOTO.md) | 动态照片各家机制、真机逆向结论、A/B 实测证据与适配指南 |
 | [常见问题](docs/FAQ.md) | 安装与下载的常见问题排查 |
 | [开发指南](docs/DEVELOPMENT.md) | 构建、测试与发布流程说明 |

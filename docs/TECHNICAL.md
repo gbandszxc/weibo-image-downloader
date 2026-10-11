@@ -37,6 +37,8 @@
 
 ## 微博 Live Photo 合并（JPEG + MOV → 单文件 Motion Photo）
 
+> 本文保留项目集成视角的功能说明；格式知识、真机逆向全程、A/B 实测证据与平台适配方法详见 [LivePhoto 格式逆向与实现](LIVEPHOTO.md)。
+
 「微博LivePhoto自动合并」开启时，脚本在浏览器本地把 Live Photo 的封面图与 `.mov` 视频合并为单文件 Motion Photo，命名为 `weibo_帖子ID_序号.MP.jpg`（遵循 Google Motion Photo 规范建议的 `*.MP.jpg` 模式），全程纯字节拼接，不重新编码、不转码。关闭该设置时改为保存 **Apple Live Photo 配对文件**（同名 `.jpg` + `.mov`，见下节）；合并过程中任何一步失败（拉流失败、视频不是 ISO-BMFF 容器等）也会自动回退为配对保存，并在 toast 中提示。
 
 **输出文件布局**（实现位于 `src/livephoto.ts` 的 `buildMotionPhoto`，与用户 ColorOS 16 真机文件逐字节对照对齐，并经 A/B 变体真机实测确认）：
