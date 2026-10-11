@@ -11,3 +11,5 @@ Thumbs.db
 .worktrees/
 
 .playwright-cli/
+.zcode/
+.zcodeignore
