@@ -37,7 +37,12 @@ function element(tagName) {
     };
 }
 
-function harness({ resolveMedia = (_post, items) => items, download = async () => ({ successCount: 1, failedCount: 0, handedOffCount: 0 }) } = {}) {
+function harness({
+    resolveMedia = (_post, items) => items,
+    download = async () => ({ successCount: 1, failedCount: 0, handedOffCount: 0 }),
+    shouldResolveEmptyMediaItems = () => false,
+    configOverrides = {}
+} = {}) {
     const calls = [];
     const document = {
         head: element("head"), body: element("body"),
@@ -48,7 +53,7 @@ function harness({ resolveMedia = (_post, items) => items, download = async () =
     };
     const media = [{ kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/mock.mp4" }];
     const ui = createUi({
-        config: CONFIG, documentRef: document, windowRef: {}, addStyle() {},
+        config: { ...CONFIG, ...configOverrides }, documentRef: document, windowRef: {}, addStyle() {},
         utils: {
             log() {},
             async downloadMediaItems(items, id) { calls.push({ items, id }); return download(items, id); },
@@ -59,6 +64,7 @@ function harness({ resolveMedia = (_post, items) => items, download = async () =
                     getPostId(post) { return post.id; },
                     getPostSelectors() { return [".post"]; },
                     shouldSkipPost() { return false; },
+                    shouldResolveEmptyMediaItems,
                     insertDownloadButton({ post, btn }) { post.appendChild(btn); return true; }
                 };
             }
@@ -187,4 +193,93 @@ test("keyboard activation starts one download and pointer-generated clicks do no
     pending.resolve({ successCount: 1, failedCount: 0, handedOffCount: 0 });
     await setImmediate();
     assert.equal(button.innerHTML, "完成");
+});
+
+test("buttons re-resolve when media mounts after injection and update the count", async () => {
+    let resolutions = 0;
+    const h = harness({ resolveMedia: (_post, items) => { resolutions++; return items; } });
+    const { button } = h.addPost("1");
+    await setImmediate();
+    assert.equal(button.innerHTML, "↓1");
+
+    h.media.push({ kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/second.mp4" });
+    h.ui.injectDownloadButtons();
+    await setImmediate();
+
+    assert.equal(resolutions, 2);
+    assert.equal(button.innerHTML, "↓2");
+});
+
+test("stable media avoids repeated platform resolution across injections", async () => {
+    let resolutions = 0;
+    const h = harness({ resolveMedia: (_post, items) => { resolutions++; return items; } });
+    h.addPost("1");
+    await setImmediate();
+
+    h.ui.injectDownloadButtons();
+    h.ui.injectDownloadButtons();
+    await setImmediate();
+
+    assert.equal(resolutions, 1);
+});
+
+test("mounting video elements re-resolve posts whose DOM snapshot did not change", async () => {
+    let videoIndicatorMounted = false;
+    let resolutions = 0;
+    const h = harness({
+        shouldResolveEmptyMediaItems: () => videoIndicatorMounted,
+        resolveMedia: (_post, items) => { resolutions++; return items; }
+    });
+    const { button } = h.addPost("1");
+    await setImmediate();
+    assert.equal(button.innerHTML, "↓1");
+    assert.equal(resolutions, 1);
+
+    videoIndicatorMounted = true;
+    h.ui.injectDownloadButtons();
+    await setImmediate();
+
+    assert.equal(resolutions, 2);
+});
+
+test("downloading rescans media so late-mounted items are included", async () => {
+    const h = harness();
+    const { button } = h.addPost("1");
+    await setImmediate();
+
+    h.media.push({ kind: "image", imageUrl: "https://pbs.twimg.com/media/Late?name=orig" });
+    await button.fire("pointerup");
+
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].items.length, 2);
+});
+
+test("failed resolutions back off per fingerprint and retry after the cooldown", async () => {
+    let shouldFail = true;
+    let resolutions = 0;
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const h = harness({
+        configOverrides: { MEDIA_RESOLVE_RETRY_COOLDOWN_MS: 20 },
+        resolveMedia: (_post, items) => {
+            resolutions++;
+            return shouldFail ? Promise.reject(new Error("rate limited")) : items;
+        }
+    });
+    const { button } = h.addPost("1");
+    await setImmediate();
+    assert.equal(resolutions, 1);
+
+    h.ui.injectDownloadButtons();
+    h.ui.injectDownloadButtons();
+    await setImmediate();
+    assert.equal(resolutions, 1);
+    assert.equal(button.innerHTML, "↓1");
+
+    await sleep(30);
+    shouldFail = false;
+    h.ui.injectDownloadButtons();
+    await setImmediate();
+
+    assert.equal(resolutions, 2);
+    assert.equal(button.innerHTML, "↓1");
 });

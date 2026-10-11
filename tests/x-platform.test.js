@@ -387,33 +387,167 @@ test("video-enabled x platform resolves quoted photos when their DOM has not loa
     assert.equal(mediaItems[1].videoUrl, "https://video.twimg.com/amplify_video/demo/832.mp4");
 });
 
-test("video-enabled x platform skips API fetch when DOM already has video items", async () => {
-    let fetchCalled = false;
+function createStatusPostWithVideo() {
+    return {
+        querySelectorAll(selector) {
+            if (selector === "time") {
+                return [{
+                    closest(sel) {
+                        return sel.includes("/status/")
+                            ? { href: "https://x.com/Enorez2/status/2108593257039221196" }
+                            : null;
+                    }
+                }];
+            }
+            return [];
+        },
+        querySelector(selector) {
+            return selector.includes("previewInterstitial") ? {} : null;
+        }
+    };
+}
+
+function createVideoDomItem(url) {
+    return {
+        id: "dom-video-1",
+        kind: "video",
+        label: "视频 1",
+        imageUrl: null,
+        videoUrl: url,
+        imageExt: ".jpg",
+        videoExt: ".mp4"
+    };
+}
+
+function createXPlatformForResolve({ fetchImpl }) {
+    let fetchCount = 0;
     const platform = createXPlatform({
-        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
-        fetchRef: async () => {
+        config: { ...CONFIG, DEBUG: false, ENABLE_VIDEO_DOWNLOAD: true },
+        windowRef: {
+            location: {
+                hostname: "x.com",
+                pathname: "/Enorez2/status/2108593257039221196",
+                href: "https://x.com/Enorez2/status/2108593257039221196"
+            }
+        },
+        log() {},
+        fetchRef: async (...args) => {
+            fetchCount++;
+            return fetchImpl(...args);
+        },
+        getFileExtensionFromUrl(url, fallback = ".jpg") {
+            const match = url.split("?")[0].match(/(\.[a-z0-9]+)$/i);
+            return match ? match[1].toLowerCase() : fallback;
+        }
+    });
+    return { platform, getFetchCount: () => fetchCount };
+}
+
+test("video-enabled x platform corrects DOM video kind to GIF when API reports animated_gif", async () => {
+    const { platform, getFetchCount } = createXPlatformForResolve({
+        fetchImpl: async () => ({
+            ok: true,
+            json: async () => ({
+                data: {
+                    tweetResult: {
+                        result: {
+                            legacy: {
+                                extended_entities: {
+                                    media: [{
+                                        id_str: "gif-media-1",
+                                        type: "animated_gif",
+                                        video_info: {
+                                            variants: [{
+                                                bitrate: 1280000,
+                                                content_type: "video/mp4",
+                                                url: "https://video.twimg.com/tweet_video/HUM5447X0AIfFa3.mp4"
+                                            }]
+                                        }
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        })
+    });
+
+    const mediaItems = await platform.resolvePostMediaItems(
+        createStatusPostWithVideo(),
+        [createVideoDomItem("https://video.twimg.com/tweet_video/HUM5447X0AIfFa3.mp4?tag=12")]
+    );
+
+    assert.equal(getFetchCount(), 1);
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "gif");
+    assert.equal(mediaItems[0].imageUrl, "https://video.twimg.com/tweet_video/HUM5447X0AIfFa3.mp4");
+    assert.equal(mediaItems[0].videoUrl, null);
+});
+
+test("video-enabled x platform keeps DOM video without duplicating other API variants", async () => {
+    const { platform, getFetchCount } = createXPlatformForResolve({
+        fetchImpl: async () => ({
+            ok: true,
+            json: async () => ({
+                data: {
+                    tweetResult: {
+                        result: {
+                            legacy: {
+                                extended_entities: {
+                                    media: [{
+                                        id_str: "video-media-1",
+                                        type: "video",
+                                        video_info: {
+                                            variants: [{
+                                                bitrate: 2176000,
+                                                content_type: "video/mp4",
+                                                url: "https://video.twimg.com/amplify_video/demo/720.mp4"
+                                            }]
+                                        }
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        })
+    });
+
+    const mediaItems = await platform.resolvePostMediaItems(
+        createStatusPostWithVideo(),
+        [createVideoDomItem("https://video.twimg.com/amplify_video/demo/480.mp4")]
+    );
+
+    assert.equal(getFetchCount(), 1);
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/demo/480.mp4");
+});
+
+test("video-enabled x platform skips API fetch when DOM already found a GIF badge", async () => {
+    let fetchCalled = false;
+    const { platform } = createXPlatformForResolve({
+        fetchImpl: async () => {
             fetchCalled = true;
             throw new Error("fetch should not be called");
         }
     });
-    const post = {
-        querySelector() {
-            return {};
-        }
-    };
-    const videoItem = {
-        id: "v1",
-        kind: "video",
-        label: "视频 1",
-        imageUrl: null,
-        videoUrl: "https://video.twimg.com/amplify_video/demo/direct.mp4",
-        imageExt: ".jpg",
-        videoExt: ".mp4"
+    const gifItem = {
+        id: "dom-gif-1",
+        kind: "gif",
+        label: "GIF 1",
+        imageUrl: "https://video.twimg.com/tweet_video/HUM5447X0AIfFa3.mp4",
+        videoUrl: null,
+        imageExt: ".mp4",
+        videoExt: ".mov"
     };
 
-    const mediaItems = await platform.resolvePostMediaItems(post, [videoItem]);
+    const mediaItems = await platform.resolvePostMediaItems(createStatusPostWithVideo(), [gifItem]);
 
     assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "gif");
     assert.equal(fetchCalled, false);
 });
 

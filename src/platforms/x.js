@@ -315,19 +315,30 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             return fallbackItems;
         }
 
-        // DOM 已解析出视频/GIF 直链，无需再调接口
-        if (fallbackItems.some((item) => item.kind === "video" || item.kind === "gif")) {
-            return fallbackItems;
-        }
-
-        // 无视频迹象（封面/播放器）的帖子不需要接口
-        if (!shouldResolveEmptyMediaItems(postContainer)) {
+        // DOM 徽标已明确是 GIF（或帖子无视频迹象）时无需再调接口
+        if (fallbackItems.some((item) => item.kind === "gif") || !shouldResolveEmptyMediaItems(postContainer)) {
             return fallbackItems;
         }
 
         return getXMediaItemsById(statusId).then((mediaItems) => {
             if (mediaItems.length === 0) {
                 return fallbackItems;
+            }
+
+            const apiByUrl = new Map(
+                mediaItems.map((item) => [(item.videoUrl || item.imageUrl || "").split("?")[0], item])
+            );
+
+            // DOM 已解析出视频直链时仅按 URL 校正 kind：GIF 徽标渲染滞后会被误判成
+            // video 导致直接下载 MP4；不新增接口项，避免同一视频不同码率重复下载。
+            if (fallbackItems.some((item) => item.kind === "video")) {
+                return fallbackItems.map((item) => {
+                    if (item.kind !== "video") {
+                        return item;
+                    }
+                    const apiItem = apiByUrl.get((item.videoUrl || item.imageUrl || "").split("?")[0]);
+                    return apiItem && apiItem.kind === "gif" ? apiItem : item;
+                });
             }
 
             // 混合帖：保留 DOM 图片，附加接口解析出的视频/GIF

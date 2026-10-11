@@ -8,6 +8,7 @@ const SELECTION_LABEL_PREFIXES = {
 export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
     const platform = utils.getPlatformAdapter();
     let resolvedMediaItemsCache = new WeakMap();
+    const resolveFailureCooldowns = new WeakMap();
     const buttonDetails = new WeakMap();
     const postDownloads = new Map();
     const downloadButtonTitle = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
@@ -142,8 +143,9 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         const previousWidth = labelChanged && btn.isConnected ? btn.getBoundingClientRect().width : 0;
         if (labelChanged) {
             details.animation?.cancel();
+            // 标签未变化时不动 DOM，避免触发 MutationObserver 造成注入循环。
+            btn.innerHTML = label;
         }
-        btn.innerHTML = label;
         btn.disabled = busy;
         btn.setAttribute("data-download-state", status);
         btn.setAttribute("aria-busy", String(busy));
@@ -172,18 +174,41 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         });
     }
 
-    async function resolvePostMediaItems(postContainer, initialFallbackItems = null) {
-        if (resolvedMediaItemsCache.has(postContainer)) {
-            return resolvedMediaItemsCache.get(postContainer);
+    // X 详情页等场景媒体是渐进挂载的，只有 DOM 快照变化时才能重新解析，
+    // 否则缓存会让按钮计数和下载内容停留在注入瞬间的状态。
+    function getMediaItemsFingerprint(fallbackItems, postContainer) {
+        const needsApiResolve = typeof platform.shouldResolveEmptyMediaItems === "function" &&
+            platform.shouldResolveEmptyMediaItems(postContainer);
+        const items = Array.isArray(fallbackItems) ? fallbackItems : [];
+        return `${needsApiResolve ? "api" : "dom"}:${items.map((item) =>
+            `${item && item.kind ? item.kind : "image"}:${((item && (item.imageUrl || item.videoUrl)) || "").split("?")[0]}`
+        ).join("|")}`;
+    }
+
+    function resolvePostMediaItems(postContainer, initialFallbackItems = null) {
+        const fallbackItems = initialFallbackItems || getFallbackMediaItems(postContainer);
+        const fingerprint = getMediaItemsFingerprint(fallbackItems, postContainer);
+        const cached = resolvedMediaItemsCache.get(postContainer);
+        if (cached && cached.fingerprint === fingerprint) {
+            return cached.promise;
         }
 
-        const fallbackItems = initialFallbackItems || getFallbackMediaItems(postContainer);
+        const cooldowns = resolveFailureCooldowns.get(postContainer);
+        if (cooldowns && Date.now() - (cooldowns.get(fingerprint) || 0) < config.MEDIA_RESOLVE_RETRY_COOLDOWN_MS) {
+            return Promise.resolve(fallbackItems);
+        }
+
         const mediaPromise = Promise.resolve(platform.resolvePostMediaItems(postContainer, fallbackItems)).catch((error) => {
-            resolvedMediaItemsCache.delete(postContainer);
+            const current = resolvedMediaItemsCache.get(postContainer);
+            if (current?.promise === mediaPromise) {
+                resolvedMediaItemsCache.delete(postContainer);
+                const cooldownMap = resolveFailureCooldowns.get(postContainer) || new Map();
+                cooldownMap.set(fingerprint, Date.now());
+                resolveFailureCooldowns.set(postContainer, cooldownMap);
+            }
             throw error;
         });
-
-        resolvedMediaItemsCache.set(postContainer, mediaPromise);
+        resolvedMediaItemsCache.set(postContainer, { fingerprint, promise: mediaPromise });
         return mediaPromise;
     }
 
@@ -417,7 +442,8 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
             renderDownloadButton(btn);
             refreshPostDownloadState(postId);
             try {
-                let mediaItems = await resolvePostMediaItems(postContainer, initialMediaItems);
+                // 下载时重新扫描 DOM，避免使用按钮创建瞬间的过期媒体列表。
+                let mediaItems = await resolvePostMediaItems(postContainer, getFallbackMediaItems(postContainer));
                 if (selectMedia) {
                     mediaItems = await showImageSelectModal(mediaItems);
                     if (!mediaItems || mediaItems.length === 0) {
@@ -507,13 +533,26 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }) {
         return btn;
     }
 
+    function syncExistingButtonMedia(post, btn) {
+        resolvePostMediaItems(post, getFallbackMediaItems(post)).then((mediaItems) => {
+            if (btn.parentNode) {
+                syncDownloadButtonState(btn, mediaItems);
+            }
+        }).catch((error) => {
+            utils.log("媒体刷新失败:", error.message);
+        });
+    }
+
     function injectDownloadButtons() {
         const selectors = platform.getPostSelectors();
 
         for (const selector of selectors) {
             const posts = documentRef.querySelectorAll(selector);
             posts.forEach((post) => {
-                if (post.querySelector(".weibo-img-download-btn")) {
+                const existingBtn = post.querySelector(".weibo-img-download-btn");
+                if (existingBtn) {
+                    // 媒体元素可能晚于首次注入挂载（如 X 详情页渐进加载），周期性校正计数与内容。
+                    syncExistingButtonMedia(post, existingBtn);
                     return;
                 }
 

@@ -901,6 +901,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
   var CONFIG = {
     DELAY_MS: 300,
     LONG_PRESS_MS: 500,
+    MEDIA_RESOLVE_RETRY_COOLDOWN_MS: 6e4,
     VIDEO_DOWNLOAD_SETTING_KEY: "weiboImageDownloader.enableVideoDownload",
     ENABLE_VIDEO_DOWNLOAD: false,
     X_GIF_AUTO_CONVERT_SETTING_KEY: "weiboImageDownloader.xGifAutoConvert",
@@ -1845,15 +1846,24 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       if (!statusId) {
         return fallbackItems;
       }
-      if (fallbackItems.some((item) => item.kind === "video" || item.kind === "gif")) {
-        return fallbackItems;
-      }
-      if (!shouldResolveEmptyMediaItems(postContainer)) {
+      if (fallbackItems.some((item) => item.kind === "gif") || !shouldResolveEmptyMediaItems(postContainer)) {
         return fallbackItems;
       }
       return getXMediaItemsById(statusId).then((mediaItems) => {
         if (mediaItems.length === 0) {
           return fallbackItems;
+        }
+        const apiByUrl = new Map(
+          mediaItems.map((item) => [(item.videoUrl || item.imageUrl || "").split("?")[0], item])
+        );
+        if (fallbackItems.some((item) => item.kind === "video")) {
+          return fallbackItems.map((item) => {
+            if (item.kind !== "video") {
+              return item;
+            }
+            const apiItem = apiByUrl.get((item.videoUrl || item.imageUrl || "").split("?")[0]);
+            return apiItem && apiItem.kind === "gif" ? apiItem : item;
+          });
         }
         const existingKeys = new Set(
           fallbackItems.map((item) => (item.videoUrl || item.imageUrl || "").split("?")[0])
@@ -2839,6 +2849,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
   function createUi({ config, utils: utils2, windowRef, documentRef, addStyle }) {
     const platform = utils2.getPlatformAdapter();
     let resolvedMediaItemsCache = /* @__PURE__ */ new WeakMap();
+    const resolveFailureCooldowns = /* @__PURE__ */ new WeakMap();
     const buttonDetails = /* @__PURE__ */ new WeakMap();
     const postDownloads = /* @__PURE__ */ new Map();
     const downloadButtonTitle = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
@@ -2951,8 +2962,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       const previousWidth = labelChanged && btn.isConnected ? btn.getBoundingClientRect().width : 0;
       if (labelChanged) {
         details.animation?.cancel();
+        btn.innerHTML = label;
       }
-      btn.innerHTML = label;
       btn.disabled = busy;
       btn.setAttribute("data-download-state", status);
       btn.setAttribute("aria-busy", String(busy));
@@ -2975,16 +2986,35 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         }
       });
     }
-    async function resolvePostMediaItems(postContainer, initialFallbackItems = null) {
-      if (resolvedMediaItemsCache.has(postContainer)) {
-        return resolvedMediaItemsCache.get(postContainer);
-      }
+    function getMediaItemsFingerprint(fallbackItems, postContainer) {
+      const needsApiResolve = typeof platform.shouldResolveEmptyMediaItems === "function" && platform.shouldResolveEmptyMediaItems(postContainer);
+      const items = Array.isArray(fallbackItems) ? fallbackItems : [];
+      return `${needsApiResolve ? "api" : "dom"}:${items.map(
+        (item) => `${item && item.kind ? item.kind : "image"}:${(item && (item.imageUrl || item.videoUrl) || "").split("?")[0]}`
+      ).join("|")}`;
+    }
+    function resolvePostMediaItems(postContainer, initialFallbackItems = null) {
       const fallbackItems = initialFallbackItems || getFallbackMediaItems(postContainer);
+      const fingerprint = getMediaItemsFingerprint(fallbackItems, postContainer);
+      const cached = resolvedMediaItemsCache.get(postContainer);
+      if (cached && cached.fingerprint === fingerprint) {
+        return cached.promise;
+      }
+      const cooldowns = resolveFailureCooldowns.get(postContainer);
+      if (cooldowns && Date.now() - (cooldowns.get(fingerprint) || 0) < config.MEDIA_RESOLVE_RETRY_COOLDOWN_MS) {
+        return Promise.resolve(fallbackItems);
+      }
       const mediaPromise = Promise.resolve(platform.resolvePostMediaItems(postContainer, fallbackItems)).catch((error) => {
-        resolvedMediaItemsCache.delete(postContainer);
+        const current = resolvedMediaItemsCache.get(postContainer);
+        if (current?.promise === mediaPromise) {
+          resolvedMediaItemsCache.delete(postContainer);
+          const cooldownMap = resolveFailureCooldowns.get(postContainer) || /* @__PURE__ */ new Map();
+          cooldownMap.set(fingerprint, Date.now());
+          resolveFailureCooldowns.set(postContainer, cooldownMap);
+        }
         throw error;
       });
-      resolvedMediaItemsCache.set(postContainer, mediaPromise);
+      resolvedMediaItemsCache.set(postContainer, { fingerprint, promise: mediaPromise });
       return mediaPromise;
     }
     function getPostId(postContainer) {
@@ -3169,7 +3199,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         renderDownloadButton(btn);
         refreshPostDownloadState(postId);
         try {
-          let mediaItems = await resolvePostMediaItems(postContainer, initialMediaItems);
+          let mediaItems = await resolvePostMediaItems(postContainer, getFallbackMediaItems(postContainer));
           if (selectMedia) {
             mediaItems = await showImageSelectModal(mediaItems);
             if (!mediaItems || mediaItems.length === 0) {
@@ -3247,12 +3277,23 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       btn.addEventListener("pointercancel", clearLongPressTimer);
       return btn;
     }
+    function syncExistingButtonMedia(post, btn) {
+      resolvePostMediaItems(post, getFallbackMediaItems(post)).then((mediaItems) => {
+        if (btn.parentNode) {
+          syncDownloadButtonState(btn, mediaItems);
+        }
+      }).catch((error) => {
+        utils2.log("媒体刷新失败:", error.message);
+      });
+    }
     function injectDownloadButtons() {
       const selectors = platform.getPostSelectors();
       for (const selector of selectors) {
         const posts = documentRef.querySelectorAll(selector);
         posts.forEach((post) => {
-          if (post.querySelector(".weibo-img-download-btn")) {
+          const existingBtn = post.querySelector(".weibo-img-download-btn");
+          if (existingBtn) {
+            syncExistingButtonMedia(post, existingBtn);
             return;
           }
           if (platform.shouldSkipPost(post)) {

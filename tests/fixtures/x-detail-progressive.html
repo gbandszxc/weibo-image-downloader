@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>X 详情页渐进加载 fixture</title>
+</head>
+<body>
+<!--
+  模拟 X 推文详情页：进入详情页时只有图片先挂载，两个 GIF 的 video 元素与
+  videoComponent 容器延迟挂载，用于复现/验证下载按钮计数随媒体渐进加载自动校正。
+  用法：本地静态服务后浏览器打开本页，再手动注入 dist/weibo-image-downloader.user.js。
+-->
+<article data-testid="tweet" tabindex="-1">
+  <div>
+    <div data-testid="User-Name">
+      <span>Enorez2</span>
+    </div>
+  </div>
+  <a href="/Enorez2/status/2108593257039221196/video/1" aria-label="播放">占位</a>
+  <div data-testid="tweetPhoto">
+    <img src="https://pbs.twimg.com/media/HUM6PoAXsAAxBnu?format=jpg&name=small" alt="图像">
+  </div>
+  <a href="https://x.com/Enorez2/status/2108593257039221196">
+    <time datetime="2026-10-10T12:00:00.000Z">2026年10月10日</time>
+  </a>
+</article>
+<script>
+  // 6 秒后模拟 X 渐进挂载两个 GIF 播放器（徽标文本与 video 同帧出现），
+  // 晚于下载脚本首次注入（2 秒），用于验证按钮创建后计数仍能自动校正。
+  setTimeout(() => {
+    const urls = [
+      "https://video.twimg.com/tweet_video/HUM5447X0AIfFa3.mp4?tag=12",
+      "https://video.twimg.com/tweet_video/HUM545FXAAACJ0X.mp4?tag=12"
+    ];
+    for (const url of urls) {
+      const component = document.createElement("div");
+      component.setAttribute("data-testid", "videoComponent");
+      const badge = document.createElement("span");
+      badge.textContent = "GIF";
+      const video = document.createElement("video");
+      video.src = url;
+      video.muted = true;
+      video.loop = true;
+      component.appendChild(badge);
+      component.appendChild(video);
+      document.querySelector("article[data-testid='tweet']").appendChild(component);
+    }
+  }, 1200);
+</script>
+</body>
+</html>
