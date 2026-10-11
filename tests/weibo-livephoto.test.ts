@@ -669,15 +669,52 @@ test("live photo status resolves full media list", () => {
     assert.ok(mediaItems.every((item) => item.videoUrl && item.kind === "livephoto"));
 });
 
-test("live photo expands to stable jpg and mov jobs", () => {
-    const utils = createUtilsForWeibo();
+test("live photo expands to a merged Motion Photo job by default and jpg+mov pair when merge is off", () => {
     const platform = createWeiboPlatformForTests();
     const mediaItems = platform.getWeiboMediaItemsFromStatus(sampleStatus);
-    const jobs = utils.buildMediaDownloadJobs(mediaItems, "5286555824429155");
 
-    assert.equal(jobs.length, 6);
+    const mergedUtils = createUtilsForWeibo();
+    const mergedJobs = mergedUtils.buildMediaDownloadJobs(mediaItems, "5286555824429155");
+    assert.equal(CONFIG.LIVEPHOTO_AUTO_MERGE, true);
+    assert.equal(mergedJobs.length, 3);
     assert.deepEqual(
-        jobs.map((job) => job.filename),
+        mergedJobs.map((job) => job.filename),
+        [
+            "weibo_5286555824429155_1.MP.jpg",
+            "weibo_5286555824429155_2.MP.jpg",
+            "weibo_5286555824429155_3.MP.jpg"
+        ]
+    );
+    assert.ok(mergedJobs.every((job) => job.livePhotoVideoUrl));
+
+    const legacyUtils = createUtils({
+        config: {
+            ...CONFIG,
+            DEBUG: false,
+            LIVEPHOTO_AUTO_MERGE: false
+        },
+        windowRef: {
+            location: {
+                hostname: "weibo.com"
+            },
+            URL,
+            document: {
+                createElement() {
+                    return {
+                        click() {}
+                    };
+                }
+            },
+            open() {}
+        } as unknown as UtilsWindowRef,
+        fetchRef: async () => {
+            throw new Error("fetch not mocked");
+        }
+    });
+    const legacyJobs = legacyUtils.buildMediaDownloadJobs(mediaItems, "5286555824429155");
+    assert.equal(legacyJobs.length, 6);
+    assert.deepEqual(
+        legacyJobs.map((job) => job.filename),
         [
             "weibo_5286555824429155_1.jpg",
             "weibo_5286555824429155_1_live.mov",

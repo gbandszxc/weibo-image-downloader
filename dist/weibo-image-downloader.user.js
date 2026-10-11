@@ -907,6 +907,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     ENABLE_VIDEO_DOWNLOAD: false,
     X_GIF_AUTO_CONVERT_SETTING_KEY: "weiboImageDownloader.xGifAutoConvert",
     X_GIF_AUTO_CONVERT: true,
+    LIVEPHOTO_AUTO_MERGE_SETTING_KEY: "weiboImageDownloader.livephotoAutoMerge",
+    LIVEPHOTO_AUTO_MERGE: true,
     DEBUG: true
   };
 
@@ -2531,6 +2533,203 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     }
   }
 
+  // src/livephoto.ts
+  var XMP_SEGMENT_ID = "http://ns.adobe.com/xap/1.0/\0";
+  var SAMSUNG_FIELD_MARKER = new Uint8Array([0, 0, 48, 10]);
+  var SAMSUNG_FIELD_HEAD_SIZE = 24;
+  var SAMSUNG_SEF_TAIL_SIZE = 32;
+  var SAMSUNG_SEF_VERSION = 106;
+  var STILL_IMAGE_TIMESTAMP_US = 15e5;
+  function concatBytes(...parts) {
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+      out.set(part, offset);
+      offset += part.length;
+    }
+    return out;
+  }
+  function encodeUtf8(text) {
+    return new TextEncoder().encode(text);
+  }
+  function bytesToLatin1(bytes) {
+    let text = "";
+    for (let i = 0; i < bytes.length; i++) {
+      text += String.fromCharCode(bytes[i]);
+    }
+    return text;
+  }
+  function findJpegXmpInsertPoint(jpeg) {
+    if (jpeg.length < 4 || jpeg[0] !== 255 || jpeg[1] !== 216) {
+      throw new Error("不是有效的 JPEG 数据（缺少 SOI 标记）");
+    }
+    let offset = 2;
+    let insertOffset = 2;
+    let existingXmp = null;
+    while (offset + 4 <= jpeg.length) {
+      while (offset < jpeg.length - 1 && jpeg[offset] === 255 && jpeg[offset + 1] === 255) {
+        offset++;
+      }
+      if (jpeg[offset] !== 255) {
+        break;
+      }
+      const marker = jpeg[offset + 1];
+      if (marker !== 224 && (marker < 225 || marker > 239)) {
+        break;
+      }
+      const segmentLength = jpeg[offset + 2] << 8 | jpeg[offset + 3];
+      const segmentEnd = offset + 2 + segmentLength;
+      if (segmentLength < 2 || segmentEnd > jpeg.length) {
+        throw new Error("JPEG 段结构损坏（段长度越界）");
+      }
+      if (marker === 225) {
+        const idEnd = Math.min(offset + 4 + XMP_SEGMENT_ID.length, segmentEnd);
+        const segmentId = bytesToLatin1(jpeg.subarray(offset + 4, idEnd));
+        if (segmentId === XMP_SEGMENT_ID) {
+          existingXmp = { start: offset, end: segmentEnd };
+          if (bytesToLatin1(jpeg.subarray(offset + 4, segmentEnd)).includes("MotionPhoto") || bytesToLatin1(jpeg.subarray(offset + 4, segmentEnd)).includes("MicroVideo")) {
+            throw new Error("图片已包含 Motion Photo 元数据，无需重复合并");
+          }
+        }
+        insertOffset = segmentEnd;
+      }
+      offset = segmentEnd;
+    }
+    return { insertOffset, existingXmp };
+  }
+  function buildMotionPhotoXmp(embeddedLength, microVideoOffset) {
+    return [
+      '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
+      '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 5.1.0-jc003">',
+      '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
+      '    <rdf:Description rdf:about=""',
+      '        xmlns:GCamera="http://ns.google.com/photos/1.0/camera/"',
+      '        xmlns:OpCamera="http://ns.oplus.com/photos/1.0/camera/"',
+      '        xmlns:MiCamera="http://ns.xiaomi.com/photos/1.0/camera/"',
+      '        xmlns:Container="http://ns.google.com/photos/1.0/container/"',
+      '        xmlns:Item="http://ns.google.com/photos/1.0/container/item/"',
+      '      GCamera:MotionPhoto="1"',
+      '      GCamera:MotionPhotoVersion="1"',
+      `      GCamera:MotionPhotoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
+      `      OpCamera:MotionPhotoPrimaryPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}"`,
+      '      OpCamera:MotionPhotoOwner="oplus"',
+      '      OpCamera:OLivePhotoVersion="2"',
+      `      OpCamera:VideoLength="${embeddedLength}"`,
+      `      MiCamera:XMPMeta="&lt;?xml version='1.0' encoding='UTF-8' standalone='yes' ?&gt;"`,
+      '      GCamera:MicroVideoVersion="1"',
+      '      GCamera:MicroVideo="1"',
+      `      GCamera:MicroVideoOffset="${microVideoOffset}"`,
+      `      GCamera:MicroVideoPresentationTimestampUs="${STILL_IMAGE_TIMESTAMP_US}">`,
+      "      <Container:Directory>",
+      "        <rdf:Seq>",
+      '          <rdf:li rdf:parseType="Resource">',
+      "            <Container:Item",
+      '              Item:Mime="image/jpeg"',
+      '              Item:Semantic="Primary"',
+      '              Item:Length="0"',
+      '              Item:Padding="0"/>',
+      "          </rdf:li>",
+      '          <rdf:li rdf:parseType="Resource">',
+      "            <Container:Item",
+      '              Item:Mime="video/mp4"',
+      '              Item:Semantic="MotionPhoto"',
+      `              Item:Length="${embeddedLength}"/>`,
+      "          </rdf:li>",
+      "        </rdf:Seq>",
+      "      </Container:Directory>",
+      "    </rdf:Description>",
+      "  </rdf:RDF>",
+      "</x:xmpmeta>",
+      '<?xpacket end="w"?>'
+    ].join("\n");
+  }
+  function buildXmpApp1Segment(xmpText) {
+    const idBytes = encodeUtf8(XMP_SEGMENT_ID);
+    const payload = encodeUtf8(xmpText);
+    const segmentLength = 2 + idBytes.length + payload.length;
+    if (segmentLength > 65535) {
+      throw new Error("XMP 段超出 APP1 长度上限");
+    }
+    const segment = new Uint8Array(2 + segmentLength);
+    segment[0] = 255;
+    segment[1] = 225;
+    segment[2] = segmentLength >> 8 & 255;
+    segment[3] = segmentLength & 255;
+    segment.set(idBytes, 4);
+    segment.set(payload, 4 + idBytes.length);
+    return segment;
+  }
+  function buildSamsungFieldHead() {
+    const nameBytes = encodeUtf8("MotionPhoto_Data");
+    const head = new Uint8Array(SAMSUNG_FIELD_HEAD_SIZE);
+    let offset = 0;
+    head.set(SAMSUNG_FIELD_MARKER, offset);
+    offset += SAMSUNG_FIELD_MARKER.length;
+    const nameLength = nameBytes.length;
+    head[offset] = nameLength & 255;
+    head[offset + 1] = nameLength >> 8 & 255;
+    head[offset + 2] = nameLength >> 16 & 255;
+    head[offset + 3] = nameLength >> 24 & 255;
+    offset += 4;
+    head.set(nameBytes, offset);
+    return head;
+  }
+  function buildSamsungSefTail(videoLength) {
+    const sefHeadSize = 4 + 4 + 4;
+    const sefFieldInfoSize = SAMSUNG_FIELD_MARKER.length + 4 + 4;
+    const sefOffset = SAMSUNG_FIELD_HEAD_SIZE + videoLength;
+    const tail = new Uint8Array(SAMSUNG_SEF_TAIL_SIZE);
+    let offset = 0;
+    tail.set(encodeUtf8("SEFH"), offset);
+    offset += 4;
+    tail[offset] = SAMSUNG_SEF_VERSION & 255;
+    tail[offset + 1] = SAMSUNG_SEF_VERSION >> 8 & 255;
+    tail[offset + 2] = SAMSUNG_SEF_VERSION >> 16 & 255;
+    tail[offset + 3] = SAMSUNG_SEF_VERSION >> 24 & 255;
+    offset += 4;
+    const fieldCount = 1;
+    tail[offset] = fieldCount;
+    offset += 4;
+    tail.set(SAMSUNG_FIELD_MARKER, offset);
+    offset += SAMSUNG_FIELD_MARKER.length;
+    const negativeOffsetFromSef = sefOffset;
+    tail[offset] = negativeOffsetFromSef & 255;
+    tail[offset + 1] = negativeOffsetFromSef >> 8 & 255;
+    tail[offset + 2] = negativeOffsetFromSef >> 16 & 255;
+    tail[offset + 3] = negativeOffsetFromSef >> 24 & 255;
+    offset += 4;
+    const fieldDataLength = sefOffset;
+    tail[offset] = fieldDataLength & 255;
+    tail[offset + 1] = fieldDataLength >> 8 & 255;
+    tail[offset + 2] = fieldDataLength >> 16 & 255;
+    tail[offset + 3] = fieldDataLength >> 24 & 255;
+    offset += 4;
+    const sefDataSize = sefHeadSize + sefFieldInfoSize;
+    tail[offset] = sefDataSize & 255;
+    tail[offset + 1] = sefDataSize >> 8 & 255;
+    tail[offset + 2] = sefDataSize >> 16 & 255;
+    tail[offset + 3] = sefDataSize >> 24 & 255;
+    offset += 4;
+    tail.set(encodeUtf8("SEFT"), offset);
+    return tail;
+  }
+  function buildMotionPhoto(jpeg, video) {
+    if (video.length < 12 || bytesToLatin1(video.subarray(4, 8)) !== "ftyp") {
+      throw new Error("视频不是 ISO-BMFF 容器（缺少 ftyp box），无法合并");
+    }
+    const { insertOffset, existingXmp } = findJpegXmpInsertPoint(jpeg);
+    const microVideoOffset = video.length + SAMSUNG_SEF_TAIL_SIZE;
+    const embeddedLength = microVideoOffset;
+    const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(embeddedLength, microVideoOffset));
+    const fieldHead = buildSamsungFieldHead();
+    const sefTail = buildSamsungSefTail(video.length);
+    const headEnd = existingXmp ? existingXmp.start : insertOffset;
+    const jpegHead = jpeg.subarray(0, headEnd);
+    const jpegTail = jpeg.subarray(existingXmp ? existingXmp.end : insertOffset);
+    return concatBytes(jpegHead, xmpSegment, jpegTail, fieldHead, video, sefTail);
+  }
+
   // src/utils.ts
   function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui: ui2 }) {
     let platformLabel = "weibo";
@@ -2600,7 +2799,9 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         if (!item || typeof item !== "object") {
           return;
         }
-        const baseName = `${platform2}_${postId}_${index + 1}`;
+        const normalizedPostId = postId.startsWith(`${platform2}_`) ? postId.slice(platform2.length + 1) : postId;
+        const baseName = `${platform2}_${normalizedPostId}_${index + 1}`;
+        const mergeLivePhoto = platform2 === "weibo" && item.kind === "livephoto" && !!item.videoUrl && !!config.LIVEPHOTO_AUTO_MERGE && getFileExtensionFromUrl(item.imageUrl, ".jpg") === ".jpg";
         if (item.imageUrl) {
           const job = {
             type: "image",
@@ -2611,9 +2812,13 @@ OR OTHER DEALINGS IN THE SOFTWARE.
             job.convertToGif = true;
             job.filename = `${baseName}.gif`;
           }
+          if (mergeLivePhoto) {
+            job.livePhotoVideoUrl = item.videoUrl;
+            job.filename = `${baseName}.MP.jpg`;
+          }
           jobs.push(job);
         }
-        if (item.videoUrl) {
+        if (item.videoUrl && !mergeLivePhoto) {
           const isStandaloneVideo = item.kind === "video";
           jobs.push({
             type: "video",
@@ -2744,19 +2949,39 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       return response.blob();
     }
-    async function downloadBlob(blob, filename) {
-      const gmSuccess = await tryGmDownload(blob, filename);
-      if (gmSuccess) {
-        return true;
+    async function fetchMediaBlob(url) {
+      try {
+        if (typeof gmXmlhttpRequest !== "function") {
+          return await fetchBlobWithWindowFetch(url);
+        }
+        return await fetchBlobWithXmlHttpRequest(url);
+      } catch (error) {
+        if (typeof gmXmlhttpRequest !== "function") {
+          throw error;
+        }
+        return await fetchBlobWithWindowFetch(url);
       }
-      return downloadBlobWithAnchor(blob, filename);
+    }
+    async function downloadBlob(blob, filename) {
+      try {
+        return downloadBlobWithAnchor(blob, filename);
+      } catch (error) {
+        log("浏览器原生保存失败，回退 GM_download:", filename, error.message);
+        const gmSuccess = await tryGmDownload(blob, filename);
+        return gmSuccess || downloadBlobWithAnchor(blob, filename);
+      }
     }
     async function downloadImage(url, filename) {
+      try {
+        const blob = await fetchMediaBlob(url);
+        return downloadBlobWithAnchor(blob, filename);
+      } catch (error) {
+        log("浏览器原生保存失败，回退直链下载:", filename, error.message);
+      }
       const directDownloadSuccess = await tryGmDownload(url, filename);
       if (directDownloadSuccess) {
         return true;
       }
-      log("GM_download失败，尝试二进制兜底下载");
       return downloadImageFallback(url, filename);
     }
     async function downloadImageFallback(url, filename) {
@@ -2807,6 +3032,22 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         return false;
       }
     }
+    async function downloadMergedLivePhoto(imageUrl, videoUrl, filename) {
+      try {
+        const [imageBlob, videoBlob] = await Promise.all([
+          fetchMediaBlob(imageUrl),
+          fetchMediaBlob(videoUrl)
+        ]);
+        const mergedBytes = buildMotionPhoto(
+          new Uint8Array(await imageBlob.arrayBuffer()),
+          new Uint8Array(await videoBlob.arrayBuffer())
+        );
+        return await downloadBlob(new Blob([mergedBytes], { type: "image/jpeg" }), filename);
+      } catch (error) {
+        log("LivePhoto合并失败:", filename, error.message);
+        return false;
+      }
+    }
     async function downloadMediaItems(mediaItems, postId) {
       if (!mediaItems || mediaItems.length === 0) {
         if (ui2 && typeof ui2.showToast === "function") {
@@ -2825,9 +3066,53 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       let successCount = 0;
       let failedCount = 0;
       let failedGifCount = 0;
+      let failedLivePhotoMergeCount = 0;
+      let livePhotoFallbackSavedCount = 0;
       let handedOffCount = 0;
       for (let i = 0; i < jobs.length; i++) {
         const job = jobs[i];
+        const isLastJob = i === jobs.length - 1;
+        const delayBetweenJobs = async () => {
+          if (!isLastJob) {
+            await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
+          }
+        };
+        if (job.livePhotoVideoUrl) {
+          const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
+          if (merged) {
+            successCount++;
+            if (merged === "started") {
+              handedOffCount++;
+            }
+          } else {
+            failedLivePhotoMergeCount++;
+            log("LivePhoto合并失败，回退为分别下载:", job.filename);
+            const videoFilename = `${job.filename.replace(/\.[a-z0-9]+$/i, "")}_live${getFileExtensionFromUrl(job.livePhotoVideoUrl, ".mov")}`;
+            const imageResult = await downloadImage(job.url, job.filename);
+            if (imageResult) {
+              successCount++;
+              livePhotoFallbackSavedCount++;
+              if (imageResult === "started") {
+                handedOffCount++;
+              }
+            } else {
+              failedCount++;
+            }
+            await delayBetweenJobs();
+            const videoResult = await downloadImage(job.livePhotoVideoUrl, videoFilename);
+            if (videoResult) {
+              successCount++;
+              livePhotoFallbackSavedCount++;
+              if (videoResult === "started") {
+                handedOffCount++;
+              }
+            } else {
+              failedCount++;
+            }
+          }
+          await delayBetweenJobs();
+          continue;
+        }
         const success = job.convertToGif ? await downloadXGif(job.url, job.filename) : await downloadImage(job.url, job.filename);
         if (success) {
           successCount++;
@@ -2840,9 +3125,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
             failedGifCount++;
           }
         }
-        if (i < jobs.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
-        }
+        await delayBetweenJobs();
       }
       let message = "";
       if (failedCount === 0) {
@@ -2864,6 +3147,9 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       if (failedGifCount > 0) {
         message += "；X GIF转换或保存失败，可关闭自动转换下载 MP4 源";
+      }
+      if (livePhotoFallbackSavedCount > 0) {
+        message += "；部分LivePhoto未能合并，已分别保存图片与视频";
       }
       log(message);
       if (ui2 && typeof ui2.showToast === "function") {
@@ -3432,7 +3718,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
   var runtimeConfig = {
     ...CONFIG,
     ENABLE_VIDEO_DOWNLOAD: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.VIDEO_DOWNLOAD_SETTING_KEY, CONFIG.ENABLE_VIDEO_DOWNLOAD)) : CONFIG.ENABLE_VIDEO_DOWNLOAD,
-    X_GIF_AUTO_CONVERT: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY, CONFIG.X_GIF_AUTO_CONVERT)) : CONFIG.X_GIF_AUTO_CONVERT
+    X_GIF_AUTO_CONVERT: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY, CONFIG.X_GIF_AUTO_CONVERT)) : CONFIG.X_GIF_AUTO_CONVERT,
+    LIVEPHOTO_AUTO_MERGE: typeof GM_getValue === "function" ? Boolean(GM_getValue(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY, CONFIG.LIVEPHOTO_AUTO_MERGE)) : CONFIG.LIVEPHOTO_AUTO_MERGE
   };
   function injectStyles() {
     if (document.getElementById(styleId)) {
@@ -3546,8 +3833,27 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         }
       );
       xGifMenuRegistered = true;
+    }, registerLivePhotoMergeMenu = function() {
+      if (livePhotoMergeMenuRegistered) {
+        if (livePhotoMergeMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
+          return;
+        }
+        GM_unregisterMenuCommand(livePhotoMergeMenuId);
+      }
+      livePhotoMergeMenuId = GM_registerMenuCommand(
+        `微博LivePhoto自动合并：[${runtimeConfig.LIVEPHOTO_AUTO_MERGE ? "开启" : "关闭"}]`,
+        () => {
+          runtimeConfig.LIVEPHOTO_AUTO_MERGE = !runtimeConfig.LIVEPHOTO_AUTO_MERGE;
+          if (typeof GM_setValue === "function") {
+            GM_setValue(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY, runtimeConfig.LIVEPHOTO_AUTO_MERGE);
+          }
+          registerLivePhotoMergeMenu();
+          ui.showToast(`微博LivePhoto自动合并已${runtimeConfig.LIVEPHOTO_AUTO_MERGE ? "开启" : "关闭"}`);
+        }
+      );
+      livePhotoMergeMenuRegistered = true;
     };
-    getVideoDownloadMenuText2 = getVideoDownloadMenuText, registerVideoDownloadMenu2 = registerVideoDownloadMenu, registerXGifMenu2 = registerXGifMenu;
+    getVideoDownloadMenuText2 = getVideoDownloadMenuText, registerVideoDownloadMenu2 = registerVideoDownloadMenu, registerXGifMenu2 = registerXGifMenu, registerLivePhotoMergeMenu2 = registerLivePhotoMergeMenu;
     let videoDownloadMenuId = null;
     let videoDownloadMenuRegistered = false;
     GM_registerMenuCommand("刷新按钮", () => {
@@ -3557,8 +3863,12 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     let xGifMenuId = null;
     let xGifMenuRegistered = false;
     registerXGifMenu();
+    let livePhotoMergeMenuId = null;
+    let livePhotoMergeMenuRegistered = false;
+    registerLivePhotoMergeMenu();
   }
   var getVideoDownloadMenuText2;
   var registerVideoDownloadMenu2;
   var registerXGifMenu2;
+  var registerLivePhotoMergeMenu2;
 })();

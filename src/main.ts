@@ -12,7 +12,10 @@ const runtimeConfig = {
         : CONFIG.ENABLE_VIDEO_DOWNLOAD,
     X_GIF_AUTO_CONVERT: typeof GM_getValue === "function"
         ? Boolean(GM_getValue(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY, CONFIG.X_GIF_AUTO_CONVERT))
-        : CONFIG.X_GIF_AUTO_CONVERT
+        : CONFIG.X_GIF_AUTO_CONVERT,
+    LIVEPHOTO_AUTO_MERGE: typeof GM_getValue === "function"
+        ? Boolean(GM_getValue(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY, CONFIG.LIVEPHOTO_AUTO_MERGE))
+        : CONFIG.LIVEPHOTO_AUTO_MERGE
 };
 
 function injectStyles(): void {
@@ -159,4 +162,28 @@ if (typeof GM_registerMenuCommand === "function") {
         xGifMenuRegistered = true;
     }
     registerXGifMenu();
+
+    let livePhotoMergeMenuId: number | null = null;
+    let livePhotoMergeMenuRegistered = false;
+    function registerLivePhotoMergeMenu(): void {
+        if (livePhotoMergeMenuRegistered) {
+            if (livePhotoMergeMenuId === null || typeof GM_unregisterMenuCommand !== "function") {
+                return;
+            }
+            GM_unregisterMenuCommand(livePhotoMergeMenuId);
+        }
+        livePhotoMergeMenuId = GM_registerMenuCommand(
+            `微博LivePhoto自动合并：[${runtimeConfig.LIVEPHOTO_AUTO_MERGE ? "开启" : "关闭"}]`,
+            () => {
+                runtimeConfig.LIVEPHOTO_AUTO_MERGE = !runtimeConfig.LIVEPHOTO_AUTO_MERGE;
+                if (typeof GM_setValue === "function") {
+                    GM_setValue(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY, runtimeConfig.LIVEPHOTO_AUTO_MERGE);
+                }
+                registerLivePhotoMergeMenu();
+                ui.showToast(`微博LivePhoto自动合并已${runtimeConfig.LIVEPHOTO_AUTO_MERGE ? "开启" : "关闭"}`);
+            }
+        );
+        livePhotoMergeMenuRegistered = true;
+    }
+    registerLivePhotoMergeMenu();
 }

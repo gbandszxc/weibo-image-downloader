@@ -39,8 +39,48 @@ test("X GIF menu uses the persisted setting and saves toggles immediately", asyn
         assert.equal(gifMenu.text, `X平台GIF自动转换：[${persistedValue === false ? "关闭" : "开启"}]`);
         gifMenu.callback();
         assert.equal(settings.get(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY), persistedValue === false);
-        assert.equal(menus.size, 3);
+        assert.equal(menus.size, 4);
         assert.equal([...menus.values()].find((menu) => menu.text.startsWith("X平台GIF自动转换")).text,
             `X平台GIF自动转换：[${persistedValue === false ? "开启" : "关闭"}]`);
+    }
+});
+
+test("LivePhoto merge menu uses the persisted setting and saves toggles immediately", async () => {
+    const { outputFiles } = await build({
+        entryPoints: [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
+        bundle: true,
+        write: false,
+        format: "iife",
+        loader: { ".css": "text" }
+    });
+    for (const persistedValue of [undefined, false]) {
+        const settings = new Map();
+        if (persistedValue !== undefined) settings.set(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY, persistedValue);
+        const menus = new Map();
+        let menuId = 0;
+        const document = {
+            readyState: "loading",
+            addEventListener() {},
+            getElementById() { return null; },
+            createElement() { return { appendChild() {} }; },
+            body: { appendChild() {} }
+        };
+        vm.runInNewContext(outputFiles![0].text, {
+            document,
+            window: { document, location: { hostname: "weibo.com" }, fetch() {} },
+            GM_getValue(key: string, fallback: unknown) { return settings.has(key) ? settings.get(key) : fallback; },
+            GM_setValue(key: string, value: unknown) { settings.set(key, value); },
+            GM_registerMenuCommand(text: string, callback: () => void) { menus.set(++menuId, { text, callback }); return menuId; },
+            GM_unregisterMenuCommand(id: number) { menus.delete(id); },
+            setTimeout() {},
+            console
+        });
+        const mergeMenu = [...menus.values()].find((menu) => menu.text.startsWith("微博LivePhoto自动合并"));
+        assert.equal(mergeMenu.text, `微博LivePhoto自动合并：[${persistedValue === false ? "关闭" : "开启"}]`);
+        mergeMenu.callback();
+        assert.equal(settings.get(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY), persistedValue === false);
+        assert.equal(menus.size, 4);
+        assert.equal([...menus.values()].find((menu) => menu.text.startsWith("微博LivePhoto自动合并")).text,
+            `微博LivePhoto自动合并：[${persistedValue === false ? "开启" : "关闭"}]`);
     }
 });

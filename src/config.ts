@@ -6,6 +6,8 @@ export const CONFIG = {
     ENABLE_VIDEO_DOWNLOAD: false,
     X_GIF_AUTO_CONVERT_SETTING_KEY: "weiboImageDownloader.xGifAutoConvert",
     X_GIF_AUTO_CONVERT: true,
+    LIVEPHOTO_AUTO_MERGE_SETTING_KEY: "weiboImageDownloader.livephotoAutoMerge",
+    LIVEPHOTO_AUTO_MERGE: true,
     DEBUG: true
 };
 

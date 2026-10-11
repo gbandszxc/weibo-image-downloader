@@ -1,6 +1,7 @@
 import { createPlatformAdapter } from "./platforms/index.ts";
 import type { PlatformAdapter } from "./platforms/index.ts";
 import { convertXVideoToGif } from "./x-gif.ts";
+import { buildMotionPhoto } from "./livephoto.ts";
 import type { WeiboMediaItem, WeiboPlatformWindow } from "./platforms/weibo.ts";
 import type { XMediaItem, XPlatformWindowRef } from "./platforms/x.ts";
 import type { GifWindowLike } from "./x-gif-workers.ts";
@@ -16,6 +17,7 @@ export interface UtilsConfig {
     DELAY_MS: number;
     ENABLE_VIDEO_DOWNLOAD?: boolean;
     X_GIF_AUTO_CONVERT?: boolean;
+    LIVEPHOTO_AUTO_MERGE?: boolean;
 }
 
 export interface GmDownloadOptions {
@@ -61,6 +63,8 @@ export interface MediaDownloadJob {
     url: string;
     filename: string;
     convertToGif?: boolean;
+    /** 开启 LivePhoto 自动合并时：与图片合并为单文件 Motion Photo 的视频地址 */
+    livePhotoVideoUrl?: string;
 }
 
 export interface DownloadResult {
@@ -166,7 +170,15 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                 return;
             }
 
-            const baseName = `${platform}_${postId}_${index + 1}`;
+            // 平台回退 postId 可能自带同名前缀（如 weibo_1791...），避免拼出 weibo_weibo_...
+            const normalizedPostId = postId.startsWith(`${platform}_`) ? postId.slice(platform.length + 1) : postId;
+            const baseName = `${platform}_${normalizedPostId}_${index + 1}`;
+            // 微博 LivePhoto：开启合并时输出单文件 Motion Photo（JPEG 内嵌视频），否则保存图片+视频两个文件
+            const mergeLivePhoto = platform === "weibo"
+                && item.kind === "livephoto"
+                && !!item.videoUrl
+                && !!config.LIVEPHOTO_AUTO_MERGE
+                && getFileExtensionFromUrl(item.imageUrl, ".jpg") === ".jpg";
 
             if (item.imageUrl) {
                 const job: MediaDownloadJob = {
@@ -179,10 +191,15 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                     job.convertToGif = true;
                     job.filename = `${baseName}.gif`;
                 }
+                if (mergeLivePhoto) {
+                    job.livePhotoVideoUrl = item.videoUrl!;
+                    // 官方 Motion Photo 规范建议产物命名为 *.MP.jpg
+                    job.filename = `${baseName}.MP.jpg`;
+                }
                 jobs.push(job);
             }
 
-            if (item.videoUrl) {
+            if (item.videoUrl && !mergeLivePhoto) {
                 const isStandaloneVideo = item.kind === "video";
                 jobs.push({
                     type: "video",
@@ -333,22 +350,49 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return response.blob();
     }
 
-    async function downloadBlob(blob: Blob, filename: string): Promise<boolean | "started"> {
-        const gmSuccess = await tryGmDownload(blob, filename);
-        if (gmSuccess) {
-            return true;
+    /** 优先走 GM_xmlhttpRequest 拉取二进制，失败时退回页面 fetch（与 GIF 转换下载同一套策略）。 */
+    async function fetchMediaBlob(url: string): Promise<Blob> {
+        try {
+            if (typeof gmXmlhttpRequest !== "function") {
+                return await fetchBlobWithWindowFetch(url);
+            }
+            return (await fetchBlobWithXmlHttpRequest(url))!;
+        } catch (error) {
+            if (typeof gmXmlhttpRequest !== "function") {
+                throw error;
+            }
+            return await fetchBlobWithWindowFetch(url);
         }
+    }
 
-        return downloadBlobWithAnchor(blob, filename);
+    async function downloadBlob(blob: Blob, filename: string): Promise<boolean | "started"> {
+        // Blob 优先走浏览器原生 a[download] 保存：部分浏览器/下载管理器会忽略 GM_download 对 Blob
+        // 的命名，以内部 UUID + 内容嗅探扩展名落盘（如合并产物被存成 *.exif），a[download] 是
+        // 唯一稳定保留文件名的通道；直链下载（downloadImage）仍优先 GM_download，不受此影响。
+        try {
+            return downloadBlobWithAnchor(blob, filename);
+        } catch (error) {
+            log("浏览器原生保存失败，回退 GM_download:", filename, (error as Error).message);
+            const gmSuccess = await tryGmDownload(blob, filename);
+            return gmSuccess || downloadBlobWithAnchor(blob, filename);
+        }
     }
 
     async function downloadImage(url: string, filename: string): Promise<boolean | "started"> {
+        try {
+            // 与 Blob 产物同路：统一走浏览器原生保存，文件名不受系统 MIME 扩展名映射
+            // （如 image/jpeg 被改写为 .exif）或下载管理器丢弃命名的影响
+            const blob = await fetchMediaBlob(url);
+            return downloadBlobWithAnchor(blob, filename);
+        } catch (error) {
+            log("浏览器原生保存失败，回退直链下载:", filename, (error as Error).message);
+        }
+
         const directDownloadSuccess = await tryGmDownload(url, filename);
         if (directDownloadSuccess) {
             return true;
         }
 
-        log("GM_download失败，尝试二进制兜底下载");
         return downloadImageFallback(url, filename);
     }
 
@@ -408,6 +452,24 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
     }
 
+    /** 将微博 LivePhoto 的图片与视频合并为单文件 Motion Photo 后保存；任何一步失败返回 false，由调用方回退。 */
+    async function downloadMergedLivePhoto(imageUrl: string, videoUrl: string, filename: string): Promise<boolean | "started"> {
+        try {
+            const [imageBlob, videoBlob] = await Promise.all([
+                fetchMediaBlob(imageUrl),
+                fetchMediaBlob(videoUrl)
+            ]);
+            const mergedBytes = buildMotionPhoto(
+                new Uint8Array(await imageBlob.arrayBuffer()),
+                new Uint8Array(await videoBlob.arrayBuffer())
+            );
+            return await downloadBlob(new Blob([mergedBytes as BlobPart], { type: "image/jpeg" }), filename);
+        } catch (error) {
+            log("LivePhoto合并失败:", filename, (error as Error).message);
+            return false;
+        }
+    }
+
     async function downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string): Promise<DownloadResult> {
         if (!mediaItems || mediaItems.length === 0) {
             if (ui && typeof ui.showToast === "function") {
@@ -429,10 +491,57 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         let successCount = 0;
         let failedCount = 0;
         let failedGifCount = 0;
+        let failedLivePhotoMergeCount = 0;
+        let livePhotoFallbackSavedCount = 0;
         let handedOffCount = 0;
 
         for (let i = 0; i < jobs.length; i++) {
             const job = jobs[i];
+            const isLastJob = i === jobs.length - 1;
+            const delayBetweenJobs = async () => {
+                if (!isLastJob) {
+                    await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
+                }
+            };
+
+            if (job.livePhotoVideoUrl) {
+                const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
+                if (merged) {
+                    successCount++;
+                    if (merged === "started") {
+                        handedOffCount++;
+                    }
+                } else {
+                    // 合并失败：回退为分别保存图片与视频（与关闭自动合并时的产物一致）
+                    failedLivePhotoMergeCount++;
+                    log("LivePhoto合并失败，回退为分别下载:", job.filename);
+                    const videoFilename = `${job.filename.replace(/\.[a-z0-9]+$/i, "")}_live${getFileExtensionFromUrl(job.livePhotoVideoUrl, ".mov")}`;
+                    const imageResult = await downloadImage(job.url, job.filename);
+                    if (imageResult) {
+                        successCount++;
+                        livePhotoFallbackSavedCount++;
+                        if (imageResult === "started") {
+                            handedOffCount++;
+                        }
+                    } else {
+                        failedCount++;
+                    }
+                    await delayBetweenJobs();
+                    const videoResult = await downloadImage(job.livePhotoVideoUrl, videoFilename);
+                    if (videoResult) {
+                        successCount++;
+                        livePhotoFallbackSavedCount++;
+                        if (videoResult === "started") {
+                            handedOffCount++;
+                        }
+                    } else {
+                        failedCount++;
+                    }
+                }
+                await delayBetweenJobs();
+                continue;
+            }
+
             const success = job.convertToGif
                 ? await downloadXGif(job.url, job.filename)
                 : await downloadImage(job.url, job.filename);
@@ -447,9 +556,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                     failedGifCount++;
                 }
             }
-            if (i < jobs.length - 1) {
-                await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
-            }
+            await delayBetweenJobs();
         }
 
         let message = "";
@@ -475,6 +582,9 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
         if (failedGifCount > 0) {
             message += "；X GIF转换或保存失败，可关闭自动转换下载 MP4 源";
+        }
+        if (livePhotoFallbackSavedCount > 0) {
+            message += "；部分LivePhoto未能合并，已分别保存图片与视频";
         }
         log(message);
         if (ui && typeof ui.showToast === "function") {

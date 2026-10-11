@@ -12,6 +12,7 @@ export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, 
     const seeks: number[] = [];
     const drawnTimes: number[] = [];
     const revokedUrls: string[] = [];
+    const anchors: { href: string; download: string }[] = [];
     let loadCalls = 0;
     let paused = false;
     let sourceRemoved = false;
@@ -75,7 +76,25 @@ export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, 
                 createElement(tag: string) {
                     if (tag === "video") return video;
                     if (tag === "canvas") return canvas;
+                    if (tag === "a") {
+                        return {
+                            href: "",
+                            download: "",
+                            parentNode: null,
+                            click() {
+                                anchors.push({ href: this.href, download: this.download });
+                            }
+                        };
+                    }
                     throw new Error(`Unexpected element: ${tag}`);
+                },
+                body: {
+                    appendChild(node: { parentNode: unknown }) {
+                        node.parentNode = this;
+                    },
+                    removeChild(node: { parentNode: unknown }) {
+                        node.parentNode = null;
+                    }
                 }
             },
             URL: {
@@ -84,6 +103,7 @@ export function createGifVideoMock({ duration = 0.12, failOn = null, width = 2, 
             }
         } as unknown as GifWindowLike & Record<string, unknown>,
         video,
+        anchors,
         seeks,
         drawnTimes,
         revokedUrls,
