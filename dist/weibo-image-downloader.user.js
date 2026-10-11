@@ -100,7 +100,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         nearestColorIndex: () => nearestColorIndex,
         nearestColorIndexWithDistance: () => nearestColorIndexWithDistance,
         prequantize: () => prequantize,
-        quantize: () => quantize2,
+        quantize: () => quantize3,
         snapColorsToPalette: () => snapColorsToPalette
       });
       var constants_default = {
@@ -418,7 +418,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         }
         return bins;
       }
-      function quantize2(rgba, maxColors, opts = {}) {
+      function quantize3(rgba, maxColors, opts = {}) {
         const {
           format = "rgb565",
           clearAlpha = true,
@@ -2051,40 +2051,15 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     return createWeiboPlatform(deps);
   }
 
-  // src/x-gif.js
+  // src/x-gif-frame.js
   var gifenc = __toESM(require_gifenc(), 1);
-  var { GIFEncoder: GIFEncoder2, quantize, applyPalette } = gifenc.GIFEncoder ? gifenc : gifenc.default;
-  function waitForVideo(video, eventName, action) {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => finish(new Error("视频解码超时")), 3e4);
-      function finish(error) {
-        clearTimeout(timer);
-        video.removeEventListener(eventName, onReady);
-        video.removeEventListener("error", onError);
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      }
-      function onReady() {
-        finish();
-      }
-      function onError() {
-        finish(new Error("浏览器无法解码此 GIF 视频源"));
-      }
-      video.addEventListener(eventName, onReady);
-      video.addEventListener("error", onError);
-      try {
-        action();
-      } catch (error) {
-        finish(error);
-      }
-    });
-  }
+  var { GIFEncoder: GIFEncoder2 } = gifenc.GIFEncoder ? gifenc : gifenc.default;
   function getChangedFrame(index, palette, width, height, previousPixels) {
     const colors = palette.map(([r, g, b]) => r | g << 8 | b << 16);
-    const pixels = Uint32Array.from(index, (color) => colors[color]);
+    const pixels = new Uint32Array(index.length);
+    for (let i = 0; i < index.length; i++) {
+      pixels[i] = colors[index[i]];
+    }
     let left = width;
     let top = height;
     let right = -1;
@@ -2122,9 +2097,11 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       frame: { index: cropped, palette, width: frameWidth, height: frameHeight, left, top, transparentIndex }
     };
   }
-  function writeGifFrame(gif, frame) {
-    const start = gif.bytesView().length;
+  function encodeGifFrame(frame, first) {
+    const gif = GIFEncoder2({ auto: false });
+    if (first) gif.writeHeader();
     gif.writeFrame(frame.index, frame.width, frame.height, {
+      first,
       palette: frame.palette,
       delay: frame.delay,
       repeat: 0,
@@ -2133,14 +2110,244 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       transparent: frame.transparentIndex >= 0,
       transparentIndex: frame.transparentIndex
     });
-    if (start > 0) {
-      if (gif.bytesView()[start + 8] !== 44) {
+    if (!first) {
+      if (gif.bytesView()[8] !== 44) {
         throw new Error("GIF 编码器的帧结构不兼容");
       }
       const view = new DataView(gif.buffer);
-      view.setUint16(start + 9, frame.left, true);
-      view.setUint16(start + 11, frame.top, true);
+      view.setUint16(9, frame.left, true);
+      view.setUint16(11, frame.top, true);
     }
+    return gif.bytesView();
+  }
+
+  // src/x-gif-worker.js
+  var gifenc2 = __toESM(require_gifenc(), 1);
+  var { quantize: quantize2, applyPalette } = gifenc2.quantize ? gifenc2 : gifenc2.default;
+  var captureCanvas = null;
+  function prepareGifFrame(pixels) {
+    const palette = quantize2(pixels, 256);
+    return { palette, index: applyPalette(pixels, palette) };
+  }
+  function runGifJob(data) {
+    if (data.command === "capture") {
+      try {
+        if (!captureCanvas || captureCanvas.width !== data.width || captureCanvas.height !== data.height) {
+          captureCanvas = new OffscreenCanvas(data.width, data.height);
+        }
+        const context = captureCanvas.getContext("2d", { willReadFrequently: true });
+        if (!context) throw new Error("Worker 不支持 Canvas 2D");
+        context.drawImage(data.bitmap, 0, 0, data.width, data.height);
+        return { pixels: context.getImageData(0, 0, data.width, data.height).data };
+      } finally {
+        data.bitmap.close();
+      }
+    }
+    if (data.command === "compare") {
+      return getChangedFrame(data.index, data.palette, data.width, data.height, data.previousPixels);
+    }
+    if (data.command === "encode") {
+      return { bytes: encodeGifFrame(data.frame, data.first) };
+    }
+    return prepareGifFrame(data.pixels);
+  }
+  if (typeof self !== "undefined" && !self.document) {
+    self.onmessage = ({ data }) => {
+      const { id } = data;
+      try {
+        const result = runGifJob(data);
+        const transfer = data.command === "capture" ? [result.pixels.buffer] : data.command === "compare" ? [result.pixels.buffer, ...result.frame ? [result.frame.index.buffer] : []] : [(result.bytes || result.index).buffer];
+        self.postMessage({ id, ...result }, transfer);
+      } catch (error) {
+        self.postMessage({ id, error: error.message });
+      }
+    };
+  }
+
+  // src/x-gif-workers.js
+  var pools = /* @__PURE__ */ new WeakMap();
+  async function yieldForGifUi(windowRef) {
+    if (windowRef.scheduler?.yield) await windowRef.scheduler.yield();
+    else if (windowRef.setTimeout) await new Promise((resolve) => windowRef.setTimeout(resolve, 0));
+  }
+  function isByteArray(value) {
+    return ArrayBuffer.isView(value) && value.BYTES_PER_ELEMENT === 1;
+  }
+  function isPalette(value) {
+    return Array.isArray(value) && value.length > 0 && value.length <= 256 && value.every((color) => Array.isArray(color) && color.length === 3 && color.every((channel) => Number.isInteger(channel) && channel >= 0 && channel <= 255));
+  }
+  function isValidResult(job, data) {
+    if (job.command === "capture") {
+      return isByteArray(data.pixels) && data.pixels.length === job.width * job.height * 4;
+    }
+    if (job.command === "encode") {
+      return isByteArray(data.bytes) && data.bytes.length > 8 && data.bytes[0] === (job.first ? 71 : 33);
+    }
+    if (job.command === "compare") {
+      const frame = data.frame;
+      return ArrayBuffer.isView(data.pixels) && data.pixels.BYTES_PER_ELEMENT === 4 && data.pixels.length === job.width * job.height && (frame === null || frame && [frame.left, frame.top, frame.width, frame.height].every(Number.isInteger) && frame.left >= 0 && frame.top >= 0 && frame.width > 0 && frame.height > 0 && frame.left + frame.width <= job.width && frame.top + frame.height <= job.height && isByteArray(frame.index) && frame.index.length === frame.width * frame.height && isPalette(frame.palette) && Number.isInteger(frame.transparentIndex) && frame.transparentIndex >= -1 && frame.transparentIndex < frame.palette.length);
+    }
+    return isPalette(data.palette) && isByteArray(data.index) && data.index.length === job.pixels.length / 4;
+  }
+  function createPool(windowRef, source) {
+    const slots = [];
+    const queue = [];
+    let disabled = false;
+    let nextId = 0;
+    async function fallback(job) {
+      clearTimeout(job.timer);
+      try {
+        await yieldForGifUi(windowRef);
+        job.resolve(job.runFallback ? await job.runFallback() : runGifJob(job.backup));
+      } catch (error) {
+        job.reject(error);
+      }
+    }
+    function stop() {
+      if (disabled) return;
+      disabled = true;
+      const pending = queue.splice(0);
+      for (const slot of slots) {
+        slot.worker.terminate();
+        if (slot.job) pending.push(slot.job);
+        slot.job = null;
+      }
+      pending.forEach(fallback);
+    }
+    function dispatch() {
+      for (const slot of slots) {
+        if (disabled || slot.job || !queue.length) continue;
+        const job = queue.shift();
+        slot.job = job;
+        job.timer = setTimeout(stop, 15e3);
+        try {
+          slot.worker.postMessage({ id: job.id, ...job.data }, job.transfer);
+        } catch {
+          stop();
+        }
+      }
+    }
+    let url;
+    try {
+      url = windowRef.URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      const count = Math.min(2, Math.max(1, (windowRef.navigator?.hardwareConcurrency || 2) - 1));
+      for (let i = 0; i < count; i++) {
+        const worker = new windowRef.Worker(url);
+        const slot = { worker, job: null };
+        slots.push(slot);
+        worker.onmessage = ({ data }) => {
+          const job = slot.job;
+          if (!job || disabled) return;
+          if (data?.id !== job.id || data.error || !isValidResult(job.backup, data)) {
+            stop();
+            return;
+          }
+          clearTimeout(job.timer);
+          slot.job = null;
+          job.resolve(data);
+          dispatch();
+        };
+        worker.onerror = (event) => {
+          event.preventDefault?.();
+          stop();
+        };
+        worker.onmessageerror = stop;
+      }
+    } catch {
+      stop();
+      return null;
+    } finally {
+      if (url) windowRef.URL.revokeObjectURL(url);
+    }
+    return {
+      users: 0,
+      get disabled() {
+        return disabled;
+      },
+      request(data, transfer = [], backup = data, runFallback = null) {
+        return new Promise((resolve, reject) => {
+          const job = { id: nextId++, data, transfer, backup, runFallback, resolve, reject };
+          if (disabled) fallback(job);
+          else {
+            queue.push(job);
+            dispatch();
+          }
+        });
+      },
+      stop
+    };
+  }
+  function acquireGifWorkers(windowRef, source) {
+    if (!source || typeof windowRef.Worker !== "function") return null;
+    let pool = pools.get(windowRef);
+    if (!pool) {
+      pool = createPool(windowRef, source);
+      if (!pool) return null;
+      pools.set(windowRef, pool);
+    }
+    pool.users++;
+    return {
+      async capture(video, width, height, readFrame) {
+        let bitmap;
+        const fallback = () => ({ pixels: readFrame() });
+        if (pool.disabled) {
+          await yieldForGifUi(windowRef);
+          return fallback();
+        }
+        try {
+          bitmap = await windowRef.createImageBitmap(video);
+        } catch {
+          await yieldForGifUi(windowRef);
+          return fallback();
+        }
+        try {
+          const data = { command: "capture", bitmap, width, height };
+          return await pool.request(data, [bitmap], data, fallback);
+        } finally {
+          bitmap.close();
+        }
+      },
+      process: (pixels, backup) => pool.request({ pixels }, [pixels.buffer], { pixels: backup }),
+      compare: (index, palette, width, height, previousPixels) => pool.request({ command: "compare", index, palette, width, height, previousPixels }),
+      encode: (frame, first) => pool.request({ command: "encode", frame: { ...frame }, first }),
+      release() {
+        if (--pool.users === 0) {
+          pool.stop();
+          pools.delete(windowRef);
+        }
+      }
+    };
+  }
+
+  // src/x-gif.js
+  var workerSource = true ? '(()=>{var ue=Object.create;var K=Object.defineProperty;var he=Object.getOwnPropertyDescriptor;var ge=Object.getOwnPropertyNames;var we=Object.getPrototypeOf,de=Object.prototype.hasOwnProperty;var ye=(e,t)=>()=>(t||e((t={exports:{}}).exports,t),t.exports);var pe=(e,t,n,r)=>{if(t&&typeof t=="object"||typeof t=="function")for(let o of ge(t))!de.call(e,o)&&o!==n&&K(e,o,{get:()=>t[o],enumerable:!(r=he(t,o))||r.enumerable});return e};var X=(e,t,n)=>(n=e!=null?ue(we(e)):{},pe(t||!e||!e.__esModule?K(n,"default",{value:e,enumerable:!0}):n,e));var Z=ye(N=>{var ee=Object.defineProperty,be=e=>ee(e,"__esModule",{value:!0}),xe=(e,t)=>{for(var n in t)ee(e,n,{get:t[n],enumerable:!0})};be(N);xe(N,{GIFEncoder:()=>se,applyPalette:()=>ke,default:()=>Ve,nearestColor:()=>Ee,nearestColorIndex:()=>ie,nearestColorIndexWithDistance:()=>ce,prequantize:()=>_e,quantize:()=>Ce,snapColorsToPalette:()=>ze});var Ae={signature:"GIF",version:"89a",trailer:59,extensionIntroducer:33,applicationExtensionLabel:255,graphicControlExtensionLabel:249,imageSeparator:44,signatureSize:3,versionSize:3,globalColorTableFlagMask:128,colorResolutionMask:112,sortFlagMask:8,globalColorTableSizeMask:7,applicationIdentifierSize:8,applicationAuthCodeSize:3,disposalMethodMask:28,userInputFlagMask:2,transparentColorFlagMask:1,localColorTableFlagMask:128,interlaceFlagMask:64,idSortFlagMask:32,localColorTableSizeMask:7};function te(e=256){let t=0,n=new Uint8Array(e);return{get buffer(){return n.buffer},reset(){t=0},bytesView(){return n.subarray(0,t)},bytes(){return n.slice(0,t)},writeByte(o){r(t+1),n[t]=o,t++},writeBytes(o,c=0,i=o.length){r(t+i);for(let s=0;s<i;s++)n[t++]=o[s+c]},writeBytesView(o,c=0,i=o.byteLength){r(t+i),n.set(o.subarray(c,c+i),t),t+=i}};function r(o){var c=n.length;if(c>=o)return;var i=1024*1024;o=Math.max(o,c*(c<i?2:1.125)>>>0),c!=0&&(o=Math.max(o,256));let s=n;n=new Uint8Array(o),t>0&&n.set(s.subarray(0,t),0)}}var L=12,Y=5003,Me=[0,1,3,7,15,31,63,127,255,511,1023,2047,4095,8191,16383,32767,65535];function me(e,t,n,r,o=te(512),c=new Uint8Array(256),i=new Int32Array(Y),s=new Int32Array(Y)){let h=i.length,u=Math.max(2,r);c.fill(0),s.fill(0),i.fill(-1);let f=0,l=0,g=u+1,p=g,d=!1,y=p,w=(1<<y)-1,a=1<<g-1,m=a+1,M=a+2,b=0,B=n[0],F=0;for(let A=h;A<65536;A*=2)++F;F=8-F,o.writeByte(u),C(a);let x=n.length;for(let A=1;A<x;A++)e:{let _=n[A],k=(_<<L)+B,I=_<<F^B;if(i[I]===k){B=s[I];break e}let R=I===0?1:h-I;for(;i[I]>=0;)if(I-=R,I<0&&(I+=h),i[I]===k){B=s[I];break e}C(B),B=_,M<1<<L?(s[I]=M++,i[I]=k):(i.fill(-1),M=a+2,d=!0,C(a))}return C(B),C(m),o.writeByte(0),o.bytesView();function C(A){for(f&=Me[l],l>0?f|=A<<l:f=A,l+=y;l>=8;)c[b++]=f&255,b>=254&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0),f>>=8,l-=8;if((M>w||d)&&(d?(y=p,w=(1<<y)-1,d=!1):(++y,w=y===L?1<<y:(1<<y)-1)),A==m){for(;l>0;)c[b++]=f&255,b>=254&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0),f>>=8,l-=8;b>0&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0)}}}var Be=me;function ne(e,t,n){return e<<8&63488|t<<2&992|n>>3}function re(e,t,n,r){return e>>4|t&240|(n&240)<<4|(r&240)<<8}function oe(e,t,n){return e>>4<<8|t&240|n>>4}function D(e,t,n){return e<t?t:e>n?n:e}function q(e){return e*e}function Q(e,t,n){var r=0,o=1e100;let c=e[t],i=c.cnt,s=c.ac,h=c.rc,u=c.gc,f=c.bc;for(var l=c.fw;l!=0;l=e[l].fw){let p=e[l],d=p.cnt,y=i*d/(i+d);if(!(y>=o)){var g=0;n&&(g+=y*q(p.ac-s),g>=o)||(g+=y*q(p.rc-h),!(g>=o)&&(g+=y*q(p.gc-u),!(g>=o)&&(g+=y*q(p.bc-f),!(g>=o)&&(o=g,r=l))))}}c.err=o,c.nn=r}function W(){return{ac:0,rc:0,gc:0,bc:0,cnt:0,nn:0,fw:0,bk:0,tm:0,mtm:0,err:0}}function Ie(e,t){let n=t==="rgb444"?4096:65536,r=new Array(n),o=e.length;if(t==="rgba4444")for(let c=0;c<o;++c){let i=e[c],s=i>>24&255,h=i>>16&255,u=i>>8&255,f=i&255,l=re(f,u,h,s),g=l in r?r[l]:r[l]=W();g.rc+=f,g.gc+=u,g.bc+=h,g.ac+=s,g.cnt++}else if(t==="rgb444")for(let c=0;c<o;++c){let i=e[c],s=i>>16&255,h=i>>8&255,u=i&255,f=oe(u,h,s),l=f in r?r[f]:r[f]=W();l.rc+=u,l.gc+=h,l.bc+=s,l.cnt++}else for(let c=0;c<o;++c){let i=e[c],s=i>>16&255,h=i>>8&255,u=i&255,f=ne(u,h,s),l=f in r?r[f]:r[f]=W();l.rc+=u,l.gc+=h,l.bc+=s,l.cnt++}return r}function Ce(e,t,n={}){let{format:r="rgb565",clearAlpha:o=!0,clearAlphaColor:c=0,clearAlphaThreshold:i=0,oneBitAlpha:s=!1}=n;if(!e||!e.buffer)throw new Error("quantize() expected RGBA Uint8Array data");if(!(e instanceof Uint8Array)&&!(e instanceof Uint8ClampedArray))throw new Error("quantize() expected RGBA Uint8Array data");let h=new Uint32Array(e.buffer),u=n.useSqrt!==!1,f=r==="rgba4444",l=Ie(h,r),g=l.length,p=g-1,d=new Uint32Array(g+1);for(var y=0,a=0;a<g;++a){let v=l[a];if(v!=null){var w=1/v.cnt;f&&(v.ac*=w),v.rc*=w,v.gc*=w,v.bc*=w,l[y++]=v}}q(t)/y<.022&&(u=!1);for(var a=0;a<y-1;++a)l[a].fw=a+1,l[a+1].bk=a,u&&(l[a].cnt=Math.sqrt(l[a].cnt));u&&(l[a].cnt=Math.sqrt(l[a].cnt));var m,M,b;for(a=0;a<y;++a){Q(l,a,!1);var B=l[a].err;for(M=++d[0];M>1&&(b=M>>1,!(l[m=d[b]].err<=B));M=b)d[M]=m;d[M]=a}var F=y-t;for(a=0;a<F;){for(var x;;){var C=d[1];if(x=l[C],x.tm>=x.mtm&&l[x.nn].mtm<=x.tm)break;x.mtm==p?C=d[1]=d[d[0]--]:(Q(l,C,!1),x.tm=a);var B=l[C].err;for(M=1;(b=M+M)<=d[0]&&(b<d[0]&&l[d[b]].err>l[d[b+1]].err&&b++,!(B<=l[m=d[b]].err));M=b)d[M]=m;d[M]=C}var A=l[x.nn],_=x.cnt,k=A.cnt,w=1/(_+k);f&&(x.ac=w*(_*x.ac+k*A.ac)),x.rc=w*(_*x.rc+k*A.rc),x.gc=w*(_*x.gc+k*A.gc),x.bc=w*(_*x.bc+k*A.bc),x.cnt+=A.cnt,x.mtm=++a,l[A.bk].fw=A.fw,l[A.fw].bk=A.bk,A.mtm=p}let I=[];var R=0;for(a=0;;++R){let O=D(Math.round(l[a].rc),0,255),v=D(Math.round(l[a].gc),0,255),H=D(Math.round(l[a].bc),0,255),E=255;f&&(E=D(Math.round(l[a].ac),0,255),s&&(E=E<=(typeof s=="number"?s:127)?0:255),o&&E<=i&&(O=v=H=c,E=0));let J=f?[O,v,H,E]:[O,v,H];if(ve(I,J)||I.push(J),(a=l[a].fw)==0)break}return I}function ve(e,t){for(let n=0;n<e.length;n++){let r=e[n],o=r[0]===t[0]&&r[1]===t[1]&&r[2]===t[2],c=r.length>=4&&t.length>=4?r[3]===t[3]:!0;if(o&&c)return!0}return!1}function P(e,t){var n=0,r;for(r=0;r<e.length;r++){let o=e[r]-t[r];n+=o*o}return n}function V(e,t){return t>1?Math.round(e/t)*t:e}function _e(e,{roundRGB:t=5,roundAlpha:n=10,oneBitAlpha:r=null}={}){let o=new Uint32Array(e.buffer);for(let c=0;c<o.length;c++){let i=o[c],s=i>>24&255,h=i>>16&255,u=i>>8&255,f=i&255;s=V(s,n),r&&(s=s<=(typeof r=="number"?r:127)?0:255),f=V(f,t),u=V(u,t),h=V(h,t),o[c]=s<<24|h<<16|u<<8|f<<0}}function ke(e,t,n="rgb565"){if(!e||!e.buffer)throw new Error("quantize() expected RGBA Uint8Array data");if(!(e instanceof Uint8Array)&&!(e instanceof Uint8ClampedArray))throw new Error("quantize() expected RGBA Uint8Array data");if(t.length>256)throw new Error("applyPalette() only works with 256 colors or less");let r=new Uint32Array(e.buffer),o=r.length,c=n==="rgb444"?4096:65536,i=new Uint8Array(o),s=new Array(c),h=n==="rgba4444";if(n==="rgba4444")for(let u=0;u<o;u++){let f=r[u],l=f>>24&255,g=f>>16&255,p=f>>8&255,d=f&255,y=re(d,p,g,l),w=y in s?s[y]:s[y]=Fe(d,p,g,l,t);i[u]=w}else{let u=n==="rgb444"?oe:ne;for(let f=0;f<o;f++){let l=r[f],g=l>>16&255,p=l>>8&255,d=l&255,y=u(d,p,g),w=y in s?s[y]:s[y]=Ue(d,p,g,t);i[f]=w}}return i}function Fe(e,t,n,r,o){let c=0,i=1e100;for(let s=0;s<o.length;s++){let h=o[s],u=h[3],f=z(u-r);if(f>i)continue;let l=h[0];if(f+=z(l-e),f>i)continue;let g=h[1];if(f+=z(g-t),f>i)continue;let p=h[2];f+=z(p-n),!(f>i)&&(i=f,c=s)}return c}function Ue(e,t,n,r){let o=0,c=1e100;for(let i=0;i<r.length;i++){let s=r[i],h=s[0],u=z(h-e);if(u>c)continue;let f=s[1];if(u+=z(f-t),u>c)continue;let l=s[2];u+=z(l-n),!(u>c)&&(c=u,o=i)}return o}function ze(e,t,n=5){if(!e.length||!t.length)return;let r=e.map(i=>i.slice(0,3)),o=n*n,c=e[0].length;for(let i=0;i<t.length;i++){let s=t[i];s.length<c?s=[s[0],s[1],s[2],255]:s.length>c?s=s.slice(0,3):s=s.slice();let h=ce(r,s.slice(0,3),P),u=h[0],f=h[1];f>0&&f<=o&&(e[u]=s)}}function z(e){return e*e}function ie(e,t,n=P){let r=1/0,o=-1;for(let c=0;c<e.length;c++){let i=e[c],s=n(t,i);s<r&&(r=s,o=c)}return o}function ce(e,t,n=P){let r=1/0,o=-1;for(let c=0;c<e.length;c++){let i=e[c],s=n(t,i);s<r&&(r=s,o=c)}return[o,r]}function Ee(e,t,n=P){return e[ie(e,t,n)]}function se(e={}){let{initialCapacity:t=4096,auto:n=!0}=e,r=te(t),o=5003,c=new Uint8Array(256),i=new Int32Array(o),s=new Int32Array(o),h=!1;return{reset(){r.reset(),h=!1},finish(){r.writeByte(Ae.trailer)},bytes(){return r.bytes()},bytesView(){return r.bytesView()},get buffer(){return r.buffer},get stream(){return r},writeHeader:u,writeFrame(f,l,g,p={}){let{transparent:d=!1,transparentIndex:y=0,delay:w=0,palette:a=null,repeat:m=0,colorDepth:M=8,dispose:b=-1}=p,B=!1;if(n?h||(B=!0,u(),h=!0):B=!!p.first,l=Math.max(0,Math.floor(l)),g=Math.max(0,Math.floor(g)),B){if(!a)throw new Error("First frame must include a { palette } option");Te(r,l,g,a,M),$(r,a),m>=0&&Ge(r,m)}let F=Math.round(w/10);qe(r,b,F,d,y);let x=!!a&&!B;Se(r,l,g,x?a:null),x&&$(r,a),De(r,f,l,g,M,c,i,s)}};function u(){le(r,"GIF89a")}}function qe(e,t,n,r,o){e.writeByte(33),e.writeByte(249),e.writeByte(4),o<0&&(o=0,r=!1);var c,i;r?(c=1,i=2):(c=0,i=0),t>=0&&(i=t&7),i<<=2,e.writeByte(0|i|0|c),U(e,n),e.writeByte(o||0),e.writeByte(0)}function Te(e,t,n,r,o=8){let s=j(r.length)-1,h=128|o-1<<4|0|s,u=0,f=0;U(e,t),U(e,n),e.writeBytes([h,u,f])}function Ge(e,t){e.writeByte(33),e.writeByte(255),e.writeByte(11),le(e,"NETSCAPE2.0"),e.writeByte(3),e.writeByte(1),U(e,t),e.writeByte(0)}function $(e,t){let n=1<<j(t.length);for(let r=0;r<n;r++){let o=[0,0,0];r<t.length&&(o=t[r]),e.writeByte(o[0]),e.writeByte(o[1]),e.writeByte(o[2])}}function Se(e,t,n,r){if(e.writeByte(44),U(e,0),U(e,0),U(e,t),U(e,n),r){let i=j(r.length)-1;e.writeByte(128|i)}else e.writeByte(0)}function De(e,t,n,r,o=8,c,i,s){Be(n,r,t,o,e,c,i,s)}function U(e,t){e.writeByte(t&255),e.writeByte(t>>8&255)}function le(e,t){for(var n=0;n<t.length;n++)e.writeByte(t.charCodeAt(n))}function j(e){return Math.max(Math.ceil(Math.log2(e)),1)}var Ve=se});var S=X(Z(),1);var T=X(Z(),1),{GIFEncoder:Pe}=T.GIFEncoder?T:T.default;function fe(e,t,n,r,o){let c=t.map(([w,a,m])=>w|a<<8|m<<16),i=new Uint32Array(e.length);for(let w=0;w<e.length;w++)i[w]=c[e[w]];let s=n,h=r,u=-1,f=-1,l=new Uint8Array(256);for(let w=0;w<i.length;w++)if(!o||i[w]!==o[w]){let a=w%n,m=Math.floor(w/n);s=Math.min(s,a),h=Math.min(h,m),u=Math.max(u,a),f=Math.max(f,m),l[e[w]]=1}if(u<0)return{pixels:i,frame:null};let g=o?l.indexOf(0):-1;g===t.length&&t.push([0,0,0]);let p=u-s+1,d=f-h+1,y=new Uint8Array(p*d);for(let w=0;w<d;w++)for(let a=0;a<p;a++){let m=(h+w)*n+s+a;y[w*p+a]=g>=0&&i[m]===o[m]?g:e[m]}return{pixels:i,frame:{index:y,palette:t,width:p,height:d,left:s,top:h,transparentIndex:g}}}function ae(e,t){let n=Pe({auto:!1});if(t&&n.writeHeader(),n.writeFrame(e.index,e.width,e.height,{first:t,palette:e.palette,delay:e.delay,repeat:0,colorDepth:Math.max(2,Math.ceil(Math.log2(e.palette.length))),dispose:1,transparent:e.transparentIndex>=0,transparentIndex:e.transparentIndex}),!t){if(n.bytesView()[8]!==44)throw new Error("GIF 编码器的帧结构不兼容");let r=new DataView(n.buffer);r.setUint16(9,e.left,!0),r.setUint16(11,e.top,!0)}return n.bytesView()}var{quantize:Re,applyPalette:Oe}=S.quantize?S:S.default,G=null;function He(e){let t=Re(e,256);return{palette:t,index:Oe(e,t)}}function Le(e){if(e.command==="capture")try{(!G||G.width!==e.width||G.height!==e.height)&&(G=new OffscreenCanvas(e.width,e.height));let t=G.getContext("2d",{willReadFrequently:!0});if(!t)throw new Error("Worker 不支持 Canvas 2D");return t.drawImage(e.bitmap,0,0,e.width,e.height),{pixels:t.getImageData(0,0,e.width,e.height).data}}finally{e.bitmap.close()}return e.command==="compare"?fe(e.index,e.palette,e.width,e.height,e.previousPixels):e.command==="encode"?{bytes:ae(e.frame,e.first)}:He(e.pixels)}typeof self<"u"&&!self.document&&(self.onmessage=({data:e})=>{let{id:t}=e;try{let n=Le(e),r=e.command==="capture"?[n.pixels.buffer]:e.command==="compare"?[n.pixels.buffer,...n.frame?[n.frame.index.buffer]:[]]:[(n.bytes||n.index).buffer];self.postMessage({id:t,...n},r)}catch(n){self.postMessage({id:t,error:n.message})}});})();\n' : "";
+  function waitForVideo(video, eventName, action) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error("视频解码超时")), 3e4);
+      function finish(error) {
+        clearTimeout(timer);
+        video.removeEventListener(eventName, onReady);
+        video.removeEventListener("error", onError);
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      }
+      function onReady() {
+        finish();
+      }
+      function onError() {
+        finish(new Error("浏览器无法解码此 GIF 视频源"));
+      }
+      video.addEventListener(eventName, onReady);
+      video.addEventListener("error", onError);
+      try {
+        action();
+      } catch (error) {
+        finish(error);
+      }
+    });
   }
   async function convertXVideoToGif(blob, windowRef) {
     const video = windowRef.document.createElement("video");
@@ -2148,6 +2355,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
+    let workers = null;
     try {
       await waitForVideo(video, "loadeddata", () => {
         video.src = sourceUrl;
@@ -2165,12 +2373,46 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       if (!context) {
         throw new Error("浏览器不支持 Canvas 2D");
       }
-      const gif = GIFEncoder2();
+      const encodedParts = [];
+      const encoding = [];
+      let firstFrame = true;
       const frameDelay = 50;
       const durationMs = Math.max(10, Math.round(video.duration * 100) * 10);
       const frameCount = Math.ceil(durationMs / frameDelay);
+      workers = acquireGifWorkers(windowRef, workerSource);
+      const captureInWorker = workers && typeof windowRef.createImageBitmap === "function" && typeof windowRef.OffscreenCanvas === "function";
+      const queuedFrames = [];
+      let previousRaw = null;
       let previousPixels = null;
       let pendingFrame = null;
+      async function writeFrame(frame) {
+        if (!workers) await yieldForGifUi(windowRef);
+        const result = workers ? workers.encode(frame, firstFrame) : Promise.resolve({ bytes: encodeGifFrame(frame, firstFrame) });
+        firstFrame = false;
+        result.catch(() => {
+        });
+        encoding.push(result);
+        if (encoding.length > 2) encodedParts.push((await encoding.shift()).bytes);
+      }
+      async function consumeFrame() {
+        const { result, delay } = queuedFrames.shift();
+        const { index, palette } = await result;
+        if (!workers) await yieldForGifUi(windowRef);
+        const changed = workers ? await workers.compare(index, palette, width, height, previousPixels) : getChangedFrame(index, palette, width, height, previousPixels);
+        previousPixels = changed.pixels;
+        if (changed.frame) {
+          if (pendingFrame) await writeFrame(pendingFrame);
+          pendingFrame = { ...changed.frame, delay: 0 };
+        }
+        let remaining = delay;
+        while (pendingFrame.delay + remaining > 655350) {
+          remaining -= 655350 - pendingFrame.delay;
+          pendingFrame.delay = 655350;
+          await writeFrame(pendingFrame);
+          pendingFrame.delay = 0;
+        }
+        pendingFrame.delay += remaining;
+      }
       for (let frame = 0; frame < frameCount; frame++) {
         const time = frame * frameDelay / 1e3;
         if (video.currentTime !== time) {
@@ -2178,29 +2420,51 @@ OR OTHER DEALINGS IN THE SOFTWARE.
             video.currentTime = time;
           });
         }
-        context.drawImage(video, 0, 0, width, height);
-        const { data } = context.getImageData(0, 0, width, height);
-        const palette = quantize(data, 256);
-        const changed = getChangedFrame(applyPalette(data, palette), palette, width, height, previousPixels);
+        const readFrame = () => {
+          context.drawImage(video, 0, 0, width, height);
+          return context.getImageData(0, 0, width, height).data;
+        };
+        let data;
+        if (captureInWorker) {
+          ({ pixels: data } = await workers.capture(video, width, height, readFrame));
+        } else {
+          await yieldForGifUi(windowRef);
+          context.drawImage(video, 0, 0, width, height);
+          await yieldForGifUi(windowRef);
+          data = context.getImageData(0, 0, width, height).data;
+        }
         const delay = Math.min(frameDelay, durationMs - frame * frameDelay);
-        previousPixels = changed.pixels;
-        if (!changed.frame) {
-          if (pendingFrame.delay + delay > 655350) {
-            writeGifFrame(gif, pendingFrame);
-            pendingFrame.delay = 0;
+        const raw = new Uint32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+        let identical = !!previousRaw;
+        if (identical) {
+          for (let i = 0; i < raw.length; i++) {
+            if (raw[i] !== previousRaw[i]) {
+              identical = false;
+              break;
+            }
           }
-          pendingFrame.delay += delay;
+        }
+        if (identical) {
+          queuedFrames[queuedFrames.length - 1].delay += delay;
           continue;
         }
-        if (pendingFrame) {
-          writeGifFrame(gif, pendingFrame);
+        const backup = workers ? data.slice() : data;
+        previousRaw = new Uint32Array(backup.buffer, backup.byteOffset, backup.byteLength / 4);
+        if (!workers) await yieldForGifUi(windowRef);
+        const result = workers ? workers.process(data, backup) : Promise.resolve(prepareGifFrame(data));
+        result.catch(() => {
+        });
+        queuedFrames.push({ result, delay });
+        if (queuedFrames.length > (workers ? 2 : 1)) {
+          await consumeFrame();
         }
-        pendingFrame = { ...changed.frame, delay };
       }
-      writeGifFrame(gif, pendingFrame);
-      gif.finish();
-      return new Blob([gif.bytesView()], { type: "image/gif" });
+      while (queuedFrames.length) await consumeFrame();
+      await writeFrame(pendingFrame);
+      while (encoding.length) encodedParts.push((await encoding.shift()).bytes);
+      return new Blob([...encodedParts, new Uint8Array([59])], { type: "image/gif" });
     } finally {
+      workers?.release();
       video.pause();
       video.removeAttribute("src");
       video.load();
@@ -2414,7 +2678,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     }
     async function fetchBlobWithWindowFetch(url) {
       const response = await fetchRef(url, {
-        credentials: "include"
+        credentials: platform.id === "x" ? "omit" : "include"
       });
       if (!response || !response.ok) {
         throw new Error(`fetch状态异常: ${response?.status ?? "unknown"}`);

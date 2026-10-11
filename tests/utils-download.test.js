@@ -333,3 +333,20 @@ test("browser anchor fallback reports initiation instead of claiming saved files
     assert.equal(clicks.length, 1);
     assert.deepEqual(toastMessages, ["已发起 1 个文件的下载；请查看浏览器下载列表"]);
 });
+
+test("X public media fallback omits credentials while Weibo retains them", async () => {
+    for (const [hostname, url, credentials] of [
+        ["x.com", "https://video.twimg.com/tweet_video/demo.mp4", "omit"],
+        ["weibo.com", "https://wx4.sinaimg.cn/large/demo.jpg", "include"]
+    ]) {
+        const { utils, clicks } = createTestUtils({
+            windowOverrides: { location: { hostname } },
+            fetchRef: async (_, options) => {
+                assert.equal(options.credentials, credentials);
+                return { ok: true, blob: async () => new Blob(["media"]) };
+            }
+        });
+        assert.equal(await utils.downloadImageFallback(url, "media"), "started");
+        assert.equal(clicks.length, 1);
+    }
+});

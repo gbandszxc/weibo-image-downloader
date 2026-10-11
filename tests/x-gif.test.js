@@ -124,6 +124,20 @@ test("very short videos retain a valid minimum GIF frame delay", async () => {
     assert.deepEqual(readFrameDelays(new Uint8Array(await gif.arrayBuffer())), [10]);
 });
 
+test("long identical frames split GIF delay without wrapping or changing pixels", async () => {
+    const pixels = new Uint8Array([255, 0, 0, 255, 0, 0, 0, 255]);
+    const mock = createGifVideoMock({ duration: 700, frames: [pixels] });
+    const gif = await convertXVideoToGif(new Blob(["long-static"]), mock.windowRef);
+    const bytes = new Uint8Array(await gif.arrayBuffer());
+    assert.deepEqual(readFrameDelays(bytes), [655350, 44650]);
+    const reader = new GifReader(bytes);
+    const composed = new Uint8Array(pixels.length);
+    for (let frame = 0; frame < reader.numFrames(); frame++) {
+        reader.decodeAndBlitFrameRGBA(frame, composed);
+        assert.deepEqual(composed, pixels);
+    }
+});
+
 test("stalled decoding times out and releases the source", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const mock = createGifVideoMock();

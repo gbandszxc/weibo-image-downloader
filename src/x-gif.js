@@ -1,7 +1,8 @@
-import * as gifenc from "gifenc";
+import { getChangedFrame, encodeGifFrame } from "./x-gif-frame.js";
+import { prepareGifFrame } from "./x-gif-worker.js";
+import { acquireGifWorkers, yieldForGifUi } from "./x-gif-workers.js";
 
-// Node 使用此包的 CommonJS 入口，浏览器构建使用 ESM 入口。
-const { GIFEncoder, quantize, applyPalette } = gifenc.GIFEncoder ? gifenc : gifenc.default;
+const workerSource = typeof __X_GIF_WORKER_SOURCE__ === "string" ? __X_GIF_WORKER_SOURCE__ : "";
 
 function waitForVideo(video, eventName, action) {
     return new Promise((resolve, reject) => {
@@ -32,78 +33,13 @@ function waitForVideo(video, eventName, action) {
     });
 }
 
-function getChangedFrame(index, palette, width, height, previousPixels) {
-    const colors = palette.map(([r, g, b]) => r | g << 8 | b << 16);
-    const pixels = Uint32Array.from(index, (color) => colors[color]);
-    let left = width;
-    let top = height;
-    let right = -1;
-    let bottom = -1;
-    const usedColors = new Uint8Array(256);
-    for (let i = 0; i < pixels.length; i++) {
-        if (!previousPixels || pixels[i] !== previousPixels[i]) {
-            const x = i % width;
-            const y = Math.floor(i / width);
-            left = Math.min(left, x);
-            top = Math.min(top, y);
-            right = Math.max(right, x);
-            bottom = Math.max(bottom, y);
-            usedColors[index[i]] = 1;
-        }
-    }
-    if (right < 0) {
-        return { pixels, frame: null };
-    }
-
-    // 仅借用变化像素未使用的颜色索引作透明色，保留所有实际颜色。
-    const transparentIndex = previousPixels ? usedColors.indexOf(0) : -1;
-    if (transparentIndex === palette.length) {
-        palette.push([0, 0, 0]);
-    }
-    const frameWidth = right - left + 1;
-    const frameHeight = bottom - top + 1;
-    const cropped = new Uint8Array(frameWidth * frameHeight);
-    for (let y = 0; y < frameHeight; y++) {
-        for (let x = 0; x < frameWidth; x++) {
-            const source = (top + y) * width + left + x;
-            cropped[y * frameWidth + x] = transparentIndex >= 0 && pixels[source] === previousPixels[source]
-                ? transparentIndex : index[source];
-        }
-    }
-    return {
-        pixels,
-        frame: { index: cropped, palette, width: frameWidth, height: frameHeight, left, top, transparentIndex }
-    };
-}
-
-function writeGifFrame(gif, frame) {
-    const start = gif.bytesView().length;
-    gif.writeFrame(frame.index, frame.width, frame.height, {
-        palette: frame.palette,
-        delay: frame.delay,
-        repeat: 0,
-        colorDepth: Math.max(2, Math.ceil(Math.log2(frame.palette.length))),
-        dispose: 1,
-        transparent: frame.transparentIndex >= 0,
-        transparentIndex: frame.transparentIndex
-    });
-    if (start > 0) {
-        // gifenc 未提供帧坐标选项；GIF89a 的 8 字节 GCE 后紧接图像描述符。
-        if (gif.bytesView()[start + 8] !== 0x2c) {
-            throw new Error("GIF 编码器的帧结构不兼容");
-        }
-        const view = new DataView(gif.buffer);
-        view.setUint16(start + 9, frame.left, true);
-        view.setUint16(start + 11, frame.top, true);
-    }
-}
-
 export async function convertXVideoToGif(blob, windowRef) {
     const video = windowRef.document.createElement("video");
     const sourceUrl = windowRef.URL.createObjectURL(blob);
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
+    let workers = null;
 
     try {
         await waitForVideo(video, "loadeddata", () => {
@@ -125,13 +61,53 @@ export async function convertXVideoToGif(blob, windowRef) {
             throw new Error("浏览器不支持 Canvas 2D");
         }
 
-        const gif = GIFEncoder();
+        const encodedParts = [];
+        const encoding = [];
+        let firstFrame = true;
         // shortcut: 按 20 FPS 采样，若需要保留更高帧率则改用逐帧解码。
         const frameDelay = 50;
         const durationMs = Math.max(10, Math.round(video.duration * 100) * 10);
         const frameCount = Math.ceil(durationMs / frameDelay);
+        workers = acquireGifWorkers(windowRef, workerSource);
+        const captureInWorker = workers && typeof windowRef.createImageBitmap === "function" &&
+            typeof windowRef.OffscreenCanvas === "function";
+        const queuedFrames = [];
+        let previousRaw = null;
         let previousPixels = null;
         let pendingFrame = null;
+
+        async function writeFrame(frame) {
+            if (!workers) await yieldForGifUi(windowRef);
+            const result = workers ? workers.encode(frame, firstFrame) : Promise.resolve({ bytes: encodeGifFrame(frame, firstFrame) });
+            firstFrame = false;
+            result.catch(() => {});
+            encoding.push(result);
+            if (encoding.length > 2) encodedParts.push((await encoding.shift()).bytes);
+        }
+
+        async function consumeFrame() {
+            const { result, delay } = queuedFrames.shift();
+            const { index, palette } = await result;
+            if (!workers) await yieldForGifUi(windowRef);
+            const changed = workers
+                ? await workers.compare(index, palette, width, height, previousPixels)
+                : getChangedFrame(index, palette, width, height, previousPixels);
+            previousPixels = changed.pixels;
+            if (changed.frame) {
+                if (pendingFrame) await writeFrame(pendingFrame);
+                pendingFrame = { ...changed.frame, delay: 0 };
+            }
+            let remaining = delay;
+            // GIF 延迟字段为 16 位，长时间静止时拆分，避免溢出加速播放。
+            while (pendingFrame.delay + remaining > 655350) {
+                remaining -= 655350 - pendingFrame.delay;
+                pendingFrame.delay = 655350;
+                await writeFrame(pendingFrame);
+                pendingFrame.delay = 0;
+            }
+            pendingFrame.delay += remaining;
+        }
+
         for (let frame = 0; frame < frameCount; frame++) {
             const time = frame * frameDelay / 1000;
             if (video.currentTime !== time) {
@@ -139,30 +115,51 @@ export async function convertXVideoToGif(blob, windowRef) {
                     video.currentTime = time;
                 });
             }
-            context.drawImage(video, 0, 0, width, height);
-            const { data } = context.getImageData(0, 0, width, height);
-            const palette = quantize(data, 256);
-            const changed = getChangedFrame(applyPalette(data, palette), palette, width, height, previousPixels);
+            const readFrame = () => {
+                context.drawImage(video, 0, 0, width, height);
+                return context.getImageData(0, 0, width, height).data;
+            };
+            let data;
+            if (captureInWorker) {
+                ({ pixels: data } = await workers.capture(video, width, height, readFrame));
+            } else {
+                // 大帧绘制与像素读取分开执行，让浏览器先处理输入和页面绘制。
+                await yieldForGifUi(windowRef);
+                context.drawImage(video, 0, 0, width, height);
+                await yieldForGifUi(windowRef);
+                data = context.getImageData(0, 0, width, height).data;
+            }
             const delay = Math.min(frameDelay, durationMs - frame * frameDelay);
-            previousPixels = changed.pixels;
-            if (!changed.frame) {
-                // GIF 延迟字段为 16 位，长时间静止时拆分，避免溢出加速播放。
-                if (pendingFrame.delay + delay > 655350) {
-                    writeGifFrame(gif, pendingFrame);
-                    pendingFrame.delay = 0;
+            const raw = new Uint32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+            let identical = !!previousRaw;
+            if (identical) {
+                for (let i = 0; i < raw.length; i++) {
+                    if (raw[i] !== previousRaw[i]) { identical = false; break; }
                 }
-                pendingFrame.delay += delay;
+            }
+            if (identical) {
+                queuedFrames[queuedFrames.length - 1].delay += delay;
                 continue;
             }
-            if (pendingFrame) {
-                writeGifFrame(gif, pendingFrame);
+
+            // 转移像素缓冲区前保留一份，用于重复帧比较和 Worker 失败回退。
+            const backup = workers ? data.slice() : data;
+            previousRaw = new Uint32Array(backup.buffer, backup.byteOffset, backup.byteLength / 4);
+            if (!workers) await yieldForGifUi(windowRef);
+            const result = workers ? workers.process(data, backup) : Promise.resolve(prepareGifFrame(data));
+            result.catch(() => {}); // 后续按序 await；解码中途失败时也不产生未处理拒绝。
+            queuedFrames.push({ result, delay });
+            // 保留最新帧累加重复帧时长，最多三个在途帧，避免缓存整段视频。
+            if (queuedFrames.length > (workers ? 2 : 1)) {
+                await consumeFrame();
             }
-            pendingFrame = { ...changed.frame, delay };
         }
-        writeGifFrame(gif, pendingFrame);
-        gif.finish();
-        return new Blob([gif.bytesView()], { type: "image/gif" });
+        while (queuedFrames.length) await consumeFrame();
+        await writeFrame(pendingFrame);
+        while (encoding.length) encodedParts.push((await encoding.shift()).bytes);
+        return new Blob([...encodedParts, new Uint8Array([0x3b])], { type: "image/gif" });
     } finally {
+        workers?.release();
         video.pause();
         video.removeAttribute("src");
         video.load();

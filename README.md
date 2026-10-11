@@ -56,6 +56,10 @@
 
 转换保留源视频尺寸和完整时长，以 20 FPS 采样、每帧最多 256 色编码；自动合并重复帧、裁剪变化区域并复用未变化像素，无损减少编码后的冗余数据，不额外降低颜色数、尺寸或采样帧率。压缩效果取决于画面变化程度，GIF 文件通常仍比 MP4 大，较长或较高分辨率的动图转换会更慢、占用更多内存。转换失败会提示失败，可关闭自动转换后重试下载 MP4 源文件。
 
+转换会在颜色量化前跳过像素完全相同的重复帧，并优化像素扫描。支持 Web Worker 时，全页最多使用两个线程处理量化、颜色映射、差分压缩和 GIF 编码；支持 OffscreenCanvas 时，帧绘制及像素读取也在 Worker 中完成。主线程按原帧序组装独立编码的 GIF 帧片段，每次转换最多保留三个待量化帧和三个待编码帧，不缓存整段视频的原始像素，也不反复扩容整段 GIF 的编码缓冲区。低核心数设备使用一个 Worker；Worker 或离屏绘制不可用、报错或超时时自动回退，并在主线程计算步骤间让出执行权，优先响应页面输入。X 公开媒体的 fetch 下载回退不携带凭据，以兼容 CDN 的跨域策略。
+
+2026-10-11 在 Windows 11、Chrome 154、20 逻辑核心设备的当前 X 页面，以 [1280×720、5.6 秒的示例帖第二段动图](https://x.com/catboyhannibaI/status/2107894103069405534) 验证滚动响应：原量化并行版本的三次纯转换测到 82–89 个主线程长任务，帧间隔峰值约 152–170ms；移出帧绘制、差分和编码后，纯转换测试为 0 个主线程长任务、帧间隔峰值 55ms。长按选择、实际保存和转换期间翻页也通过验证，保存用时约 10.7 秒，产物为 34,135,778 字节、80 帧、5.6 秒的循环 GIF，与优化前 SHA-256 一致。滚动加载时仍能观察到 X 自身及其他扩展的长任务；此结果仅代表该样本与设备，未测功耗或风扇噪声。
+
 ### 微博
 
 1. 打开微博首页 https://weibo.com、移动端 https://m.weibo.cn/ 或任意微博页面
@@ -159,8 +163,8 @@ bun run verify:dist
 - 源码位于 `src/`
 - 平台实现位于 `src/platforms/`，共享流程通过统一适配器调用
 - `bun run test:placement` 可单独校验微博/X 各页面按钮位置是否回归
-- `tests/fixtures/x-gif-dom.json` 保存了通过 chrome-devtools 提取的 X GIF 示例详情页及回复媒体结构；`tests/x-platform.test.js` 基于该结构 mock 识别流程，`tests/x-gif.test.js` 和 `tests/utils-download.test.js` 无网络回归转换产物、下载开关和失败清理。X 更新结构时可替换 fixture 并执行 `bun run test`
-- GIF 编码使用打包进单文件产物的 [gifenc](https://github.com/mattdesl/gifenc)；构建会保留其 MIT 许可声明
+- `tests/fixtures/x-gif-dom.json` 保存了通过 chrome-devtools 提取的 X GIF 示例详情页及回复媒体结构；`tests/x-platform.test.js` 基于该结构 mock 识别流程，`tests/x-gif.test.js`、`tests/x-gif-workers.test.js` 和 `tests/utils-download.test.js` 无网络回归转换产物、真实 Worker 的帧序与失败回退、下载开关和资源清理。X 更新结构时可替换 fixture 并执行 `bun run test`
+- GIF 编码使用打包进单文件产物的 [gifenc](https://github.com/mattdesl/gifenc)；Worker 代码也内嵌在产物中，运行时通过本地 Blob 创建，不需要额外下载。构建会保留其 MIT 许可声明，`bun run dev` 会跟踪 Worker 源码变化
 - 发布产物位于 `dist/weibo-image-downloader.user.js`
 - 版本号以 `package.json` 为准，发布时需同步更新 Git tag、README 更新日志和最终 userscript `@version`
 - 发布前执行 `bun run verify:dist`，确认 `dist/` 产物已由当前源码重新生成且 metadata 一致

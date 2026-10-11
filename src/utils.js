@@ -239,7 +239,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
 
     async function fetchBlobWithWindowFetch(url) {
         const response = await fetchRef(url, {
-            credentials: "include"
+            credentials: platform.id === "x" ? "omit" : "include"
         });
 
         if (!response || !response.ok) {

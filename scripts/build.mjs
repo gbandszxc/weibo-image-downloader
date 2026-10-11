@@ -2,6 +2,7 @@ import path from "node:path";
 import { mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build, context } from "esbuild";
+import { gifWorkerPlugin } from "./gif-worker.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,6 +65,7 @@ const buildOptions = {
   target: "es2020",
   charset: "utf8",
   legalComments: "none",
+  plugins: [gifWorkerPlugin()],
   loader: {
     ".css": "text"
   },
