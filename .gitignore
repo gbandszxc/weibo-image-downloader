@@ -13,3 +13,4 @@ Thumbs.db
 .playwright-cli/
 .zcode/
 .zcodeignore
+.subdriver/

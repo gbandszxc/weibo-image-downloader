@@ -6,13 +6,17 @@
   "scripts": {
     "build": "bun run scripts/build.mjs",
     "dev": "bun run scripts/build.mjs --watch",
-    "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types",
     "test:placement": "node --test tests/button-placement.test.js",
     "verify:dist": "bun run scripts/verify-dist.mjs"
   },
   "devDependencies": {
+    "@types/node": "^22",
+    "@types/tampermonkey": "5.5.0",
     "esbuild": "^0.25.3",
-    "omggif": "1.0.10"
+    "omggif": "1.0.10",
+    "typescript": "^5"
   },
   "dependencies": {
     "gifenc": "1.0.3"

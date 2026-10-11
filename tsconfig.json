@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    /* 语言与环境（esbuild target es2020、浏览器油猴环境） */
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    /* 类型检查强度 */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* node --experimental-strip-types 兼容：仅允许可擦除语法与显式扩展名导入 */
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+
+    /* 产物由 esbuild 生成，tsc 仅做检查 */
+    "noEmit": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "tests"]
+}
