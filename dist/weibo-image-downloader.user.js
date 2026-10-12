@@ -2611,6 +2611,99 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     patched.set(encodeUtf8("mp41"), 16);
     return patched;
   }
+  function keepVideoTrack(trak) {
+    let handler = "";
+    let codec = "";
+    const walk = (start, end) => {
+      const view = new DataView(trak.buffer, trak.byteOffset, trak.byteLength);
+      let offset = start;
+      while (offset + 8 <= end) {
+        const size = view.getUint32(offset, false);
+        if (size < 8 || offset + size > end) {
+          return;
+        }
+        const type = bytesToLatin1(trak.subarray(offset + 4, offset + 8));
+        if (type === "mdia" || type === "minf" || type === "stbl") {
+          walk(offset + 8, offset + size);
+        } else if (type === "hdlr" && !handler) {
+          handler = bytesToLatin1(trak.subarray(offset + 16, offset + 20));
+        } else if (type === "stsd") {
+          codec = bytesToLatin1(trak.subarray(offset + 20, offset + 24));
+        }
+        offset += size;
+      }
+    };
+    walk(8, trak.length);
+    return handler === "vide" || handler === "soun" && codec === "mp4a";
+  }
+  function stripVideoAuxiliaryTracks(video) {
+    try {
+      if (video.length < 16 || bytesToLatin1(video.subarray(4, 8)) !== "ftyp") {
+        return video;
+      }
+      const view = new DataView(video.buffer, video.byteOffset, video.byteLength);
+      const typeAt = (offset2) => bytesToLatin1(video.subarray(offset2 + 4, offset2 + 8));
+      let moovAt = -1;
+      let moovSize = 0;
+      let mdatAt = -1;
+      let pos = 0;
+      while (pos + 8 <= video.length) {
+        const size = view.getUint32(pos, false);
+        if (size < 8 || pos + size > video.length) {
+          return video;
+        }
+        const type = typeAt(pos);
+        if (type === "moov") {
+          moovAt = pos;
+          moovSize = size;
+        } else if (type === "mdat") {
+          mdatAt = pos;
+        }
+        pos += size;
+      }
+      if (moovAt < 0 || mdatAt >= 0 && moovAt < mdatAt) {
+        return video;
+      }
+      const kept = [];
+      let trakCount = 0;
+      let keptTrakCount = 0;
+      let child = moovAt + 8;
+      const moovEnd = moovAt + moovSize;
+      while (child + 8 <= moovEnd) {
+        const size = view.getUint32(child, false);
+        if (size < 8 || child + size > moovEnd) {
+          return video;
+        }
+        const box = video.slice(child, child + size);
+        if (typeAt(child) === "trak") {
+          trakCount++;
+          if (keepVideoTrack(box)) {
+            kept.push(box);
+            keptTrakCount++;
+          }
+        } else {
+          kept.push(box);
+        }
+        child += size;
+      }
+      if (keptTrakCount === trakCount || keptTrakCount === 0) {
+        return video;
+      }
+      const bodyLength = kept.reduce((sum, box) => sum + box.length, 0);
+      const newMoov = new Uint8Array(8 + bodyLength);
+      const newMoovView = new DataView(newMoov.buffer);
+      newMoovView.setUint32(0, newMoov.length, false);
+      newMoov.set(encodeUtf8("moov"), 4);
+      let offset = 8;
+      for (const box of kept) {
+        newMoov.set(box, offset);
+        offset += box.length;
+      }
+      return concatBytes(video.subarray(0, moovAt), newMoov, video.subarray(moovAt + moovSize));
+    } catch {
+      return video;
+    }
+  }
   var USER_COMMENT_TAG = 37510;
   var EXIF_IFD_POINTER_TAG = 34665;
   var USER_COMMENT_VALUE = `${USER_COMMENT_ASCII_PREFIX}${OPPO_USER_COMMENT}`;
@@ -3024,7 +3117,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     }
   }
   function buildMotionPhoto(jpeg, video) {
-    const patchedVideo = patchVideoContainerBrand(video);
+    const patchedVideo = patchVideoContainerBrand(stripVideoAuxiliaryTracks(video));
     if (patchedVideo.length < 12 || bytesToLatin1(patchedVideo.subarray(4, 8)) !== "ftyp") {
       throw new Error("视频不是 ISO-BMFF 容器（缺少 ftyp box），无法合并");
     }

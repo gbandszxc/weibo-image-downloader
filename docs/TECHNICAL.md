@@ -75,6 +75,7 @@ XMP 字段与 ColorOS 16 真机文件对齐（无 xpacket 包裹、无 MicroVide
 - EXIF 注入通过 TIFF IFD 结构化改写完成：在 Exif IFD 中按 tag 序插入 UserComment 条目，条目表增长 12 字节，所有指向表后数据的偏移同步平移（缩略图 IFD 指针、MakerNote 数据块整体后移，MakerNote 内部偏移以其自身为基不受影响）；结构不符合预期时跳过注入，不影响合并。
 - MPF 段按 CIPA 规范大端 TIFF 编码，`MPEntry` 的 size/dataOffset 均**相对 MPF TIFF 起点**填写（真机同值 50）；Primary 条目 size = 含 MPF 段在内的 JPEG 部分总长，GainMap 条目 size = 主图字节数、dataOffset 指向 JPEG 尾部之后。
 - 视频必须是 ISO-BMFF 容器（字节 4-7 为 `ftyp`）。微博 LivePhoto 视频存在 QuickTime MOV（`ftyp qt`）与 MP4 两种，前者会被原位等长补丁为 `isom`/`mp41` brand——box 尺寸不变、`stco` 偏移无需修补，主流播放器直接兼容；已是 MP4 brand 的视频保持原样。
+- **iPhone 原始多轨视频裁剪**（A/B 第 5 轮真机实测）：未转码的 iPhone 实况视频含 4 条 `auxv` 深度辅助轨、LPCM 裸音轨与 4 条 `mebx` 元数据轨，OPPO 相册动图播放器识别正常但**播放失败**（Windows/飞牛正常）。合并前按轨道裁剪（`stripVideoAuxiliaryTracks`）：仅保留视频轨（hdlr=vide）与 AAC 音轨（soun+mp4a），删除 trak box 重组 moov——仅处理 moov 后置布局（此布局下 mdat 不移动、`stco` 绝对偏移天然有效），faststart 视频为微博转码产物、结构干净，保持原样。
 - 不写 Samsung SEFT 尾部：厂商真机文件均无尾部，且 SEF 尾部会使"文件末尾-长度"定位到错误位置。取舍是**三星相册不识别本产物**（三星相册依赖 SEFT trailer）；Google 相册、Windows 11 照片按 XMP 识别不受影响。
 
 **实测/资料兼容性矩阵**：

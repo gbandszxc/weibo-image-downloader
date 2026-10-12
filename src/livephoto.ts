@@ -20,7 +20,10 @@
  *   - 飞牛相册（fnOS，A/B 第 3 轮实测）：按 EXIF 厂商分支——微博封面图转自 iPhone
  *     （Make="Apple" + Apple MakerNote 配对标记）会被判为 Apple 配对 Live Photo、
  *     忽略内嵌视频；合并时需去 Apple 化（Make/Model 改写为 OnePlus、MakerNote 中和、
- *     残迹清零，见 neutralizeAppleExif）。
+ *     残迹清零，见 neutralizeAppleExif）；
+ *   - iPhone 原始多轨视频（A/B 第 5 轮实测）：5 条 HEVC 轨 + LPCM 裸音轨 + mebx
+ *     元数据轨的实况视频会导致 OPPO 动图播放器播放失败（识别正常）；合并前裁剪
+ *     moov 内多余轨道（保留视频轨与 AAC 音轨，见 stripVideoAuxiliaryTracks）。
  * 已知取舍：不写 Samsung SEFT 尾部（厂商真机文件均无，且 SEF 尾部会使
  * "文件末尾-长度"定位到错误位置）；三星相册因此不识别本产物，详见 docs/TECHNICAL.md。
  * Apple Live Photo 为"成对文件 + ContentIdentifier"机制，无单文件格式，
@@ -150,6 +153,120 @@ export function patchVideoContainerBrand(video: Uint8Array): Uint8Array {
     patched.set(encodeUtf8("isom"), 8);
     patched.set(encodeUtf8("mp41"), 16);
     return patched;
+}
+
+// ---------------------------------------------------------------------------
+// 视频轨道裁剪（真机 A/B 第 5 轮实测：微博转存的 iPhone 原始实况视频含
+// 4 条 auxv 深度辅助轨 + LPCM 裸音轨 + 4 条 mebx 元数据轨，OPPO 相册
+// 动图播放器识别正常但播放失败；仅保留视频轨与 AAC 音轨后各平台均可播放。
+// 裁剪只删除 moov 内的 trak box：moov 位于 mdat 之后时所有 stco 绝对偏移
+// 不受影响；faststart（moov 前置）视频是微博转码产物、结构干净，保持原样。
+// ---------------------------------------------------------------------------
+
+/** trak 是否保留：视频轨（hdlr=vide）或 AAC 音轨（hdlr=soun 且 stsd 编码 mp4a） */
+function keepVideoTrack(trak: Uint8Array): boolean {
+    let handler = "";
+    let codec = "";
+    const walk = (start: number, end: number): void => {
+        const view = new DataView(trak.buffer, trak.byteOffset, trak.byteLength);
+        let offset = start;
+        while (offset + 8 <= end) {
+            const size = view.getUint32(offset, false);
+            if (size < 8 || offset + size > end) {
+                return;
+            }
+            const type = bytesToLatin1(trak.subarray(offset + 4, offset + 8));
+            if (type === "mdia" || type === "minf" || type === "stbl") {
+                walk(offset + 8, offset + size);
+            } else if (type === "hdlr" && !handler) {
+                // 取第一个 hdlr（mdia/hdlr 为真实类型；minf/hdlr 是 QuickTime 遗留的 alis）
+                handler = bytesToLatin1(trak.subarray(offset + 16, offset + 20));
+            } else if (type === "stsd") {
+                codec = bytesToLatin1(trak.subarray(offset + 20, offset + 24));
+            }
+            offset += size;
+        }
+    };
+    walk(8, trak.length);
+    return handler === "vide" || (handler === "soun" && codec === "mp4a");
+}
+
+/**
+ * 裁剪视频 moov 中的多余轨道（保留视频轨与 AAC 音轨，丢弃深度辅助轨、
+ * 非 AAC 音轨与元数据轨）。moov 前置（faststart）、无可裁剪轨道、裁剪后
+ * 无任何轨道或结构异常时原样返回。
+ */
+export function stripVideoAuxiliaryTracks(video: Uint8Array): Uint8Array {
+    try {
+        if (video.length < 16 || bytesToLatin1(video.subarray(4, 8)) !== "ftyp") {
+            return video;
+        }
+        const view = new DataView(video.buffer, video.byteOffset, video.byteLength);
+        const typeAt = (offset: number) => bytesToLatin1(video.subarray(offset + 4, offset + 8));
+        let moovAt = -1;
+        let moovSize = 0;
+        let mdatAt = -1;
+        let pos = 0;
+        while (pos + 8 <= video.length) {
+            const size = view.getUint32(pos, false);
+            if (size < 8 || pos + size > video.length) {
+                return video;
+            }
+            const type = typeAt(pos);
+            if (type === "moov") {
+                moovAt = pos;
+                moovSize = size;
+            } else if (type === "mdat") {
+                mdatAt = pos;
+            }
+            pos += size;
+        }
+        // moov 前置时删除 trak 会整体后移 mdat、使 stco 失效，不处理
+        if (moovAt < 0 || (mdatAt >= 0 && moovAt < mdatAt)) {
+            return video;
+        }
+
+        const kept: Uint8Array[] = [];
+        let trakCount = 0;
+        let keptTrakCount = 0;
+        let child = moovAt + 8;
+        const moovEnd = moovAt + moovSize;
+        while (child + 8 <= moovEnd) {
+            const size = view.getUint32(child, false);
+            if (size < 8 || child + size > moovEnd) {
+                return video;
+            }
+            const box = video.slice(child, child + size);
+            if (typeAt(child) === "trak") {
+                trakCount++;
+                if (keepVideoTrack(box)) {
+                    kept.push(box);
+                    keptTrakCount++;
+                }
+            } else {
+                kept.push(box);
+            }
+            child += size;
+        }
+        // 没有可裁剪的轨道，或裁剪后一条轨道都不剩（非正常媒体）：原样返回
+        if (keptTrakCount === trakCount || keptTrakCount === 0) {
+            return video;
+        }
+
+        const bodyLength = kept.reduce((sum, box) => sum + box.length, 0);
+        const newMoov = new Uint8Array(8 + bodyLength);
+        const newMoovView = new DataView(newMoov.buffer);
+        newMoovView.setUint32(0, newMoov.length, false);
+        newMoov.set(encodeUtf8("moov"), 4);
+        let offset = 8;
+        for (const box of kept) {
+            newMoov.set(box, offset);
+            offset += box.length;
+        }
+        return concatBytes(video.subarray(0, moovAt), newMoov, video.subarray(moovAt + moovSize));
+    } catch {
+        return video;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -715,7 +832,7 @@ export function neutralizeAppleExif(jpeg: Uint8Array): Uint8Array {
  * 输出为可直接保存的字节数组，文件名保持 .MP.jpg 扩展名。
  */
 export function buildMotionPhoto(jpeg: Uint8Array, video: Uint8Array): Uint8Array {
-    const patchedVideo = patchVideoContainerBrand(video);
+    const patchedVideo = patchVideoContainerBrand(stripVideoAuxiliaryTracks(video));
     if (patchedVideo.length < 12 || bytesToLatin1(patchedVideo.subarray(4, 8)) !== "ftyp") {
         throw new Error("视频不是 ISO-BMFF 容器（缺少 ftyp box），无法合并");
     }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildMotionPhoto, findJpegXmpInsertPoint, injectExifUserComment, neutralizeAppleExif, parseMvhdDurationUs, patchVideoContainerBrand } from "../src/livephoto.ts";
+import { buildMotionPhoto, findJpegXmpInsertPoint, injectExifUserComment, neutralizeAppleExif, parseMvhdDurationUs, patchVideoContainerBrand, stripVideoAuxiliaryTracks } from "../src/livephoto.ts";
 
 const STILL_TS = 1500000;
 /** 真机布局中 GainMap 数据后的 0 填充字节数（与 src/livephoto.ts 的 GAIN_MAP_PADDING_LENGTH 一致） */
@@ -14,6 +14,10 @@ function ascii(text: string): Uint8Array {
 
 function u16be(value: number): Uint8Array {
     return Uint8Array.from([value & 0xff, (value >> 8) & 0xff]);
+}
+
+function u32be(value: number): Uint8Array {
+    return Uint8Array.from([(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]);
 }
 
 function concatBytes(...parts: Uint8Array[]): Uint8Array {
@@ -92,6 +96,118 @@ function buildTestVideo(): Uint8Array {
     free.set(ascii("free"), 4);
     return new Uint8Array([...ftyp, ...free]);
 }
+
+// ---------------------------------------------------------------------------
+// iPhone 原始多轨视频 fixture 与轨道裁剪测试
+// ---------------------------------------------------------------------------
+
+function mp4Box(type: string, ...body: Uint8Array[]): Uint8Array {
+    const payload = concatBytes(...body);
+    const box = new Uint8Array(8 + payload.length);
+    new DataView(box.buffer).setUint32(0, box.length, false);
+    box.set(ascii(type), 4);
+    box.set(payload, 8);
+    return box;
+}
+
+/** trak：hdlr handler + 可选 stsd 编码（stsd 内含 8 字节占位 entry） */
+function buildTrak(handler: string, codec?: string): Uint8Array {
+    const mdiaChildren = [mp4Box("hdlr", new Uint8Array(4), new Uint8Array(4), ascii(handler))];
+    if (codec) {
+        const stsd = mp4Box("stsd", new Uint8Array(4), u32be(1), mp4Box(codec, new Uint8Array(8)));
+        mdiaChildren.push(mp4Box("minf", mp4Box("stbl", stsd)));
+    }
+    mdiaChildren.push(mp4Box("stco", new Uint8Array(4), u32be(1), u32be(40))); // chunk 偏移指向 mdat
+    const mdia = mp4Box("mdia", mp4Box("mdhd", new Uint8Array(12)), ...mdiaChildren);
+    return mp4Box("trak", mp4Box("tkhd", new Uint8Array(16)), mdia);
+}
+
+/** moov 后置（iPhone 原始结构）：视频轨 + 元数据轨 + LPCM 音轨 */
+function buildMultiTrackVideo(): Uint8Array {
+    const ftyp = mp4Box("ftyp", ascii("isom"), u32be(512), ascii("isommp41"));
+    const mdat = mp4Box("mdat", new Uint8Array(64).fill(0x5a));
+    const moov = mp4Box("moov",
+        mp4Box("mvhd", new Uint8Array(20), u32be(600), u32be(1788), new Uint8Array(76)),
+        buildTrak("vide", "hvc1"),
+        buildTrak("meta"),
+        buildTrak("soun", "lpcm")
+    );
+    return concatBytes(ftyp, mdat, moov);
+}
+
+test("stripVideoAuxiliaryTracks keeps vide and drops meta/lpcm traks (moov trailing)", () => {
+    const video = buildMultiTrackVideo();
+    const stripped = stripVideoAuxiliaryTracks(video);
+    assert.ok(stripped.length < video.length, "应删除多余轨道使文件变小");
+
+    // moov 内只剩视频轨，mdat 原样
+    const text = latin1(stripped);
+    assert.match(text, /hdlr.{8}vide/s, "视频轨应保留");
+    assert.ok(!/hdlr.{8}meta/.test(text.replace(/hdlr.{8}vide/, "")), "元数据轨应删除");
+    assert.ok(!text.includes("lpcm"), "LPCM 音轨应删除");
+    assert.ok(text.includes("hvc1"), "视频编码声明应保留");
+
+    // 结构完整：顶层 box 走通到文件尾；mdat 与 stco 未被移动
+    let pos = 0;
+    let lastType = "";
+    let seenMdat = false;
+    const view = new DataView(stripped.buffer, stripped.byteOffset, stripped.byteLength);
+    while (pos + 8 <= stripped.length) {
+        const size = view.getUint32(pos, false);
+        assert.ok(size >= 8 && pos + size <= stripped.length, "box 树应完整");
+        lastType = latin1(stripped.subarray(pos + 4, pos + 8));
+        if (lastType === "mdat") {
+            seenMdat = true;
+            assert.equal(pos, 24, "mdat 位置不应移动");
+            assert.deepEqual(Array.from(stripped.subarray(pos + 8, pos + 40)), Array.from(video.subarray(24 + 8, 24 + 40)), "mdat 数据原样");
+        }
+        pos += size;
+    }
+    assert.equal(pos, stripped.length, "box 树应走到文件尾");
+    assert.ok(seenMdat, "应存在 mdat");
+    assert.equal(lastType, "moov", "moov 应仍在尾部");
+});
+
+test("stripVideoAuxiliaryTracks leaves faststart and clean videos untouched", () => {
+    // moov 前置（faststart）：即使含元数据轨也不处理（删除会使 stco 失效）
+    const full = buildMultiTrackVideo();
+    const mdatAt = full.findIndex((_, i) => i > 0 && latin1(full.subarray(i, i + 4)) === "mdat");
+    const moovBox = full.slice(full.findIndex((_, i) => i > 0 && latin1(full.subarray(i, i + 4)) === "moov"));
+    const faststart = concatBytes(full.subarray(0, 24), moovBox, full.subarray(mdatAt));
+    assert.deepEqual(Array.from(stripVideoAuxiliaryTracks(faststart)), Array.from(faststart), "faststart 视频应原样返回");
+
+    // 干净视频（vide + mp4a）：无可裁剪轨道
+    const ftyp = mp4Box("ftyp", ascii("isom"), u32be(512), ascii("isommp41"));
+    const mdat = mp4Box("mdat", new Uint8Array(32));
+    const moov = mp4Box("moov", buildTrak("vide", "avc1"), buildTrak("soun", "mp4a"));
+    const clean = concatBytes(ftyp, mdat, moov);
+    assert.deepEqual(Array.from(stripVideoAuxiliaryTracks(clean)), Array.from(clean), "干净视频应原样返回");
+});
+
+test("buildMotionPhoto strips auxiliary tracks before merging", () => {
+    const jpeg = buildAppleJpeg();
+    const video = buildMultiTrackVideo();
+    const merged = buildMotionPhoto(jpeg, video);
+    const strippedVideoLength = stripVideoAuxiliaryTracks(video).length;
+    const xmpOffset = findXmpSegmentOffset(merged);
+    const xmpSegmentLength = (merged[xmpOffset + 2] << 8) | merged[xmpOffset + 3];
+    const xmpText = latin1(merged.subarray(xmpOffset + 4, xmpOffset + 2 + xmpSegmentLength));
+    assert.match(xmpText, new RegExp(`Item:Length="${strippedVideoLength}"`), "XMP 视频长度应为裁剪后字节数");
+    // 产物尾部应是被裁剪视频的 moov box
+    const view = new DataView(merged.buffer, merged.byteOffset, merged.byteLength);
+    const videoOffset = merged.length - strippedVideoLength;
+    assert.equal(latin1(merged.subarray(videoOffset + 4, videoOffset + 8)), "ftyp", "视频段起点应为 ftyp");
+    let pos = videoOffset;
+    let lastType = "";
+    while (pos + 8 <= merged.length) {
+        const size = view.getUint32(pos, false);
+        assert.ok(size >= 8 && pos + size <= merged.length, "视频 box 树应完整");
+        lastType = latin1(merged.subarray(pos + 4, pos + 8));
+        pos += size;
+    }
+    assert.equal(lastType, "moov", "裁剪后的视频应以 moov 结尾（moov 后置 fixture）");
+    assert.ok(!latin1(merged).includes("lpcm"), "合并产物不应再含 LPCM 轨道");
+});
 
 function latin1(bytes: Uint8Array): string {
     let text = "";

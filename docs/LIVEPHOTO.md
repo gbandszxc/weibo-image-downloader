@@ -79,6 +79,8 @@ Container:Directory 三条目：
 
 **第 2/3 轮（飞牛相册 fnOS）**：第 1 轮 8 个单变量变体（XMP 字段、Make 伪装、厂商段移植、SEFT 尾部、MPF 长度自洽、扩展名对照）全部失败；第 2 轮转向"解析器风格 + 组合探针"后命中——根因是**微博封面图转自 iPhone：EXIF `Make="Apple"` + Apple MakerNote（ContentIdentifier）让飞牛按厂商分支走 Apple 配对路线，只找同名 MOV 而无视内嵌视频**。伪装 Make（Google 或 OnePlus）+ 中和 Apple MakerNote + 清零残留字节后即可识别，且 XMP 风格（oplus/纯 Google）、xpacket 有无均不敏感。实现见 `neutralizeAppleExif`，产物与真机验证通过的 X3 变体逐字节一致。
 
+**第 4/5 轮（OPPO 播放回归排查）**：用户报告某帖"识别正常但播放失败"，A/B 实验（去 Apple 化开关）证明与去 Apple 化无关——该帖视频是未转码的 iPhone 原始多轨结构（5 条 HEVC 轨 + LPCM 裸音轨 + 4 条 mebx 元数据轨），任何构建下 OPPO 动图播放器都无法播放（识别正常）；而同帖转发链里微博转码过的单轨 HEVC+AAC 视频可正常播放。轨道裁剪（保留视频轨 + AAC 音轨）后各平台均可播放，实现见 `stripVideoAuxiliaryTracks`。
+
 ## 最终实现布局（`buildMotionPhoto`）
 
 ```
@@ -118,7 +120,8 @@ Container:Directory 三条目：
 6. **已合并检测**：XMP 里出现 `MotionPhoto` 或 `MicroVideo` 即拒绝重复合并。
 7. **厂商标记值随系统版本漂移**：`UserComment` 在 ColorOS 14 真机为 `Oplus_8388608`、ColorOS 16 为 `oplus_11534336`。适配时优先从目标系统真机样本取值。
 8. **EXIF `Make` 决定相册的解析分支**：飞牛相册实测按 Make/MakerNote 分派格式——`Make="Apple"` 即走 Apple 配对文件路线、对内嵌视频视而不见。来源为 iPhone 的图做安卓动态照片前必须去 Apple 化（改写 Make/Model、中和 MakerNote、清零残留字节）。
-9. **传输链路会毁掉一切**：微信/QQ 普通传输、部分云盘会重压缩图片并剥掉全部元数据段。测试必须用 USB 或"原图"通道。
+9. **视频轨结构影响动图播放**：iPhone 原始实况视频是 5 条 HEVC 轨（主视频+深度辅助）+ LPCM 裸音轨 + mebx 元数据轨的多轨结构——OPPO 动图播放器对它"识别正常但播放失败"（Windows/飞牛正常），裁剪到仅剩视频轨与 AAC 音轨即可恢复播放。裁剪只需删除 moov 内 trak box，moov 后置布局下 `stco` 绝对偏移不受影响。
+10. **传输链路会毁掉一切**：微信/QQ 普通传输、部分云盘会重压缩图片并剥掉全部元数据段。测试必须用 USB 或"原图"通道。
 
 ## 兼容性实测矩阵（2026-10）
 
