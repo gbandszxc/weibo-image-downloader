@@ -163,6 +163,30 @@ test("click feedback precedes media resolution and prevents same-post duplicates
     assert.equal(replacement.attributes["aria-busy"], "false");
 });
 
+test("downloading one post never flips or blocks another post's button on the same page", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const pending = deferred<UiDownloadResult>();
+    const h = harness({ download: () => pending.promise });
+    const first = h.addPost("first");
+    const second = h.addPost("second");
+
+    const firstDownload = first.button.fire("pointerup");
+    await setImmediate();
+    assert.equal(first.button.innerHTML, "下载中");
+    assert.equal(second.button.innerHTML, "↓1", "另一帖按钮不得跟随第一帖切换状态");
+    assert.equal(second.button.disabled, false);
+
+    const secondDownload = second.button.fire("pointerup");
+    await setImmediate();
+    assert.equal(h.calls.length, 2, "另一帖的下载不得被第一帖的在途任务拦截");
+    assert.equal(second.button.innerHTML, "下载中");
+
+    pending.resolve({ successCount: 1, failedCount: 0, handedOffCount: 0 });
+    await Promise.all([firstDownload, secondDownload]);
+    assert.equal(first.button.innerHTML, "完成");
+    assert.equal(second.button.innerHTML, "完成");
+});
+
 test("failure, partial failure and browser handoff display truthful results and reset", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     for (const [result, label] of [

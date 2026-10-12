@@ -765,6 +765,22 @@ export function createWeiboPlatform({
         return isVideoDownloadEnabled() && !!getStatusLookupId(postContainer);
     }
 
+    // 时间线 article 普遍不带 mid，postId 回退顺序：帖子链接中的真实 statusId →
+    // 每容器唯一合成 id。不能用 Date.now() 兜底：同一批同步注入的多个帖子会取到
+    // 同一个毫秒值，下载状态机按 postId 归组时会把整页帖子当成同一帖互相串状态。
+    const syntheticPostIds = new WeakMap<Element, string>();
+    let syntheticPostIdSeq = 0;
+
+    function getSyntheticPostId(postContainer: Element): string {
+        let id = syntheticPostIds.get(postContainer);
+        if (!id) {
+            syntheticPostIdSeq += 1;
+            id = `weibo_${syntheticPostIdSeq}`;
+            syntheticPostIds.set(postContainer, id);
+        }
+        return id;
+    }
+
     function getPostId(postContainer: Element): string {
         if (isMobileWeiboPage()) {
             const status = getVueStatusItem(postContainer);
@@ -773,9 +789,7 @@ export function createWeiboPlatform({
             }
         }
 
-        return postContainer.getAttribute("mid") ||
-            postContainer.getAttribute("data-mid") ||
-            `weibo_${Date.now()}`;
+        return getStatusLookupId(postContainer) || getSyntheticPostId(postContainer);
     }
 
     function insertMobileDownloadButton(post: Element, btn: HTMLElement): boolean {

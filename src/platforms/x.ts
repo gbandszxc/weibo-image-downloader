@@ -536,7 +536,23 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
 
         const currentPath = windowRef.location && (windowRef.location.pathname || windowRef.location.href || "");
         const currentMatch = currentPath.match(/\/status\/(\d+)/);
-        return currentMatch ? currentMatch[1] : `x_${Date.now()}`;
+        // URL 兜底只对媒体预览等"当前页就是这条推文"的容器有意义；最后的兜底不能用
+        // Date.now()：同一批同步注入的多个容器会取到同一个毫秒值，下载状态机按
+        // postId 归组时会把它们当成同一帖互相串状态，改为每容器唯一。
+        return currentMatch ? currentMatch[1] : getSyntheticPostId(postContainer);
+    }
+
+    const syntheticPostIds = new WeakMap<Element, string>();
+    let syntheticPostIdSeq = 0;
+
+    function getSyntheticPostId(postContainer: Element): string {
+        let id = syntheticPostIds.get(postContainer);
+        if (!id) {
+            syntheticPostIdSeq += 1;
+            id = `x_${syntheticPostIdSeq}`;
+            syntheticPostIds.set(postContainer, id);
+        }
+        return id;
     }
 
     function shouldResolveEmptyMediaItems(postContainer: Element): boolean {
