@@ -2913,12 +2913,123 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     segment.set(payload, 4 + idBytes.length);
     return segment;
   }
+  var MAKE_TAG = 271;
+  var MODEL_TAG = 272;
+  var MAKER_NOTE_TAG = 37500;
+  var LENS_MAKE_TAG = 42035;
+  var APPLE_MAKE = "Apple";
+  var APPLE_MAKER_NOTE_HEADER = "Apple iOS\0\0";
+  var FALLBACK_MAKE = "OnePlus";
+  var FALLBACK_MODEL = "OnePlus 13";
+  function neutralizeAppleExif(jpeg) {
+    try {
+      const { existingExif } = findJpegXmpInsertPoint(jpeg);
+      if (!existingExif) {
+        return jpeg;
+      }
+      const segment = jpeg.subarray(existingExif.start, existingExif.end);
+      const tiffStart = 10;
+      const tiff = segment.subarray(tiffStart);
+      if (tiff.length < 8) {
+        return jpeg;
+      }
+      const littleEndian = tiff[0] === 73 && tiff[1] === 73;
+      const bigEndian = tiff[0] === 77 && tiff[1] === 77;
+      if (!littleEndian && !bigEndian) {
+        return jpeg;
+      }
+      const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength);
+      const readEntries = (ifdOffset) => {
+        const count = view.getUint16(ifdOffset, littleEndian);
+        return Array.from({ length: count }, (_, i) => {
+          const pos = ifdOffset + 2 + i * 12;
+          return {
+            tag: view.getUint16(pos, littleEndian),
+            count: view.getUint32(pos + 4, littleEndian),
+            offset: view.getUint32(pos + 8, littleEndian),
+            pos
+          };
+        });
+      };
+      const latin1 = (offset, length) => bytesToLatin1(tiff.subarray(offset, offset + length));
+      const ifd0 = readEntries(view.getUint32(4, littleEndian));
+      const makeEntry = ifd0.find((entry) => entry.tag === MAKE_TAG);
+      const modelEntry = ifd0.find((entry) => entry.tag === MODEL_TAG);
+      const exifPointer = ifd0.find((entry) => entry.tag === EXIF_IFD_POINTER_TAG);
+      const exifEntries = exifPointer ? readEntries(exifPointer.offset) : [];
+      const makerEntry = exifEntries.find((entry) => entry.tag === MAKER_NOTE_TAG);
+      const lensMakeEntry = exifEntries.find((entry) => entry.tag === LENS_MAKE_TAG);
+      const makeValue = makeEntry && makeEntry.count > 4 ? latin1(makeEntry.offset, makeEntry.count) : "";
+      const makerHead = makerEntry && makerEntry.count >= APPLE_MAKER_NOTE_HEADER.length ? latin1(makerEntry.offset, APPLE_MAKER_NOTE_HEADER.length) : "";
+      const isApple = makeValue.replace(/\0.*$/, "") === APPLE_MAKE || makerHead === APPLE_MAKER_NOTE_HEADER;
+      if (!isApple) {
+        return jpeg;
+      }
+      const patched = tiff.slice();
+      const patchedView = new DataView(patched.buffer);
+      const writeU16 = (pos, value) => patchedView.setUint16(pos, value, littleEndian);
+      const writeU32 = (pos, value) => patchedView.setUint32(pos, value, littleEndian);
+      if (makerEntry && makerEntry.count > 4 && makerEntry.offset + makerEntry.count <= patched.length) {
+        patched.fill(0, makerEntry.offset, makerEntry.offset + makerEntry.count);
+        writeU16(makerEntry.pos + 2, 7);
+        writeU32(makerEntry.pos + 4, 4);
+        writeU32(makerEntry.pos + 8, 0);
+      }
+      if (lensMakeEntry && lensMakeEntry.count > 4 && lensMakeEntry.offset + lensMakeEntry.count <= patched.length && latin1(lensMakeEntry.offset, lensMakeEntry.count).replace(/\0.*$/, "") === APPLE_MAKE) {
+        patched.fill(0, lensMakeEntry.offset, lensMakeEntry.offset + lensMakeEntry.count);
+      }
+      const appended = [];
+      const rewriteAscii = (entry, value) => {
+        if (!entry) {
+          return;
+        }
+        const bytes = encodeUtf8(`${value}\0`);
+        if (entry.count > 4 && entry.offset + entry.count <= patched.length) {
+          if (bytes.length <= entry.count) {
+            patched.set(bytes, entry.offset);
+            patched.fill(0, entry.offset + bytes.length, entry.offset + entry.count);
+            return;
+          }
+          patched.fill(0, entry.offset, entry.offset + entry.count);
+        }
+        appended.push({ entry, bytes });
+      };
+      rewriteAscii(modelEntry, FALLBACK_MODEL);
+      rewriteAscii(makeEntry, FALLBACK_MAKE);
+      let appendOffset = patched.length;
+      for (const { entry, bytes } of appended) {
+        writeU16(entry.pos + 2, 2);
+        writeU32(entry.pos + 4, bytes.length);
+        writeU32(entry.pos + 8, appendOffset);
+        appendOffset += bytes.length;
+      }
+      const newTiff = appended.length > 0 ? concatBytes(patched, ...appended.map(({ bytes }) => bytes)) : patched;
+      if (newTiff === tiff) {
+        return jpeg;
+      }
+      const newSegmentLength = 2 + 6 + newTiff.length;
+      const delta = newSegmentLength + 2 - segment.length;
+      const result = new Uint8Array(jpeg.length + delta);
+      result.set(jpeg.subarray(0, existingExif.start), 0);
+      result[existingExif.start] = 255;
+      result[existingExif.start + 1] = 225;
+      result[existingExif.start + 2] = newSegmentLength >> 8 & 255;
+      result[existingExif.start + 3] = newSegmentLength & 255;
+      result.set(encodeUtf8(EXIF_SEGMENT_ID), existingExif.start + 4);
+      result.set(newTiff, existingExif.start + tiffStart);
+      result.set(jpeg.subarray(existingExif.end), existingExif.start + tiffStart + newTiff.length);
+      return result;
+    } catch {
+      return jpeg;
+    }
+  }
   function buildMotionPhoto(jpeg, video) {
     const patchedVideo = patchVideoContainerBrand(video);
     if (patchedVideo.length < 12 || bytesToLatin1(patchedVideo.subarray(4, 8)) !== "ftyp") {
       throw new Error("视频不是 ISO-BMFF 容器（缺少 ftyp box），无法合并");
     }
-    const exifReady = ensureExifWithUserComment(jpeg, findJpegXmpInsertPoint(jpeg).existingExif);
+    const deApple = neutralizeAppleExif(jpeg);
+    const exifReady = ensureExifWithUserComment(deApple, findJpegXmpInsertPoint(deApple).existingExif);
     const { insertOffset, existingXmp } = findJpegXmpInsertPoint(exifReady);
     const ptsUs = parseMvhdDurationUs(patchedVideo);
     const xmpSegment = buildXmpApp1Segment(buildMotionPhotoXmp(patchedVideo.length, ptsUs));

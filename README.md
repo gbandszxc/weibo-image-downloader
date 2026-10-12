@@ -54,7 +54,7 @@
 
 点击 **“X平台GIF自动转换：[开启/关闭]”** 可切换 X 动图转换，默认开启，设置自动保存并立即对后续下载生效。开启时在本地解码 MP4 并编码为循环播放的 `.gif`，关闭时保留 `.mp4` 源文件。此设置独立于视频下载开关，不影响微博 GIF 或普通视频。转换保留源视频尺寸和完整时长（20 FPS 采样、每帧最多 256 色），失败时会提示失败，可关闭自动转换后重试下载 MP4 源文件；压缩、Worker 调度等实现细节与性能验证记录见 [技术细节](docs/TECHNICAL.md)。
 
-点击 **“微博LivePhoto自动合并：[开启/关闭]”** 可切换微博 Live Photo 单文件合并，默认开启，设置自动保存并立即生效。开启时脚本把封面图与 `.mov` 视频在本地按字节合并为单文件 Motion Photo（命名 `weibo_帖子ID_序号.MP.jpg`）：Windows 11 照片（2023+）、Google 相册、OPPO/一加（ColorOS 16 真机实测）、小米 HyperOS 相册等支持的查看器可直接播放动态效果（飞牛相册实测不识别第三方合成产物）；Mac/iOS 因 Apple 成对文件机制不支持单文件动态照片，仅显示静态封面。关闭合并或合并失败回退时，保存为**同名** `.jpg` + `.mov` 配对文件并注入 Apple Live Photo 配对元数据，两个文件一起导入 Apple 设备照片 App 可作为 Live Photo 播放。实现原理与兼容性说明见 [技术细节](docs/TECHNICAL.md)。
+点击 **“微博LivePhoto自动合并：[开启/关闭]”** 可切换微博 Live Photo 单文件合并，默认开启，设置自动保存并立即生效。开启时脚本把封面图与 `.mov` 视频在本地按字节合并为单文件 Motion Photo（命名 `weibo_帖子ID_序号.MP.jpg`）：Windows 11 照片（2023+）、Google 相册、OPPO/一加（ColorOS 16 真机实测）、小米 HyperOS 相册、飞牛相册（fnOS，实测）等支持的查看器可直接播放动态效果；Mac/iOS 因 Apple 成对文件机制不支持单文件动态照片，仅显示静态封面。关闭合并或合并失败回退时，保存为**同名** `.jpg` + `.mov` 配对文件并注入 Apple Live Photo 配对元数据，两个文件一起导入 Apple 设备照片 App 可作为 Live Photo 播放。实现原理与兼容性说明见 [技术细节](docs/TECHNICAL.md)。
 
 ### 微博
 

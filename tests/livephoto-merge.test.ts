@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildMotionPhoto, findJpegXmpInsertPoint, injectExifUserComment, parseMvhdDurationUs, patchVideoContainerBrand } from "../src/livephoto.ts";
+import { buildMotionPhoto, findJpegXmpInsertPoint, injectExifUserComment, neutralizeAppleExif, parseMvhdDurationUs, patchVideoContainerBrand } from "../src/livephoto.ts";
 
 const STILL_TS = 1500000;
 /** 真机布局中 GainMap 数据后的 0 填充字节数（与 src/livephoto.ts 的 GAIN_MAP_PADDING_LENGTH 一致） */
@@ -396,6 +396,131 @@ test("buildMotionPhoto adds a minimal EXIF when the photo has none", () => {
     const headText = latin1(merged.subarray(0, merged.length - 28));
     assert.ok(headText.includes("Exif\0\0"), "应构造最小 EXIF 段");
     assert.ok(headText.includes("oplus_11534336"), "最小 EXIF 应包含 OPPO 标记");
+});
+
+/** 带 Apple 痕迹的 EXIF payload（模拟微博封面图：转自 iPhone，Make=Apple + Apple MakerNote） */
+function buildAppleExifPayload(): Uint8Array {
+    // 大端 TIFF：IFD0@8(Make@50 "Apple\0" + Model@56 "iPhone 16 Pro\0" + ExifIFD@72) →
+    // ExifIFD(MakerNote@104 "Apple iOS" 头 69 字节 + LensMake@176 "Apple\0")
+    const tiff = new Uint8Array(182);
+    const view = new DataView(tiff.buffer);
+    tiff.set(ascii("MM"), 0);
+    view.setUint16(2, 42, false);
+    view.setUint32(4, 8, false);
+    view.setUint16(8, 3, false);
+    // Make
+    view.setUint16(10, 0x010f, false);
+    view.setUint16(12, 2, false);
+    view.setUint32(14, 6, false);
+    view.setUint32(18, 50, false);
+    // Model
+    view.setUint16(22, 0x0110, false);
+    view.setUint16(24, 2, false);
+    view.setUint32(26, 14, false);
+    view.setUint32(30, 56, false);
+    // ExifIFD 指针
+    view.setUint16(34, 0x8769, false);
+    view.setUint16(36, 4, false);
+    view.setUint32(38, 1, false);
+    view.setUint32(42, 72, false);
+    view.setUint32(46, 0, false);
+    tiff.set(ascii("Apple\0"), 50);
+    tiff.set(ascii("iPhone 16 Pro\0"), 56);
+    // Exif IFD @72：MakerNote + LensMake
+    view.setUint16(72, 2, false);
+    view.setUint16(74, 0x927c, false);
+    view.setUint16(76, 7, false);
+    view.setUint32(78, 69, false);
+    view.setUint32(82, 104, false);
+    view.setUint16(86, 0xa433, false);
+    view.setUint16(88, 2, false);
+    view.setUint32(90, 6, false);
+    view.setUint32(94, 176, false);
+    view.setUint32(98, 0, false);
+    tiff.set(ascii("Apple iOS\0\0\x01"), 104);
+    tiff.set(ascii("Apple\0"), 176);
+    return concatBytes(ascii("Exif\0\0"), tiff);
+}
+
+function buildAppleJpeg(): Uint8Array {
+    const soi = new Uint8Array([0xff, 0xd8]);
+    const jfif = segment(0xe0, ascii("JFIF\0" + "\x01\x02\x00\x00\x01\x00\x01\x00\x00"));
+    const exif = segment(0xe1, buildAppleExifPayload());
+    const dqt = segment(0xdb, new Uint8Array(64).fill(0x11));
+    const sos = segment(0xda, ascii("\x00\x01\x01\x00\x00\x3f\x00"));
+    const scan = ascii("compressed-data-here");
+    const eoi = new Uint8Array([0xff, 0xd9]);
+    return concatBytes(soi, jfif, exif, dqt, sos, scan, eoi);
+}
+
+/** 在 JPEG 中定位 Exif APP1 段的 TIFF 部分 */
+function findExifTiff(bytes: Uint8Array): Uint8Array {
+    for (let pos = 2; pos + 12 < bytes.length;) {
+        if (bytes[pos] !== 0xff) break;
+        const marker = bytes[pos + 1];
+        const length = (bytes[pos + 2] << 8) | bytes[pos + 3];
+        if (marker === 0xe1 && latin1(bytes.subarray(pos + 4, pos + 10)) === "Exif\0\0") {
+            return bytes.subarray(pos + 10, pos + 2 + length);
+        }
+        if (marker === 0xda) break;
+        pos += 2 + length;
+    }
+    throw new Error("未找到 Exif APP1 段");
+}
+
+test("neutralizeAppleExif rewrites Apple EXIF to OnePlus and neutralizes MakerNote", () => {
+    const jpeg = buildAppleJpeg();
+    const patched = neutralizeAppleExif(jpeg);
+
+    const tiff = findExifTiff(patched);
+    const text = latin1(tiff);
+    assert.ok(text.includes("OnePlus\0"), "Make 应改写为 OnePlus");
+    assert.ok(text.includes("OnePlus 13\0"), "Model 应改写为 OnePlus 13");
+    assert.ok(!text.includes("Apple"), "TIFF 内不应残留任何 Apple 字符串");
+
+    // 解析改写后的 IFD0 Make 条目与 Exif IFD MakerNote 条目
+    const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength);
+    const readEntries = (ifdOffset: number) => {
+        const count = view.getUint16(ifdOffset, false);
+        return Array.from({ length: count }, (_, i) => {
+            const pos = ifdOffset + 2 + i * 12;
+            return {
+                tag: view.getUint16(pos, false),
+                type: view.getUint16(pos + 2, false),
+                count: view.getUint32(pos + 4, false),
+                offset: view.getUint32(pos + 8, false)
+            };
+        });
+    };
+    const ifd0 = readEntries(8);
+    const make = ifd0.find((entry) => entry.tag === 0x010f)!;
+    assert.equal(latin1(tiff.subarray(make.offset, make.offset + make.count)), "OnePlus\0", "Make 条目应重指追加的 OnePlus 值");
+    const exifIfd = readEntries(ifd0.find((entry) => entry.tag === 0x8769)!.offset);
+    const makerNote = exifIfd.find((entry) => entry.tag === 0x927c)!;
+    assert.equal(makerNote.type, 7, "MakerNote 条目应中和为 UNDEFINED");
+    assert.equal(makerNote.count, 4, "MakerNote 条目应为 4 字节");
+    assert.equal(makerNote.offset, 0, "MakerNote 条目应为内联空值");
+    // 原 Apple 数据区应清零（MakerNote 数据不再被任何条目引用）
+    assert.ok(Array.from(tiff.subarray(104, 104 + 69)).every((byte) => byte === 0), "MakerNote 原数据区应清零");
+});
+
+test("neutralizeAppleExif passes through non-Apple EXIF unchanged", () => {
+    const { jpeg } = buildTestJpeg();
+    const patched = neutralizeAppleExif(jpeg);
+    assert.equal(patched.length, jpeg.length, "非 Apple 来源长度不变");
+    assert.deepEqual(Array.from(patched), Array.from(jpeg), "非 Apple 来源字节不变");
+});
+
+test("buildMotionPhoto merges an Apple-sourced photo with brand rewritten to OnePlus", () => {
+    const merged = buildMotionPhoto(buildAppleJpeg(), buildTestVideo());
+    // Apple 痕迹断言只针对主图 EXIF：GainMap 区是输入原图字节副本（惰性数据，相册不解析）
+    const exifText = latin1(findExifTiff(merged));
+    assert.ok(exifText.includes("OnePlus"), "EXIF 应改写为 OnePlus");
+    assert.ok(!exifText.includes("Apple"), "主图 EXIF 不应残留 Apple 痕迹");
+    const videoOffset = merged.length - buildTestVideo().length;
+    const headText = latin1(merged.subarray(0, videoOffset));
+    assert.match(headText, /GCamera:MotionPhoto="1"/, "XMP 合并流程不受影响");
+    assert.ok(headText.includes("oplus_11534336"), "UserComment 注入不受影响");
 });
 
 test("parseMvhdDurationUs reads v0/v1 mvhd and falls back on missing moov", () => {

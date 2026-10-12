@@ -17,8 +17,10 @@
  *     无 MicroVideo 旧字段（16 已废弃）；PTS 取视频 mvhd 真实时长（真机同量级）；
  *   - Google：GCamera:MotionPhoto（新格式）+ Container:Directory，长度 = 视频精确字节数
  *     （视频结束于 EOF，"从文件末尾回退"的读取方同样可定位；Windows 11 照片实测可识别）；
- *   - 飞牛相册（fnOS）：实测对全复刻真机布局的第三方合成产物仍不识别（疑似按机型
- *     白名单），不再作为对齐目标。
+ *   - 飞牛相册（fnOS，A/B 第 3 轮实测）：按 EXIF 厂商分支——微博封面图转自 iPhone
+ *     （Make="Apple" + Apple MakerNote 配对标记）会被判为 Apple 配对 Live Photo、
+ *     忽略内嵌视频；合并时需去 Apple 化（Make/Model 改写为 OnePlus、MakerNote 中和、
+ *     残迹清零，见 neutralizeAppleExif）。
  * 已知取舍：不写 Samsung SEFT 尾部（厂商真机文件均无，且 SEF 尾部会使
  * "文件末尾-长度"定位到错误位置）；三星相册因此不识别本产物，详见 docs/TECHNICAL.md。
  * Apple Live Photo 为"成对文件 + ContentIdentifier"机制，无单文件格式，
@@ -560,6 +562,152 @@ function buildXmpApp1Segment(xmpText: string): Uint8Array {
     return segment;
 }
 
+// ---------------------------------------------------------------------------
+// EXIF 去 Apple 化（飞牛相册 A/B 第 3 轮实测：微博封面图转自 iPhone，EXIF
+// Make="Apple" + Apple MakerNote(ContentIdentifier) 会触发其"配对文件"分支，
+// 相册只找同名 MOV 而对内嵌视频视而不见，产物显示为静态图；
+// 改写厂商/机型 + 中和 MakerNote 后即可识别）
+// ---------------------------------------------------------------------------
+
+const MAKE_TAG = 0x010f;
+const MODEL_TAG = 0x0110;
+const MAKER_NOTE_TAG = 0x927c;
+const LENS_MAKE_TAG = 0xa433;
+const APPLE_MAKE = "Apple";
+const APPLE_MAKER_NOTE_HEADER = "Apple iOS\0\0\x01";
+/**
+ * 去 Apple 化的目标厂商/机型（X3 变体真机实测通过的组合，与 XMP 的 oplus 字段一致）。
+ * 不改写为 Google/三星等其他厂商，避免触发对应分支的额外假设。
+ */
+const FALLBACK_MAKE = "OnePlus";
+const FALLBACK_MODEL = "OnePlus 13";
+
+/** 判定并清除 Apple EXIF 痕迹；非 Apple 来源或结构异常时原样返回。 */
+export function neutralizeAppleExif(jpeg: Uint8Array): Uint8Array {
+    try {
+        const { existingExif } = findJpegXmpInsertPoint(jpeg);
+        if (!existingExif) {
+            return jpeg;
+        }
+        const segment = jpeg.subarray(existingExif.start, existingExif.end);
+        const tiffStart = 10; // FF E1(2) + 段长(2) + "Exif\0\0"(6)
+        const tiff = segment.subarray(tiffStart);
+        if (tiff.length < 8) {
+            return jpeg;
+        }
+        const littleEndian = tiff[0] === 0x49 && tiff[1] === 0x49;
+        const bigEndian = tiff[0] === 0x4d && tiff[1] === 0x4d;
+        if (!littleEndian && !bigEndian) {
+            return jpeg;
+        }
+        const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength);
+        interface EntryRef {
+            tag: number;
+            count: number;
+            /** 值 ≤4 字节时为内联，否则为 TIFF 内数据偏移 */
+            offset: number;
+            /** 条目记录在 TIFF 内的绝对位置（原位改写用） */
+            pos: number;
+        }
+        const readEntries = (ifdOffset: number): EntryRef[] => {
+            const count = view.getUint16(ifdOffset, littleEndian);
+            return Array.from({ length: count }, (_, i) => {
+                const pos = ifdOffset + 2 + i * 12;
+                return {
+                    tag: view.getUint16(pos, littleEndian),
+                    count: view.getUint32(pos + 4, littleEndian),
+                    offset: view.getUint32(pos + 8, littleEndian),
+                    pos
+                };
+            });
+        };
+        const latin1 = (offset: number, length: number) => bytesToLatin1(tiff.subarray(offset, offset + length));
+        const ifd0 = readEntries(view.getUint32(4, littleEndian));
+        const makeEntry = ifd0.find((entry) => entry.tag === MAKE_TAG);
+        const modelEntry = ifd0.find((entry) => entry.tag === MODEL_TAG);
+        const exifPointer = ifd0.find((entry) => entry.tag === EXIF_IFD_POINTER_TAG);
+        const exifEntries = exifPointer ? readEntries(exifPointer.offset) : [];
+        const makerEntry = exifEntries.find((entry) => entry.tag === MAKER_NOTE_TAG);
+        const lensMakeEntry = exifEntries.find((entry) => entry.tag === LENS_MAKE_TAG);
+
+        // Apple 来源判定：Make 值或 MakerNote 头（命中任一即处理）
+        const makeValue = makeEntry && makeEntry.count > 4 ? latin1(makeEntry.offset, makeEntry.count) : "";
+        const makerHead = makerEntry && makerEntry.count >= APPLE_MAKER_NOTE_HEADER.length
+            ? latin1(makerEntry.offset, APPLE_MAKER_NOTE_HEADER.length)
+            : "";
+        const isApple = makeValue.replace(/\0.*$/, "") === APPLE_MAKE || makerHead === APPLE_MAKER_NOTE_HEADER;
+        if (!isApple) {
+            return jpeg;
+        }
+
+        const patched = tiff.slice();
+        const patchedView = new DataView(patched.buffer);
+        const writeU16 = (pos: number, value: number) => patchedView.setUint16(pos, value, littleEndian);
+        const writeU32 = (pos: number, value: number) => patchedView.setUint32(pos, value, littleEndian);
+        // 1) MakerNote 条目中和为 4 字节内联空值，原数据区（Apple ContentIdentifier）清零
+        if (makerEntry && makerEntry.count > 4 && makerEntry.offset + makerEntry.count <= patched.length) {
+            patched.fill(0, makerEntry.offset, makerEntry.offset + makerEntry.count);
+            writeU16(makerEntry.pos + 2, 7); // UNDEFINED
+            writeU32(makerEntry.pos + 4, 4);
+            writeU32(makerEntry.pos + 8, 0);
+        }
+        // 2) LensMake="Apple" 数据区清零（0xa433，防字节级嗅探）
+        if (lensMakeEntry && lensMakeEntry.count > 4
+            && lensMakeEntry.offset + lensMakeEntry.count <= patched.length
+            && latin1(lensMakeEntry.offset, lensMakeEntry.count).replace(/\0.*$/, "") === APPLE_MAKE) {
+            patched.fill(0, lensMakeEntry.offset, lensMakeEntry.offset + lensMakeEntry.count);
+        }
+        // 3) Make/Model 改写：新值放得下原位覆写（剩余清零），放不下则旧值区清零、追加到 TIFF 尾并重指条目
+        const appended: Array<{ entry: EntryRef; bytes: Uint8Array }> = [];
+        const rewriteAscii = (entry: EntryRef | undefined, value: string) => {
+            if (!entry) {
+                return;
+            }
+            const bytes = encodeUtf8(`${value}\0`);
+            if (entry.count > 4 && entry.offset + entry.count <= patched.length) {
+                if (bytes.length <= entry.count) {
+                    patched.set(bytes, entry.offset);
+                    patched.fill(0, entry.offset + bytes.length, entry.offset + entry.count);
+                    return;
+                }
+                patched.fill(0, entry.offset, entry.offset + entry.count);
+            }
+            appended.push({ entry, bytes });
+        };
+        rewriteAscii(modelEntry, FALLBACK_MODEL);
+        rewriteAscii(makeEntry, FALLBACK_MAKE);
+        let appendOffset = patched.length;
+        for (const { entry, bytes } of appended) {
+            writeU16(entry.pos + 2, 2); // ASCII
+            writeU32(entry.pos + 4, bytes.length);
+            writeU32(entry.pos + 8, appendOffset);
+            appendOffset += bytes.length;
+        }
+        const newTiff = appended.length > 0
+            ? concatBytes(patched, ...appended.map(({ bytes }) => bytes))
+            : patched;
+        if (newTiff === tiff) {
+            return jpeg;
+        }
+
+        // 用新 TIFF 重建 Exif APP1 段并写回 JPEG（段总长 = 长度字段值 + FF E1 的 2 字节）
+        const newSegmentLength = 2 + 6 + newTiff.length;
+        const delta = newSegmentLength + 2 - segment.length;
+        const result = new Uint8Array(jpeg.length + delta);
+        result.set(jpeg.subarray(0, existingExif.start), 0);
+        result[existingExif.start] = 0xff;
+        result[existingExif.start + 1] = 0xe1;
+        result[existingExif.start + 2] = (newSegmentLength >> 8) & 0xff;
+        result[existingExif.start + 3] = newSegmentLength & 0xff;
+        result.set(encodeUtf8(EXIF_SEGMENT_ID), existingExif.start + 4);
+        result.set(newTiff, existingExif.start + tiffStart);
+        result.set(jpeg.subarray(existingExif.end), existingExif.start + tiffStart + newTiff.length);
+        return result;
+    } catch {
+        return jpeg;
+    }
+}
+
 /**
  * 将 JPEG 图片与视频合并为单文件 Motion Photo。
  * 输入字节不做转码；视频必须是 ISO-BMFF 容器（MP4/MOV，ftyp 开头），
@@ -572,7 +720,8 @@ export function buildMotionPhoto(jpeg: Uint8Array, video: Uint8Array): Uint8Arra
         throw new Error("视频不是 ISO-BMFF 容器（缺少 ftyp box），无法合并");
     }
 
-    const exifReady = ensureExifWithUserComment(jpeg, findJpegXmpInsertPoint(jpeg).existingExif);
+    const deApple = neutralizeAppleExif(jpeg);
+    const exifReady = ensureExifWithUserComment(deApple, findJpegXmpInsertPoint(deApple).existingExif);
     const { insertOffset, existingXmp } = findJpegXmpInsertPoint(exifReady);
 
     const ptsUs = parseMvhdDurationUs(patchedVideo);

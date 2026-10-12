@@ -67,6 +67,8 @@ XMP 字段与 ColorOS 16 真机文件对齐（无 xpacket 包裹、无 MicroVide
 
 **OPPO 识别触发点（A/B 变体真机实测，ColorOS 16.0.10.501）**：同一微博素材生成四个候选变体侧载真机——V1 全复刻（XMP 三条目 + GainMap 数据 + MPF 双条目 + 真实 PTS）、V2 仅 XMP 三条目（MPF 单条目）、V3 仅 MPF 双条目（XMP 两条目）、V4 真机视频段。结果 **V1/V3/V4 可识别播放、V2 显示静态图**：MPF `NumberOfImages=2`（Primary + GainMap 条目 + GainMap 数据 + 16B 填充）是识别的必要充分条件，XMP 三条目、GainMap 声明、视频内容、PTS 取值均非关键。产物据此按 V3 最小已验证布局实现（与真机验证通过的 V3 文件逐字节一致），代价是文件体积约增加一倍（GainMap 数据复用主图字节，仅占位满足结构校验）。
 
+**飞牛相册识别触发点（A/B 第 2/3 轮真机实测，fnOS）**：第 1 轮 8 个单变量变体（MicroVideo 双写、Make 伪装、jxrs 尾标、ICC/QTI 段移植、SEFT 封装、MPF 长度自洽、扩展名对照）全部失败；第 2 轮锁定根因——**微博封面图转自 iPhone，EXIF `Make="Apple"` + Apple MakerNote（ContentIdentifier 配对标记）使飞牛按厂商分支走 Apple 配对路线，对内嵌视频视而不见**。X2（伪装 Pixel + 清 Apple 痕迹）与 X3（伪装 OnePlus + 清 Apple 痕迹，保留 oplus XMP）均可识别，而仅加 xpacket 包裹的 X1 仍失败。合并流程现已内置去 Apple 化（`neutralizeAppleExif`：Make/Model 改写为 OnePlus/OnePlus 13、MakerNote 条目中和、孤儿数据清零），产物与真机验证通过的 X3 逐字节一致。
+
 实现要点：
 
 - JPEG 段按 marker 结构逐段解析定位插入点，绝不全文件搜索 `FF D9` 找 EOI（EXIF 内嵌缩略图含假 EOI）。已有普通 XMP 段时整段原位替换；已含 `MotionPhoto`/`MicroVideo` 标记的图片拒绝重复合并。
@@ -83,7 +85,7 @@ XMP 字段与 ColorOS 16 真机文件对齐（无 xpacket 包裹、无 MicroVide
 | Google 相册（App/Web） | ✓ | 新旧格式双写 |
 | OPPO/一加（ColorOS 16） | ✓ 实测 | ColorOS 16.0.10.501 真机 A/B 变体实测；触发点为 MPF 双条目 |
 | 小米（HyperOS） | ✓ 理论兼容 | 官方文档：按 XMP 的 MotionPhoto 关键字索引；仅 HyperOS 支持第三方合成产物 |
-| 飞牛相册（fnOS） | ✗ 实测 | 全复刻真机布局的第三方合成产物仍不识别，疑似按机型白名单，属平台限制 |
+| 飞牛相册（fnOS） | ✓ 实测 | 按厂商分支解析：需去 Apple 化（封面图转自 iPhone，Make=Apple 触发其配对文件分支），已内置处理 |
 | 三星相册 | ✗ | 依赖 SEFT trailer，与 OPPO 布局互斥，本产物不写 |
 | macOS 预览/Quick Look、iOS 相册 | ✗（合并产物）✓（配对文件） | 单文件动态照片为平台限制；关闭合并时的同名 jpg+mov 配对文件一起导入照片 App 可作为 Live Photo 播放 |
 | IrfanView、ACDSee、Honeyview | ✗ | 按静态图处理；ImageGlass 9.3+ 可识别 |

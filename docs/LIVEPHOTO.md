@@ -77,6 +77,8 @@ Container:Directory 三条目：
 
 方法论教训（写给做适配的人）：厂商识别逻辑可能不看任何"文档化"字段，而是结构特征开关。字段对齐无效时，尽早切换到"控制变量 + 真机二分"，比继续翻规范快得多。
 
+**第 2/3 轮（飞牛相册 fnOS）**：第 1 轮 8 个单变量变体（XMP 字段、Make 伪装、厂商段移植、SEFT 尾部、MPF 长度自洽、扩展名对照）全部失败；第 2 轮转向"解析器风格 + 组合探针"后命中——根因是**微博封面图转自 iPhone：EXIF `Make="Apple"` + Apple MakerNote（ContentIdentifier）让飞牛按厂商分支走 Apple 配对路线，只找同名 MOV 而无视内嵌视频**。伪装 Make（Google 或 OnePlus）+ 中和 Apple MakerNote + 清零残留字节后即可识别，且 XMP 风格（oplus/纯 Google）、xpacket 有无均不敏感。实现见 `neutralizeAppleExif`，产物与真机验证通过的 X3 变体逐字节一致。
+
 ## 最终实现布局（`buildMotionPhoto`）
 
 ```
@@ -115,7 +117,8 @@ Container:Directory 三条目：
 5. **TIFF 条目表增删后**，所有指向表后数据的偏移（IFD0 条目、next IFD、缩略图指针）都要平移；MakerNote 以自身为基是特例。
 6. **已合并检测**：XMP 里出现 `MotionPhoto` 或 `MicroVideo` 即拒绝重复合并。
 7. **厂商标记值随系统版本漂移**：`UserComment` 在 ColorOS 14 真机为 `Oplus_8388608`、ColorOS 16 为 `oplus_11534336`。适配时优先从目标系统真机样本取值。
-8. **传输链路会毁掉一切**：微信/QQ 普通传输、部分云盘会重压缩图片并剥掉全部元数据段。测试必须用 USB 或"原图"通道。
+8. **EXIF `Make` 决定相册的解析分支**：飞牛相册实测按 Make/MakerNote 分派格式——`Make="Apple"` 即走 Apple 配对文件路线、对内嵌视频视而不见。来源为 iPhone 的图做安卓动态照片前必须去 Apple 化（改写 Make/Model、中和 MakerNote、清零残留字节）。
+9. **传输链路会毁掉一切**：微信/QQ 普通传输、部分云盘会重压缩图片并剥掉全部元数据段。测试必须用 USB 或"原图"通道。
 
 ## 兼容性实测矩阵（2026-10）
 
@@ -125,7 +128,7 @@ Container:Directory 三条目：
 | OPPO/一加（ColorOS 16） | ✓ | 真机 A/B 实测，触发点 = MPF 双条目 |
 | Google 相册 | ✓ | Google 新格式规范实现 |
 | 小米 HyperOS 相册 | ✓（理论） | 官方文档称按 XMP MotionPhoto 关键字索引 |
-| 飞牛相册（fnOS） | ✗ 实测 | 全复刻真机布局仍不识别，疑似机型白名单；调研与候选变体见仓库迭代记录 |
+| 飞牛相册（fnOS） | ✓ | 实测：按厂商分支解析，Make=Apple（微博封面图转自 iPhone）会走 Apple 配对分支忽略内嵌视频；去 Apple 化后识别 |
 | 三星相册 | ✗ | 依赖 SEFT 尾部，与 EOF 回退布局互斥 |
 | macOS / iOS（合并产物） | ✗ | Apple 仅认成对文件；关闭合并时同名 jpg+mov 配对保存可导入为 Live Photo |
 
