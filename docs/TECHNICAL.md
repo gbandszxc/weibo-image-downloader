@@ -23,7 +23,8 @@
 - 批次间延迟 300ms
 - 避免触发平台的反爬机制
 - 兼容 Chrome 浏览器的下载限制
-- Blob 保存（Live Photo 合并产物、X GIF 转换产物）统一优先走浏览器原生 `a[download]`：个别浏览器/下载管理器会忽略 `GM_download` 对 Blob 的命名，以内部 UUID + 内容嗅探扩展名落盘（例如把动态照片存成 `*.exif`）；`a[download]` 在各浏览器行为一致，可稳定保留文件名。`GM_download` 仅作回退；直链下载仍优先 `GM_download`
+- Blob 保存（Live Photo 合并产物、X GIF 转换产物）统一优先走浏览器原生 `a[download]`：个别浏览器/下载管理器会忽略 `GM_download` 对 Blob 的命名，以内部 UUID + 内容嗅探扩展名落盘（例如把动态照片存成 `*.exif`）；`a[download]` 在各浏览器行为一致，可稳定保留文件名。`GM_download` 仅作回退
+- 直链图片/视频下载优先 `GM_download`：其 `onload`/`onerror` 回调能确认下载结果（直链 URL 自带扩展名，命名稳定），下载按钮可如实显示「完成」；`GM_download` 不可用或失败时拉取字节后走 `a[download]` 保存，此时无法确认落盘，按钮如实显示「已发起」
 
 ## X 动图转换（MP4 → GIF）实现
 

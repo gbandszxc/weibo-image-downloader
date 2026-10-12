@@ -1401,6 +1401,17 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     function shouldResolveEmptyMediaItems(postContainer) {
       return isVideoDownloadEnabled() && !!getStatusLookupId(postContainer);
     }
+    const syntheticPostIds = /* @__PURE__ */ new WeakMap();
+    let syntheticPostIdSeq = 0;
+    function getSyntheticPostId(postContainer) {
+      let id = syntheticPostIds.get(postContainer);
+      if (!id) {
+        syntheticPostIdSeq += 1;
+        id = `weibo_${syntheticPostIdSeq}`;
+        syntheticPostIds.set(postContainer, id);
+      }
+      return id;
+    }
     function getPostId(postContainer) {
       if (isMobileWeiboPage()) {
         const status = getVueStatusItem(postContainer);
@@ -1408,7 +1419,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           return status.mid;
         }
       }
-      return postContainer.getAttribute("mid") || postContainer.getAttribute("data-mid") || `weibo_${Date.now()}`;
+      return getStatusLookupId(postContainer) || getSyntheticPostId(postContainer);
     }
     function insertMobileDownloadButton(post, btn) {
       const nameRow = post.querySelector("header.weibo-top .m-text-box h3.m-text-cut");
@@ -1951,7 +1962,18 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       const currentPath = windowRef.location && (windowRef.location.pathname || windowRef.location.href || "");
       const currentMatch = currentPath.match(/\/status\/(\d+)/);
-      return currentMatch ? currentMatch[1] : `x_${Date.now()}`;
+      return currentMatch ? currentMatch[1] : getSyntheticPostId(postContainer);
+    }
+    const syntheticPostIds = /* @__PURE__ */ new WeakMap();
+    let syntheticPostIdSeq = 0;
+    function getSyntheticPostId(postContainer) {
+      let id = syntheticPostIds.get(postContainer);
+      if (!id) {
+        syntheticPostIdSeq += 1;
+        id = `x_${syntheticPostIdSeq}`;
+        syntheticPostIds.set(postContainer, id);
+      }
+      return id;
     }
     function shouldResolveEmptyMediaItems(postContainer) {
       if (!/^\d+$/.test(getPostId(postContainer))) {
@@ -4029,15 +4051,15 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
     }
     async function downloadImage(url, filename) {
+      const directDownloadSuccess = await tryGmDownload(url, filename);
+      if (directDownloadSuccess) {
+        return true;
+      }
       try {
         const blob = await fetchMediaBlob(url);
         return downloadBlobWithAnchor(blob, filename);
       } catch (error) {
         log("浏览器原生保存失败，回退直链下载:", filename, error.message);
-      }
-      const directDownloadSuccess = await tryGmDownload(url, filename);
-      if (directDownloadSuccess) {
-        return true;
       }
       return downloadImageFallback(url, filename);
     }
