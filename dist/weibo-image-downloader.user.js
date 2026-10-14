@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         微博/X图片批量下载器
 // @namespace    http://tampermonkey.net/
-// @version      1.5.3
+// @version      1.5.4
 // @description  一键下载微博和X帖子中的所有图片为原图，可选开启视频下载
 // @author       gbandszxc
 // @match        https://weibo.com/*
@@ -4051,15 +4051,15 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
     }
     async function downloadImage(url, filename) {
-      const directDownloadSuccess = await tryGmDownload(url, filename);
-      if (directDownloadSuccess) {
-        return true;
-      }
       try {
         const blob = await fetchMediaBlob(url);
         return downloadBlobWithAnchor(blob, filename);
       } catch (error) {
         log("浏览器原生保存失败，回退直链下载:", filename, error.message);
+      }
+      const directDownloadSuccess = await tryGmDownload(url, filename);
+      if (directDownloadSuccess) {
+        return true;
       }
       return downloadImageFallback(url, filename);
     }

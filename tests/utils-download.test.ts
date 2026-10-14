@@ -112,7 +112,7 @@ function createTestUtils({
     };
 }
 
-test("direct image downloads prefer GM_download so completion can be confirmed", async () => {
+test("direct image downloads fetch bytes and save through the browser anchor, not GM_download", async () => {
     const gmCalls: GmDownloadOptions[] = [];
     const { utils, clicks, createObjectUrlCalls } = createTestUtils({
         gmDownload(details) {
@@ -120,19 +120,46 @@ test("direct image downloads prefer GM_download so completion can be confirmed",
             queueMicrotask(() => details.onload());
             return { abort() {} };
         },
+        gmXmlhttpRequest(details) {
+            queueMicrotask(() => details.onload({
+                status: 200,
+                response: new Blob(["image"], { type: "image/jpeg" })
+            }));
+        }
+    });
+
+    const success = await utils.downloadImage("https://pbs.twimg.com/media/demo.jpg?name=orig", "x_123_1.jpg");
+
+    assert.equal(success, "started", "anchor 保存无法确认落盘，应如实报告 started");
+    assert.equal(gmCalls.length, 0, "GM_download 直链会被 Tampermonkey 交给浏览器下载器，在「下载前询问保存位置」开启时弹出另存为，不应优先使用");
+    assert.equal(clicks.length, 1);
+    assert.equal(clicks[0].download, "x_123_1.jpg");
+    assert.equal(createObjectUrlCalls.length, 1);
+});
+
+test("direct image downloads fall back to GM_download when fetching bytes fails", async () => {
+    const gmCalls: GmDownloadOptions[] = [];
+    const { utils, clicks } = createTestUtils({
+        gmDownload(details) {
+            gmCalls.push(details);
+            queueMicrotask(() => details.onload());
+            return { abort() {} };
+        },
+        gmXmlhttpRequest(details) {
+            queueMicrotask(() => details.onerror({ message: "network blocked" }));
+        },
         fetchRef: async () => {
-            throw new Error("GM_download 可用时直链下载不应再拉流");
+            throw new Error("blocked");
         }
     });
 
     const success = await utils.downloadImage("https://wx2.sinaimg.cn/large/demo.jpg", "weibo_demo_1.jpg");
 
-    assert.equal(success, true, "GM_download onload 回调确认完成，应返回 true 而非 started");
+    assert.equal(success, true, "拉流失败回退 GM_download，onload 确认后返回 true");
     assert.equal(gmCalls.length, 1);
     assert.equal(gmCalls[0].url, "https://wx2.sinaimg.cn/large/demo.jpg");
     assert.equal(gmCalls[0].name, "weibo_demo_1.jpg");
     assert.equal(clicks.length, 0);
-    assert.equal(createObjectUrlCalls.length, 0);
 });
 
 test("X GIF conversion defaults on and only changes X GIF download jobs", () => {
@@ -191,9 +218,10 @@ test("failed X GIF conversion never saves an MP4 named GIF and continues other j
         { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/broken.mp4", imageExt: ".mp4" },
         { kind: "image", imageUrl: "https://pbs.twimg.com/media/photo.jpg", imageExt: ".jpg" }
     ]), "123");
-    // GIF 转换失败不落盘；普通图片走 GM_download 直链确认完成，也不产生 anchor 点击
-    assert.deepEqual(mock.anchors.map((anchor) => anchor.download), []);
-    assert.match(toastMessages[toastMessages.length - 1], /^已下载 1 个文件，1 个失败；X GIF转换或保存失败/);
+    // GIF 转换失败不落盘；普通图片走拉流 + 浏览器原生 a[download] 保存
+    assert.deepEqual(mock.anchors.map((anchor) => anchor.download), ["x_123_2.jpg"]);
+    assert.match(toastMessages[toastMessages.length - 1], /^已发起 1 个文件的下载，1 个失败；请查看浏览器下载列表；X GIF转换或保存失败/);
+    // anchor 保存的 blob URL 由 setTimeout 延迟回收，测试窗口内只观察到 GIF 转换的源 revoke
     assert.deepEqual(mock.revokedUrls, ["blob:gif-source"]);
 });
 
@@ -264,7 +292,7 @@ test("downloadMediaItems reports image and video counts separately", async () =>
     assert.deepEqual(toastMessages, ["已下载 1 张图片和 1 个视频"]);
 });
 
-test("downloadImage falls back to GM_xmlhttpRequest fetch and the browser anchor when GM_download is unavailable", async () => {
+test("downloadImage fetches through GM_xmlhttpRequest and saves via the browser anchor", async () => {
     const xhrCalls: GmBlobRequestDetails[] = [];
     const blob = new Blob(["detail-page-image"], { type: "image/jpeg" });
     const { utils, openCalls, clicks } = createTestUtils({

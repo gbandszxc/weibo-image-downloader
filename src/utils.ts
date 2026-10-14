@@ -388,22 +388,21 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
     }
 
     async function downloadImage(url: string, filename: string): Promise<boolean | "started"> {
-        // 直链优先 GM_download：onload/onerror 能确认下载结果，按钮可如实显示「完成」。
-        // v1.5.2 修复的命名丢失只发生在 Blob 下载被下载管理器接管的场景（见 downloadBlob），
-        // 直链 URL 自带扩展名，GM_download 命名一直稳定，不受该问题影响。
-        const directDownloadSuccess = await tryGmDownload(url, filename);
-        if (directDownloadSuccess) {
-            return true;
-        }
-
         try {
-            // GM_download 不可用或失败时，拉取字节后走浏览器原生 a[download] 保存，
-            // 文件名不受系统 MIME 扩展名映射（如 image/jpeg 被改写为 .exif）或
-            // 下载管理器丢弃命名的影响；anchor 点击无法确认落盘，如实报告「已发起」。
+            // 直链与 Blob 产物同路：拉流后走浏览器原生 a[download] 保存。GM_download 直链
+            // 会被 Tampermonkey 直接交给浏览器下载器，Chrome「下载前询问保存位置」开启时
+            // 会弹出另存为对话框（微博直链因带 Referer 头走 TM 内部拉流路径才静默），且该
+            // 对话框挂起时 onload 仍会触发，「完成」语义失真；anchor 点击无法确认落盘，
+            // 如实报告「已发起」。GM_download 降为拉流失败时的回退。
             const blob = await fetchMediaBlob(url);
             return downloadBlobWithAnchor(blob, filename);
         } catch (error) {
             log("浏览器原生保存失败，回退直链下载:", filename, (error as Error).message);
+        }
+
+        const directDownloadSuccess = await tryGmDownload(url, filename);
+        if (directDownloadSuccess) {
+            return true;
         }
 
         return downloadImageFallback(url, filename);
