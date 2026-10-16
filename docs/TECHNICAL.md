@@ -23,8 +23,9 @@
 - 批次间延迟 300ms
 - 避免触发平台的反爬机制
 - 兼容 Chrome 浏览器的下载限制
-- 全部媒体（直链图片/视频与 Blob 产物）统一优先走浏览器原生 `a[download]` 保存：个别浏览器/下载管理器会忽略 `GM_download` 对 Blob 的命名，以内部 UUID + 内容嗅探扩展名落盘（例如把动态照片存成 `*.exif`）；直链若经 `GM_download` 交给 Tampermonkey，则会被其直接转交浏览器下载器，在 Chrome「下载前询问保存位置」开启时逐文件弹出另存为对话框（微博直链因带 Referer 头走 TM 内部拉流路径才静默），且对话框挂起期间 `onload` 仍会触发，「完成」语义失真。`a[download]` 在各浏览器行为一致，可静默保存并稳定保留文件名
-- 直链下载先经 `GM_xmlhttpRequest`（失败回退页面 `fetch`）拉取完整字节，再点击 `a[download]` 保存；拉流失败时回退 `GM_download` 直链。anchor 点击无法确认落盘，按钮如实显示「已发起」；回退 `GM_download` 成功时按钮显示「完成」
+- 直链图片/视频优先经 `GM_download`（显式 `saveAs: false`）由 Tampermonkey 转交浏览器下载 API（`chrome.downloads` / `browser.downloads`）直连保存：`saveAs` 显式为 `false` 时，即使用户开启「下载前询问每个文件的保存位置」（Chrome `prompt_for_download` / Firefox `browser.download.useDownloadDir`）也不会弹出保存对话框，文件名与 `onload`/`onerror` 结果均可靠——只有省略 `saveAs` 时浏览器才遵循该用户设置。TM 未授予下载权限或直链下载失败时回退，`onload` 确认后按钮显示「完成」
+- Blob 产物（X GIF 转换、LivePhoto 合并/配对）走浏览器原生 `a[download]` 保存：个别浏览器/下载管理器会忽略 `GM_download` 对 Blob 的命名，以内部 UUID + 内容嗅探扩展名落盘（例如把动态照片存成 `*.exif`），`a[download]` 是唯一稳定保留文件名的通道。该通道严格遵循用户「每次询问」设置，开启时此类产物会逐文件弹出保存对话框，属浏览器安全设计，脚本无法绕过
+- 直链回退链：`GM_download` 失败 → `GM_xmlhttpRequest`（失败回退页面 `fetch`）拉取完整字节 → `a[download]` 保存 → 仍失败走二进制兜底。发生回退时批量结束的 toast 会追加「若弹出保存位置询问，请在 Tampermonkey 中允许下载权限」；`GM_download` 不可用（如 Violentmonkey）属正常降级，不提示
 
 ## X 动图转换（MP4 → GIF）实现
 

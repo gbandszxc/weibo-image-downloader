@@ -253,13 +253,19 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return {};
     }
 
-    async function tryGmDownload(resource: string | Blob, filename: string): Promise<boolean> {
+    /** GM_download 单次尝试结果；error 为 "unavailable" 表示脚本管理器未提供 GM_download */
+    interface GmDownloadAttempt {
+        ok: boolean;
+        error?: string;
+    }
+
+    async function tryGmDownload(resource: string | Blob, filename: string): Promise<GmDownloadAttempt> {
         if (typeof gmDownload !== "function") {
-            return false;
+            return { ok: false, error: "unavailable" };
         }
 
         try {
-            return await new Promise<boolean>((resolve) => {
+            return await new Promise<GmDownloadAttempt>((resolve) => {
                 try {
                     const downloadId = gmDownload({
                         url: resource,
@@ -267,27 +273,28 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
                         headers: getDownloadRequestHeaders(resource),
                         saveAs: false,
                         onload() {
-                            resolve(true);
+                            resolve({ ok: true });
                         },
                         onerror(error) {
-                            log(`GM_download失败: ${error.error || error.message || "未知错误"}`);
-                            resolve(false);
+                            const reason = error.error || error.message || "未知错误";
+                            log(`GM_download失败: ${reason}`);
+                            resolve({ ok: false, error: reason });
                         },
                         onprogress: () => {}
                     });
 
                     if (downloadId === false) {
                         log("GM_download返回false，尝试备用方案:", filename);
-                        resolve(false);
+                        resolve({ ok: false, error: "rejected" });
                     }
                 } catch (error) {
                     log("GM_download异常:", (error as Error).message);
-                    resolve(false);
+                    resolve({ ok: false, error: (error as Error).message });
                 }
             });
         } catch (error) {
             log("GM_download异常，尝试备用方案:", (error as Error).message);
-            return false;
+            return { ok: false, error: (error as Error).message };
         }
     }
 
@@ -382,27 +389,33 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             return downloadBlobWithAnchor(blob, filename);
         } catch (error) {
             log("浏览器原生保存失败，回退 GM_download:", filename, (error as Error).message);
-            const gmSuccess = await tryGmDownload(blob, filename);
-            return gmSuccess || downloadBlobWithAnchor(blob, filename);
+            const gmResult = await tryGmDownload(blob, filename);
+            return gmResult.ok || downloadBlobWithAnchor(blob, filename);
         }
     }
 
+    /** 本次批量中 GM_download 失败后改走浏览器原生保存的文件数，用于批量结束时的授权提示 */
+    let directDownloadFallbackCount = 0;
+
     async function downloadImage(url: string, filename: string): Promise<boolean | "started"> {
+        // 直链优先 GM_download(saveAs:false)：由 Tampermonkey 经浏览器下载 API 直连保存，
+        // 显式 saveAs:false 在用户开启「下载前询问每个文件的保存位置」时依然静默落盘且
+        // 命名正确，onload/onerror 可确认结果，按钮显示「完成」。a[download] 通道严格遵循
+        // 该用户设置，开启时逐文件弹保存对话框，网页侧无法绕过，故只作回退使用；TM 未
+        // 提供下载权限或直链下载失败时回退，并在批量结束时提示用户授权。
+        const direct = await tryGmDownload(url, filename);
+        if (direct.ok) {
+            return true;
+        }
+        if (direct.error !== "unavailable") {
+            directDownloadFallbackCount++;
+        }
+
         try {
-            // 直链与 Blob 产物同路：拉流后走浏览器原生 a[download] 保存。GM_download 直链
-            // 会被 Tampermonkey 直接交给浏览器下载器，Chrome「下载前询问保存位置」开启时
-            // 会弹出另存为对话框（微博直链因带 Referer 头走 TM 内部拉流路径才静默），且该
-            // 对话框挂起时 onload 仍会触发，「完成」语义失真；anchor 点击无法确认落盘，
-            // 如实报告「已发起」。GM_download 降为拉流失败时的回退。
             const blob = await fetchMediaBlob(url);
             return downloadBlobWithAnchor(blob, filename);
         } catch (error) {
-            log("浏览器原生保存失败，回退直链下载:", filename, (error as Error).message);
-        }
-
-        const directDownloadSuccess = await tryGmDownload(url, filename);
-        if (directDownloadSuccess) {
-            return true;
+            log("浏览器原生保存失败，回退二进制兜底:", filename, (error as Error).message);
         }
 
         return downloadImageFallback(url, filename);
@@ -557,6 +570,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         let failedLivePhotoMergeCount = 0;
         let livePhotoFallbackSavedCount = 0;
         let handedOffCount = 0;
+        directDownloadFallbackCount = 0;
 
         for (let i = 0; i < jobs.length; i++) {
             const job = jobs[i];
@@ -656,6 +670,9 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
         if (livePhotoFallbackSavedCount > 0) {
             message += "；部分LivePhoto未能合并，已分别保存图片与视频";
+        }
+        if (directDownloadFallbackCount > 0) {
+            message += "；部分文件已改用浏览器保存，若弹出保存位置询问，请在 Tampermonkey 中允许下载权限";
         }
         log(message);
         if (ui && typeof ui.showToast === "function") {

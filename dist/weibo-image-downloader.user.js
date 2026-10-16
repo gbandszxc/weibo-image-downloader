@@ -3938,7 +3938,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     }
     async function tryGmDownload(resource, filename) {
       if (typeof gmDownload !== "function") {
-        return false;
+        return { ok: false, error: "unavailable" };
       }
       try {
         return await new Promise((resolve) => {
@@ -3949,27 +3949,28 @@ OR OTHER DEALINGS IN THE SOFTWARE.
               headers: getDownloadRequestHeaders(resource),
               saveAs: false,
               onload() {
-                resolve(true);
+                resolve({ ok: true });
               },
               onerror(error) {
-                log(`GM_download失败: ${error.error || error.message || "未知错误"}`);
-                resolve(false);
+                const reason = error.error || error.message || "未知错误";
+                log(`GM_download失败: ${reason}`);
+                resolve({ ok: false, error: reason });
               },
               onprogress: () => {
               }
             });
             if (downloadId === false) {
               log("GM_download返回false，尝试备用方案:", filename);
-              resolve(false);
+              resolve({ ok: false, error: "rejected" });
             }
           } catch (error) {
             log("GM_download异常:", error.message);
-            resolve(false);
+            resolve({ ok: false, error: error.message });
           }
         });
       } catch (error) {
         log("GM_download异常，尝试备用方案:", error.message);
-        return false;
+        return { ok: false, error: error.message };
       }
     }
     function downloadBlobWithAnchor(blob, filename) {
@@ -4046,20 +4047,24 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         return downloadBlobWithAnchor(blob, filename);
       } catch (error) {
         log("浏览器原生保存失败，回退 GM_download:", filename, error.message);
-        const gmSuccess = await tryGmDownload(blob, filename);
-        return gmSuccess || downloadBlobWithAnchor(blob, filename);
+        const gmResult = await tryGmDownload(blob, filename);
+        return gmResult.ok || downloadBlobWithAnchor(blob, filename);
       }
     }
+    let directDownloadFallbackCount = 0;
     async function downloadImage(url, filename) {
+      const direct = await tryGmDownload(url, filename);
+      if (direct.ok) {
+        return true;
+      }
+      if (direct.error !== "unavailable") {
+        directDownloadFallbackCount++;
+      }
       try {
         const blob = await fetchMediaBlob(url);
         return downloadBlobWithAnchor(blob, filename);
       } catch (error) {
-        log("浏览器原生保存失败，回退直链下载:", filename, error.message);
-      }
-      const directDownloadSuccess = await tryGmDownload(url, filename);
-      if (directDownloadSuccess) {
-        return true;
+        log("浏览器原生保存失败，回退二进制兜底:", filename, error.message);
       }
       return downloadImageFallback(url, filename);
     }
@@ -4182,6 +4187,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       let failedLivePhotoMergeCount = 0;
       let livePhotoFallbackSavedCount = 0;
       let handedOffCount = 0;
+      directDownloadFallbackCount = 0;
       for (let i = 0; i < jobs.length; i++) {
         const job = jobs[i];
         const isLastJob = i === jobs.length - 1;
@@ -4269,6 +4275,9 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       if (livePhotoFallbackSavedCount > 0) {
         message += "；部分LivePhoto未能合并，已分别保存图片与视频";
+      }
+      if (directDownloadFallbackCount > 0) {
+        message += "；部分文件已改用浏览器保存，若弹出保存位置询问，请在 Tampermonkey 中允许下载权限";
       }
       log(message);
       if (ui2 && typeof ui2.showToast === "function") {
