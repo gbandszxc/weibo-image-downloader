@@ -283,6 +283,84 @@ test("video-enabled x platform resolves highest bitrate video from TweetResultBy
     assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/demo/1080.mp4");
 });
 
+test("reply-restricted X videos resolve media inside TweetWithVisibilityResults", async () => {
+    // 2111411262261457090 的真实响应裁剪：只保留媒体与可见性包装，不包含账号信息。
+    const response = {
+        data: {
+            tweetResult: {
+                result: {
+                    __typename: "TweetWithVisibilityResults",
+                    tweet: {
+                        legacy: {
+                            extended_entities: {
+                                media: [{
+                                    id_str: "2111411210587648000",
+                                    type: "video",
+                                    video_info: {
+                                        variants: [{
+                                            bitrate: 632000,
+                                            content_type: "video/mp4",
+                                            url: "https://video.twimg.com/amplify_video/2111411210587648000/vid/avc1/320x568/7pe6Plg-2-VDxA87.mp4?tag=14"
+                                        }, {
+                                            bitrate: 2176000,
+                                            content_type: "video/mp4",
+                                            url: "https://video.twimg.com/amplify_video/2111411210587648000/vid/avc1/720x1280/rVC7kVb_ICFahjUY.mp4?tag=14"
+                                        }]
+                                    }
+                                }]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    const { platform, getFetchCount } = createXPlatformForViewer({
+        configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },
+        pathname: "/ettuaj/status/2111411262261457090",
+        response
+    });
+    const post = createStatusPostWithVideo();
+
+    assert.equal(platform.shouldResolveEmptyMediaItems(post), true);
+    const mediaItems = await platform.resolvePostMediaItems(post, []);
+
+    assert.equal(getFetchCount(), 1);
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "video");
+    assert.equal(mediaItems[0].videoUrl,
+        "https://video.twimg.com/amplify_video/2111411210587648000/vid/avc1/720x1280/rVC7kVb_ICFahjUY.mp4?tag=14");
+});
+
+test("X visibility wrappers preserve quoted photos and tolerate unavailable tweets", () => {
+    const platform = createXPlatformForTests();
+    const mediaItems = platform.getXMediaItemsFromStatus({
+        data: { tweetResult: { result: {
+            __typename: "TweetWithVisibilityResults",
+            tweet: {
+                quoted_status_result: { result: {
+                    __typename: "TweetWithVisibilityResults",
+                    tweet: { legacy: { extended_entities: { media: [{
+                        id_str: "quoted-photo",
+                        type: "photo",
+                        media_url_https: "https://pbs.twimg.com/media/QuotedPhoto.jpg"
+                    }] } } }
+                } }
+            }
+        } } }
+    });
+
+    assert.equal(mediaItems.length, 1);
+    assert.equal(mediaItems[0].kind, "image");
+    assert.equal(mediaItems[0].imageUrl, "https://pbs.twimg.com/media/QuotedPhoto.jpg?name=orig");
+    assert.deepEqual(platform.getXMediaItemsFromStatus({
+        data: { tweetResult: { result: { __typename: "TweetUnavailable" } } }
+    }), []);
+    assert.deepEqual(platform.getXMediaItemsFromStatus({
+        data: { tweetResult: { result: { __typename: "TweetWithVisibilityResults" } } }
+    }), []);
+});
+
 test("video-enabled x platform merges GraphQL videos with DOM photos for mixed posts", async () => {
     const platform = createXPlatformWithFetch({
         configOverrides: { ENABLE_VIDEO_DOWNLOAD: true },

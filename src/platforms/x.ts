@@ -26,6 +26,8 @@ export type XMediaEntity = {
 };
 
 export type XTweetResult = {
+    __typename?: string;
+    tweet?: XTweetResult;
     legacy?: {
         extended_entities?: {
             media?: XMediaEntity[];
@@ -613,9 +615,12 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
     }
 
     function getXMediaItemsFromStatus(status: XStatus | null): XMediaItem[] {
-        const result = status?.data?.tweetResult?.result;
+        // 限制回复等可见性策略会将实际推文包在 TweetWithVisibilityResults.tweet 中。
+        const rawResult = status?.data?.tweetResult?.result;
+        const result = rawResult?.tweet || rawResult;
         const media = result?.legacy?.extended_entities?.media || [];
-        const quotedMedia = result?.quoted_status_result?.result?.legacy?.extended_entities?.media || [];
+        const quotedResult = result?.quoted_status_result?.result;
+        const quotedMedia = (quotedResult?.tweet || quotedResult)?.legacy?.extended_entities?.media || [];
 
         // 媒体预览页右栏主推文的 DOM 子树里没有媒体，自有图片也要依赖接口返回
         const ownPhotos = media.filter((item) => item?.type === "photo").map((item, index) => {

@@ -2022,9 +2022,11 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       return response.json();
     }
     function getXMediaItemsFromStatus(status) {
-      const result = status?.data?.tweetResult?.result;
+      const rawResult = status?.data?.tweetResult?.result;
+      const result = rawResult?.tweet || rawResult;
       const media = result?.legacy?.extended_entities?.media || [];
-      const quotedMedia = result?.quoted_status_result?.result?.legacy?.extended_entities?.media || [];
+      const quotedResult = result?.quoted_status_result?.result;
+      const quotedMedia = (quotedResult?.tweet || quotedResult)?.legacy?.extended_entities?.media || [];
       const ownPhotos = media.filter((item) => item?.type === "photo").map((item, index) => {
         return createMediaItem({
           id: item.id_str || `graphql-photo-${index + 1}`,

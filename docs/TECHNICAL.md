@@ -17,6 +17,10 @@
 
 脚本会自动将任意尺寸的URL转换为原图URL。
 
+## X 帖子接口解析
+
+页面未提供视频直链时，通过 `TweetResultByRestId` 读取媒体，并选择最高码率的 MP4。普通响应的媒体位于 `result.legacy.extended_entities.media`；限制回复等可见性策略可能返回 `TweetWithVisibilityResults`，此时先展开 `result.tweet` 再读取媒体。引用帖也按相同规则展开，避免漏掉其图片。纯视频帖只有在开启视频下载且解析到媒体后才显示下载按钮。
+
 ## 下载策略
 
 - 每批下载 5 张图片
