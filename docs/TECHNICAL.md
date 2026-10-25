@@ -15,7 +15,13 @@
 - `name=large` - 大图
 - `name=orig` - 原图
 
-脚本会自动将任意尺寸的URL转换为原图URL。
+脚本会自动将任意尺寸的URL转换为原图URL，下载始终使用原图。
+
+长按选择弹窗只做预览，缩略图与下载 URL 分离：
+
+- 微博：取列表页同源的 `orj360` 变体（GIF 保持 `.gif`），另有 `pic_infos[*].thumbnail`（`wap180`）兜底；视频用 `page_info.page_pic`（`orj480`）
+- X：列表 DOM 已渲染的图片直接复用 `img.src`（通常 `name=900x900`）；接口/视频/GIF 封面用 `name=small`（680px）
+- 超过 9 项时按三列继续平铺（12 图微博即 3×4），滚动查看全部
 
 ## X 帖子接口解析
 

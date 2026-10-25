@@ -171,9 +171,11 @@ test("x platform keeps photo items, converts GIF videos to downloadable media, a
     assert.equal(mediaItems.length, 2);
     assert.equal(mediaItems[0].kind, "image");
     assert.equal(mediaItems[0].imageUrl, "https://pbs.twimg.com/media/PhotoOne?format=jpg&name=orig");
+    assert.equal(mediaItems[0].thumbnailUrl, "https://pbs.twimg.com/media/PhotoOne?format=jpg&name=large");
     assert.equal(mediaItems[0].imageExt, ".jpg");
     assert.equal(mediaItems[1].kind, "gif");
     assert.equal(mediaItems[1].imageUrl, "https://video.twimg.com/tweet_video/GifOne.mp4");
+    assert.equal(mediaItems[1].thumbnailUrl, "https://pbs.twimg.com/tweet_video_thumb/GifThumb.jpg?name=small");
     assert.equal(mediaItems[1].imageExt, ".mp4");
     assert.equal(mediaItems[1].videoUrl, null);
 });
@@ -188,6 +190,7 @@ test("video-enabled x platform includes regular videos when a direct source is a
             {
                 currentSrc: "https://video.twimg.com/amplify_video/VideoOne.mp4",
                 src: "https://video.twimg.com/amplify_video/VideoOne.mp4",
+                poster: "https://pbs.twimg.com/amplify_video_thumb/VideoOne.jpg",
                 querySelectorAll() {
                     return [];
                 },
@@ -204,6 +207,7 @@ test("video-enabled x platform includes regular videos when a direct source is a
     assert.equal(mediaItems[0].kind, "video");
     assert.equal(mediaItems[0].imageUrl, null);
     assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/VideoOne.mp4");
+    assert.equal(mediaItems[0].thumbnailUrl, "https://pbs.twimg.com/amplify_video_thumb/VideoOne.jpg?name=small");
     assert.equal(mediaItems[0].videoExt, ".mp4");
 });
 
@@ -241,6 +245,7 @@ test("video-enabled x platform resolves highest bitrate video from TweetResultBy
                                     {
                                         id_str: "2058970349124136960",
                                         type: "video",
+                                        media_url_https: "https://pbs.twimg.com/amplify_video_thumb/2058970349124136960/img/demo.jpg",
                                         video_info: {
                                             variants: [
                                                 {
@@ -281,6 +286,10 @@ test("video-enabled x platform resolves highest bitrate video from TweetResultBy
     assert.equal(mediaItems.length, 1);
     assert.equal(mediaItems[0].kind, "video");
     assert.equal(mediaItems[0].videoUrl, "https://video.twimg.com/amplify_video/demo/1080.mp4");
+    assert.equal(
+        mediaItems[0].thumbnailUrl,
+        "https://pbs.twimg.com/amplify_video_thumb/2058970349124136960/img/demo.jpg?name=small"
+    );
 });
 
 test("reply-restricted X videos resolve media inside TweetWithVisibilityResults", async () => {
@@ -353,6 +362,7 @@ test("X visibility wrappers preserve quoted photos and tolerate unavailable twee
     assert.equal(mediaItems.length, 1);
     assert.equal(mediaItems[0].kind, "image");
     assert.equal(mediaItems[0].imageUrl, "https://pbs.twimg.com/media/QuotedPhoto.jpg?name=orig");
+    assert.equal(mediaItems[0].thumbnailUrl, "https://pbs.twimg.com/media/QuotedPhoto.jpg?name=small");
     assert.deepEqual(platform.getXMediaItemsFromStatus({
         data: { tweetResult: { result: { __typename: "TweetUnavailable" } } }
     }), []);

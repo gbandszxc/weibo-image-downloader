@@ -6,6 +6,8 @@ export type XMediaItem = {
     label: string;
     imageUrl: string | null;
     videoUrl: string | null;
+    /** 列表页同源缩略图，仅用于选择弹窗回显，不参与下载。 */
+    thumbnailUrl?: string | null;
     imageExt: string;
     videoExt: string;
 };
@@ -168,6 +170,23 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return typeof url === "string" && url.includes("pbs.twimg.com/media/");
     }
 
+    // X 的图片/视频封面共用 pbs.twimg.com，name=small（680px）足够弹窗回显，
+    // 又不会像 orig 那样为缩略图拉整张原图。
+    function getXThumbnailUrl(url: unknown): string | null {
+        if (!url || typeof url !== "string") {
+            return null;
+        }
+
+        try {
+            const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+            const urlObj = new URL(fullUrl);
+            urlObj.searchParams.set("name", "small");
+            return urlObj.toString();
+        } catch {
+            return url;
+        }
+    }
+
     function getVideoSourceUrl(video: HTMLVideoElement): string | null {
         if (!video) {
             return null;
@@ -296,11 +315,12 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return images;
     }
 
-    function createMediaItem({ id, kind, label, url, fallbackExt }: {
+    function createMediaItem({ id, kind, label, url, thumbnailUrl, fallbackExt }: {
         id: string;
         kind: XMediaKind;
         label: string;
         url: string | null;
+        thumbnailUrl?: string | null;
         fallbackExt: string;
     }): XMediaItem | null {
         if (!url) {
@@ -314,6 +334,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 label,
                 imageUrl: null,
                 videoUrl: url,
+                thumbnailUrl: thumbnailUrl || null,
                 imageExt: ".jpg",
                 videoExt: getFileExtensionFromUrl(url, fallbackExt)
             };
@@ -325,6 +346,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             label,
             imageUrl: url,
             videoUrl: null,
+            thumbnailUrl: thumbnailUrl || null,
             imageExt: getFileExtensionFromUrl(url, fallbackExt),
             videoExt: ".mov"
         };
@@ -352,6 +374,8 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 kind: "image",
                 label: `图片 ${mediaItems.length + 1}`,
                 url,
+                // 列表页已渲染的 img.src（通常 name=900x900），直接复用命中缓存。
+                thumbnailUrl: img.src,
                 fallbackExt: ".jpg"
             });
             if (item) {
@@ -388,6 +412,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 kind,
                 label: isGif ? `GIF ${mediaCount}` : `视频 ${mediaCount}`,
                 url,
+                thumbnailUrl: getXThumbnailUrl(video.poster),
                 fallbackExt: ".mp4"
             });
             if (item) {
@@ -629,6 +654,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 kind: "image",
                 label: `图片 ${index + 1}`,
                 url: getOriginalImageUrl(item.media_url_https),
+                thumbnailUrl: getXThumbnailUrl(item.media_url_https),
                 fallbackExt: ".jpg"
             });
         }).filter(Boolean) as XMediaItem[];
@@ -643,6 +669,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 kind: "image",
                 label: `图片 ${index + 1}`,
                 url: getOriginalImageUrl(item.media_url_https),
+                thumbnailUrl: getXThumbnailUrl(item.media_url_https),
                 fallbackExt: ".jpg"
             });
         }).filter(Boolean) as XMediaItem[];
@@ -663,6 +690,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
                 kind: mediaType === "animated_gif" ? "gif" : "video",
                 label: mediaType === "animated_gif" ? `GIF ${index + 1}` : `视频 ${index + 1}`,
                 url,
+                thumbnailUrl: getXThumbnailUrl(item.media_url_https),
                 fallbackExt: ".mp4"
             });
         }).filter(Boolean) as XMediaItem[];

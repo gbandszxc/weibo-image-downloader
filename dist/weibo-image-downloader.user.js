@@ -896,7 +896,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
   });
 
   // src/style.css
-  var style_default = '#weibo-img-toast {\r\n    position: fixed;\r\n    top: 20px;\r\n    left: 50%;\r\n    transform: translateX(-50%);\r\n    background: rgba(0, 0, 0, 0.75);\r\n    color: #fff;\r\n    padding: 10px 20px;\r\n    border-radius: 4px;\r\n    font-size: 14px;\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 10px;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);\r\n}\r\n\r\n#weibo-img-toast .close-btn {\r\n    font-size: 18px;\r\n    cursor: pointer;\r\n    opacity: 0.7;\r\n    line-height: 1;\r\n}\r\n\r\n#weibo-img-toast .close-btn:hover {\r\n    opacity: 1;\r\n}\r\n\r\n.weibo-img-select-overlay {\r\n    position: fixed;\r\n    inset: 0;\r\n    background: rgba(15, 23, 42, 0.24);\r\n    backdrop-filter: blur(10px);\r\n    z-index: 2147483647;\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    padding: 16px;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-modal {\r\n    width: 100%;\r\n    max-width: 448px;\r\n    max-height: 80vh;\r\n    background: #ffffff;\r\n    border: 1px solid rgba(255, 130, 0, 0.12);\r\n    border-radius: 16px;\r\n    box-shadow: none;\r\n    display: flex;\r\n    flex-direction: column;\r\n    overflow: hidden;\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n}\r\n\r\n.weibo-img-select-header {\r\n    padding: 16px 18px 14px;\r\n    border-bottom: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    align-items: center;\r\n    justify-content: space-between;\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-header-title {\r\n    font-size: 15px;\r\n    font-weight: 600;\r\n    color: #1f2937;\r\n}\r\n\r\n.weibo-img-select-toggle-btn {\r\n    height: 30px;\r\n    padding: 0 12px;\r\n    border: 1px solid rgba(148, 163, 184, 0.35);\r\n    border-radius: 999px;\r\n    background: #ffffff;\r\n    color: #c2410c;\r\n    font-size: 12px;\r\n    font-weight: 600;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    cursor: pointer;\r\n    box-sizing: border-box;\r\n    white-space: nowrap;\r\n    transition: background-color 0.2s ease;\r\n}\r\n\r\n.weibo-img-select-toggle-btn:hover {\r\n    background: #f8fafc;\r\n}\r\n\r\n.weibo-img-select-list {\r\n    padding: 14px 18px 18px;\r\n    overflow: auto;\r\n    display: grid;\r\n    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));\r\n    gap: 12px;\r\n}\r\n\r\n.weibo-img-select-item {\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 8px;\r\n    min-width: 0;\r\n    height: 48px;\r\n    padding: 10px 12px;\r\n    border: 1px solid rgba(255, 130, 0, 0.14);\r\n    border-radius: 12px;\r\n    background: #ffffff;\r\n    box-shadow: none;\r\n    user-select: none;\r\n    font-size: 14px;\r\n    color: #374151;\r\n    transition: border-color 0.2s ease, transform 0.2s ease;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-select-item:hover {\r\n    border-color: rgba(255, 130, 0, 0.32);\r\n    box-shadow: none;\r\n    transform: translateY(-1px);\r\n}\r\n\r\n.weibo-img-select-item-video {\r\n    border-color: rgba(59, 130, 246, 0.28);\r\n    background: #ffffff;\r\n}\r\n\r\n.weibo-img-select-item-video:hover {\r\n    border-color: rgba(59, 130, 246, 0.42);\r\n    box-shadow: none;\r\n}\r\n\r\n.weibo-img-select-item input {\r\n    flex: 0 0 auto;\r\n    width: 16px;\r\n    height: 16px;\r\n    margin: 0;\r\n    display: block;\r\n    accent-color: #ff8200;\r\n}\r\n\r\n.weibo-img-select-item-video input {\r\n    accent-color: #2563eb;\r\n}\r\n\r\n.weibo-img-select-item-text {\r\n    display: inline-flex;\r\n    align-items: center;\r\n    min-width: 0;\r\n    min-height: 16px;\r\n    line-height: 16px;\r\n    white-space: nowrap;\r\n    overflow: hidden;\r\n    text-overflow: ellipsis;\r\n    font-weight: 600;\r\n    letter-spacing: 0.01em;\r\n}\r\n\r\n.weibo-img-select-item-text-video {\r\n    color: #1d4ed8;\r\n}\r\n\r\n.weibo-img-select-actions {\r\n    padding: 14px 18px 18px;\r\n    border-top: 1px solid rgba(255, 130, 0, 0.12);\r\n    display: flex;\r\n    justify-content: flex-end;\r\n    gap: 8px;\r\n}\r\n\r\n.weibo-img-select-btn {\r\n    min-width: 90px;\r\n    height: 34px;\r\n    padding: 0 14px;\r\n    border-radius: 999px;\r\n    border: 1px solid transparent;\r\n    font-size: 13px;\r\n    font-weight: 600;\r\n    cursor: pointer;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    text-align: center;\r\n    line-height: 1;\r\n    box-sizing: border-box;\r\n    transition: background-color 0.2s ease;\r\n}\r\n\r\n.weibo-img-select-modal button {\r\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\r\n    vertical-align: middle;\r\n}\r\n\r\n.weibo-img-select-btn-cancel {\r\n    background: #fff;\r\n    border-color: rgba(148, 163, 184, 0.35);\r\n    color: #475569;\r\n}\r\n\r\n.weibo-img-select-btn-cancel:hover {\r\n    background: #f8fafc;\r\n}\r\n\r\n.weibo-img-select-btn-confirm {\r\n    background: #ff8200;\r\n    color: #fff;\r\n    box-shadow: none;\r\n}\r\n\r\n.weibo-img-select-btn-confirm:hover {\r\n    background: #ff7600;\r\n}\r\n\r\n.weibo-img-download-btn {\r\n    appearance: none;\r\n    display: inline-flex;\r\n    align-items: center;\r\n    justify-content: center;\r\n    width: auto !important;\r\n    height: 20px;\r\n    border: 1px solid transparent;\r\n    padding: 0 6px !important;\r\n    margin-left: 8px;\r\n    background: #ff8200;\r\n    color: white;\r\n    border-radius: 3px;\r\n    font-size: 11px;\r\n    font-family: inherit;\r\n    font-weight: bold;\r\n    line-height: 1;\r\n    flex-shrink: 0;\r\n    overflow: hidden;\r\n    cursor: pointer;\r\n    vertical-align: middle;\r\n    white-space: nowrap;\r\n    box-sizing: border-box;\r\n}\r\n\r\n.weibo-img-download-btn[data-download-state="idle"]:hover {\r\n    background: #ff6a00;\r\n}\r\n\r\n.weibo-img-download-btn:focus-visible {\r\n    outline: 2px solid #9a4300;\r\n    outline-offset: 2px;\r\n}\r\n\r\n.weibo-img-download-btn:disabled {\r\n    cursor: progress;\r\n    opacity: 1;\r\n}\r\n\r\n.weibo-img-download-btn[data-download-state="failed"] {\r\n    background: #fff0eb;\r\n    color: #a92d20;\r\n    border-color: #dc9b90;\r\n}\r\n';
+  var style_default = '#weibo-img-toast {\n    position: fixed;\n    top: 20px;\n    left: 50%;\n    transform: translateX(-50%);\n    background: rgba(0, 0, 0, 0.75);\n    color: #fff;\n    padding: 10px 20px;\n    border-radius: 4px;\n    font-size: 14px;\n    z-index: 2147483647;\n    display: flex;\n    align-items: center;\n    gap: 10px;\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);\n}\n\n#weibo-img-toast .close-btn {\n    font-size: 18px;\n    cursor: pointer;\n    opacity: 0.7;\n    line-height: 1;\n}\n\n#weibo-img-toast .close-btn:hover {\n    opacity: 1;\n}\n\n.weibo-img-select-overlay {\n    position: fixed;\n    inset: 0;\n    background: rgba(15, 23, 42, 0.24);\n    backdrop-filter: blur(10px);\n    z-index: 2147483647;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    padding: 16px;\n    box-sizing: border-box;\n}\n\n.weibo-img-select-modal {\n    width: 100%;\n    max-width: 560px;\n    max-height: 80vh;\n    background: #ffffff;\n    border: 1px solid rgba(255, 130, 0, 0.18);\n    border-radius: 10px;\n    box-shadow: none;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n}\n\n.weibo-img-select-header {\n    padding: 14px 16px;\n    border-bottom: 1px solid rgba(255, 130, 0, 0.12);\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n}\n\n.weibo-img-select-header-title {\n    display: flex;\n    align-items: baseline;\n    gap: 8px;\n    min-width: 0;\n    font-size: 14px;\n    font-weight: 600;\n    color: #1f2937;\n}\n\n.weibo-img-select-count {\n    font-size: 12px;\n    font-weight: 400;\n    color: #9ca3af;\n    white-space: nowrap;\n}\n\n.weibo-img-select-toggle-btn {\n    height: 26px;\n    padding: 0 10px;\n    border: 1px solid rgba(255, 130, 0, 0.35);\n    border-radius: 4px;\n    background: #ffffff;\n    color: #c2410c;\n    font-size: 12px;\n    font-weight: 600;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    text-align: center;\n    line-height: 1;\n    cursor: pointer;\n    box-sizing: border-box;\n    white-space: nowrap;\n    transition: background-color 0.2s ease;\n}\n\n.weibo-img-select-toggle-btn:hover {\n    background: #fff4e8;\n}\n\n.weibo-img-select-grid {\n    padding: 12px;\n    overflow: auto;\n    display: grid;\n    grid-template-columns: repeat(3, minmax(0, 1fr));\n    gap: 8px;\n}\n\n.weibo-img-select-item {\n    position: relative;\n    display: block;\n    aspect-ratio: 1 / 1;\n    border: 1px solid rgba(255, 130, 0, 0.16);\n    border-radius: 4px;\n    background: #f3f4f6;\n    overflow: hidden;\n    cursor: pointer;\n    box-sizing: border-box;\n    transition: border-color 0.15s ease, box-shadow 0.15s ease;\n}\n\n.weibo-img-select-item:hover {\n    border-color: rgba(255, 130, 0, 0.45);\n}\n\n.weibo-img-select-item:has(input:checked) {\n    border-color: #ff8200;\n    box-shadow: inset 0 0 0 1px #ff8200;\n}\n\n.weibo-img-select-item:focus-within {\n    outline: 2px solid rgba(255, 130, 0, 0.55);\n    outline-offset: 2px;\n}\n\n.weibo-img-select-item input {\n    position: absolute;\n    inset: 0;\n    z-index: 3;\n    width: 100%;\n    height: 100%;\n    margin: 0;\n    opacity: 0;\n    cursor: pointer;\n}\n\n.weibo-img-select-thumb {\n    position: absolute;\n    inset: 0;\n    display: block;\n}\n\n.weibo-img-select-thumb img {\n    position: absolute;\n    inset: 0;\n    z-index: 1;\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n    display: block;\n}\n\n.weibo-img-select-placeholder {\n    position: absolute;\n    inset: 0;\n    z-index: 0;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    background: #f3f4f6;\n    color: #9ca3af;\n    font-size: 12px;\n    font-weight: 600;\n    user-select: none;\n}\n\n.weibo-img-select-label {\n    position: absolute;\n    left: 6px;\n    bottom: 6px;\n    z-index: 2;\n    padding: 0 5px;\n    border-radius: 3px;\n    background: rgba(0, 0, 0, 0.62);\n    color: #ffffff;\n    font-size: 10px;\n    font-weight: 600;\n    line-height: 16px;\n    letter-spacing: 0.01em;\n    pointer-events: none;\n}\n\n.weibo-img-select-kind {\n    position: absolute;\n    right: 6px;\n    bottom: 6px;\n    z-index: 2;\n    padding: 0 5px;\n    border-radius: 3px;\n    background: rgba(0, 0, 0, 0.62);\n    color: #ffffff;\n    font-size: 10px;\n    font-weight: 600;\n    line-height: 16px;\n    pointer-events: none;\n}\n\n.weibo-img-select-check {\n    position: absolute;\n    top: 6px;\n    right: 6px;\n    z-index: 2;\n    width: 18px;\n    height: 18px;\n    border: 1.5px solid rgba(255, 255, 255, 0.9);\n    border-radius: 50%;\n    background: rgba(0, 0, 0, 0.28);\n    color: transparent;\n    font-size: 12px;\n    font-weight: 700;\n    line-height: 18px;\n    text-align: center;\n    box-sizing: border-box;\n    pointer-events: none;\n    transition: background-color 0.15s ease, border-color 0.15s ease;\n}\n\n.weibo-img-select-item:has(input:checked) .weibo-img-select-check {\n    background: #ff8200;\n    border-color: #ff8200;\n    color: #ffffff;\n}\n\n.weibo-img-select-actions {\n    padding: 12px 16px;\n    border-top: 1px solid rgba(255, 130, 0, 0.12);\n    display: flex;\n    justify-content: flex-end;\n    gap: 8px;\n}\n\n.weibo-img-select-btn {\n    min-width: 84px;\n    height: 28px;\n    padding: 0 14px;\n    border-radius: 4px;\n    border: 1px solid transparent;\n    font-size: 12px;\n    font-weight: 600;\n    cursor: pointer;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    text-align: center;\n    line-height: 1;\n    box-sizing: border-box;\n    transition: background-color 0.2s ease;\n}\n\n.weibo-img-select-modal button {\n    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n    vertical-align: middle;\n}\n\n.weibo-img-select-btn:disabled {\n    cursor: not-allowed;\n    opacity: 0.5;\n}\n\n.weibo-img-select-btn-cancel {\n    background: #fff;\n    border-color: rgba(148, 163, 184, 0.45);\n    color: #475569;\n}\n\n.weibo-img-select-btn-cancel:hover:not(:disabled) {\n    background: #f8fafc;\n}\n\n.weibo-img-select-btn-confirm {\n    background: #ff8200;\n    color: #fff;\n    box-shadow: none;\n}\n\n.weibo-img-select-btn-confirm:hover:not(:disabled) {\n    background: #ff6a00;\n}\n\n.weibo-img-download-btn {\n    appearance: none;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: auto !important;\n    height: 20px;\n    border: 1px solid transparent;\n    padding: 0 6px !important;\n    margin-left: 8px;\n    background: #ff8200;\n    color: white;\n    border-radius: 3px;\n    font-size: 11px;\n    font-family: inherit;\n    font-weight: bold;\n    line-height: 1;\n    flex-shrink: 0;\n    overflow: hidden;\n    cursor: pointer;\n    vertical-align: middle;\n    white-space: nowrap;\n    box-sizing: border-box;\n}\n\n.weibo-img-download-btn[data-download-state="idle"]:hover {\n    background: #ff6a00;\n}\n\n.weibo-img-download-btn:focus-visible {\n    outline: 2px solid #9a4300;\n    outline-offset: 2px;\n}\n\n.weibo-img-download-btn:disabled {\n    cursor: progress;\n    opacity: 1;\n}\n\n.weibo-img-download-btn[data-download-state="failed"] {\n    background: #fff0eb;\n    color: #a92d20;\n    border-color: #dc9b90;\n}\n';
 
   // src/config.ts
   var CONFIG = {
@@ -999,6 +999,43 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       return url;
     }
+    function normalizeWeiboMediaUrl(url) {
+      if (!url || typeof url !== "string") {
+        return null;
+      }
+      if (url.startsWith("//")) {
+        return `https:${url}`;
+      }
+      return url.replace(/^http:\/\//, "https://");
+    }
+    function getWeiboVariantUrl(value) {
+      if (typeof value === "string") {
+        return value;
+      }
+      return value && typeof value === "object" && typeof value.url === "string" ? value.url : null;
+    }
+    function getWeiboThumbnailUrl(url) {
+      const normalized = normalizeWeiboMediaUrl(url);
+      if (!normalized) {
+        return null;
+      }
+      if (!normalized.includes("sinaimg.cn") && !normalized.includes("sina.cn")) {
+        return null;
+      }
+      if (isAvatarImage(normalized)) {
+        return null;
+      }
+      for (const size of IMAGE_SIZE_PATTERNS) {
+        if (normalized.includes(`/${size}/`)) {
+          return normalized.replace(`/${size}/`, "/orj360/");
+        }
+      }
+      const match = normalized.match(/(\.sinaimg\.cn\/)([a-z0-9]+\/)/);
+      if (match) {
+        return normalized.replace(match[2], "orj360/");
+      }
+      return normalized;
+    }
     function getBestWeiboImageUrl(picInfo) {
       if (!picInfo || typeof picInfo !== "object") {
         return null;
@@ -1043,7 +1080,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       return null;
     }
-    function createWeiboVideoMediaItem({ id, videoUrl, index }) {
+    function createWeiboVideoMediaItem({ id, videoUrl, thumbnailUrl, index }) {
       if (!videoUrl) {
         return null;
       }
@@ -1053,6 +1090,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         label: `视频 ${index + 1}`,
         imageUrl: null,
         videoUrl,
+        thumbnailUrl: thumbnailUrl || null,
         imageExt: ".jpg",
         videoExt: getFileExtensionFromUrl(videoUrl, ".mp4")
       };
@@ -1073,6 +1111,9 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           return createWeiboVideoMediaItem({
             id: data.id || data.media_id || `mix-video-${index + 1}`,
             videoUrl: getBestWeiboVideoUrl(data.media_info) || data.videoSrc || data.stream_url_hd || data.stream_url,
+            thumbnailUrl: getWeiboThumbnailUrl(getWeiboVariantUrl(
+              data.pic_info && (data.pic_info.pic_big || data.pic_info.pic_middle || data.pic_info.pic_small)
+            )),
             index
           });
         }
@@ -1091,6 +1132,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           label: `图片 ${index + 1}`,
           imageUrl,
           videoUrl: null,
+          thumbnailUrl: getWeiboThumbnailUrl(imageUrl),
           imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
           videoExt: ".mov"
         };
@@ -1117,6 +1159,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         label,
         imageUrl,
         videoUrl,
+        thumbnailUrl: getWeiboThumbnailUrl(imageUrl),
         imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
         videoExt: getFileExtensionFromUrl(videoUrl, ".mov")
       };
@@ -1138,6 +1181,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           return createWeiboVideoMediaItem({
             id: pic.pid || `pic-video-${index + 1}`,
             videoUrl: getBestWeiboVideoUrl(pic.media_info) || pic.videoSrc || pic.video,
+            thumbnailUrl: getWeiboThumbnailUrl(getWeiboVariantUrl(pic.pic_middle || pic.pic_small || pic.pic_big)),
             index
           });
         }
@@ -1191,6 +1235,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         const videoItem = createWeiboVideoMediaItem({
           id: mediaSourceStatus.mblogid || mediaSourceStatus.idstr || "video-1",
           videoUrl: getBestWeiboVideoUrl(pageInfo.media_info),
+          thumbnailUrl: normalizeWeiboMediaUrl(getWeiboVariantUrl(pageInfo.page_pic)),
           index: 0
         });
         return videoItem ? [videoItem] : [];
@@ -1680,6 +1725,19 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     function isPhotoImageUrl(url) {
       return typeof url === "string" && url.includes("pbs.twimg.com/media/");
     }
+    function getXThumbnailUrl(url) {
+      if (!url || typeof url !== "string") {
+        return null;
+      }
+      try {
+        const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+        const urlObj = new URL(fullUrl);
+        urlObj.searchParams.set("name", "small");
+        return urlObj.toString();
+      } catch {
+        return url;
+      }
+    }
     function getVideoSourceUrl(video) {
       if (!video) {
         return null;
@@ -1778,7 +1836,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       return images;
     }
-    function createMediaItem({ id, kind, label, url, fallbackExt }) {
+    function createMediaItem({ id, kind, label, url, thumbnailUrl, fallbackExt }) {
       if (!url) {
         return null;
       }
@@ -1789,6 +1847,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           label,
           imageUrl: null,
           videoUrl: url,
+          thumbnailUrl: thumbnailUrl || null,
           imageExt: ".jpg",
           videoExt: getFileExtensionFromUrl(url, fallbackExt)
         };
@@ -1799,6 +1858,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         label,
         imageUrl: url,
         videoUrl: null,
+        thumbnailUrl: thumbnailUrl || null,
         imageExt: getFileExtensionFromUrl(url, fallbackExt),
         videoExt: ".mov"
       };
@@ -1822,6 +1882,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           kind: "image",
           label: `图片 ${mediaItems.length + 1}`,
           url,
+          // 列表页已渲染的 img.src（通常 name=900x900），直接复用命中缓存。
+          thumbnailUrl: img.src,
           fallbackExt: ".jpg"
         });
         if (item) {
@@ -1853,6 +1915,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           kind,
           label: isGif ? `GIF ${mediaCount}` : `视频 ${mediaCount}`,
           url,
+          thumbnailUrl: getXThumbnailUrl(video.poster),
           fallbackExt: ".mp4"
         });
         if (item) {
@@ -2033,6 +2096,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           kind: "image",
           label: `图片 ${index + 1}`,
           url: getOriginalImageUrl(item.media_url_https),
+          thumbnailUrl: getXThumbnailUrl(item.media_url_https),
           fallbackExt: ".jpg"
         });
       }).filter(Boolean);
@@ -2045,6 +2109,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           kind: "image",
           label: `图片 ${index + 1}`,
           url: getOriginalImageUrl(item.media_url_https),
+          thumbnailUrl: getXThumbnailUrl(item.media_url_https),
           fallbackExt: ".jpg"
         });
       }).filter(Boolean);
@@ -2062,6 +2127,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           kind: mediaType === "animated_gif" ? "gif" : "video",
           label: mediaType === "animated_gif" ? `GIF ${index + 1}` : `视频 ${index + 1}`,
           url,
+          thumbnailUrl: getXThumbnailUrl(item.media_url_https),
           fallbackExt: ".mp4"
         });
       }).filter(Boolean);
@@ -4379,6 +4445,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           label: `图片 ${mediaItems.length + 1}`,
           imageUrl: url,
           videoUrl: null,
+          // 列表页实际渲染的缩略图，直接复用可命中浏览器缓存。
+          thumbnailUrl: img.src,
           imageExt: utils2.getFileExtensionFromUrl(url, ".jpg"),
           videoExt: ".mov"
         });
@@ -4515,35 +4583,69 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         modal.className = "weibo-img-select-modal";
         const header = documentRef.createElement("div");
         header.className = "weibo-img-select-header";
+        const headerTitle = documentRef.createElement("div");
+        headerTitle.className = "weibo-img-select-header-title";
+        const titleText = documentRef.createElement("span");
+        titleText.textContent = "选择要下载的内容";
+        const countText = documentRef.createElement("span");
+        countText.className = "weibo-img-select-count";
+        countText.textContent = `共 ${mediaItems.length} 项`;
+        headerTitle.appendChild(titleText);
+        headerTitle.appendChild(countText);
         const toggleAllBtn = documentRef.createElement("button");
         toggleAllBtn.type = "button";
         toggleAllBtn.className = "weibo-img-select-toggle-btn";
-        const headerTitle = documentRef.createElement("div");
-        headerTitle.className = "weibo-img-select-header-title";
-        headerTitle.textContent = `选择要下载的内容（共 ${mediaItems.length} 项）`;
-        header.appendChild(toggleAllBtn);
         header.appendChild(headerTitle);
+        header.appendChild(toggleAllBtn);
         const list = documentRef.createElement("div");
-        list.className = "weibo-img-select-list";
+        list.className = "weibo-img-select-grid";
         const typeCounters = {};
         mediaItems.forEach((item, index) => {
-          const label = documentRef.createElement("label");
-          label.className = "weibo-img-select-item";
+          const itemLabel = getSelectionItemLabel(item, typeCounters);
+          const entry = documentRef.createElement("label");
+          entry.className = itemLabel.typeKey === "image" ? "weibo-img-select-item" : `weibo-img-select-item weibo-img-select-item-${itemLabel.typeKey}`;
+          entry.title = item && item.label ? item.label : itemLabel.text;
           const input = documentRef.createElement("input");
           input.type = "checkbox";
           input.checked = true;
           input.value = String(index);
-          const text = documentRef.createElement("span");
-          const itemLabel = getSelectionItemLabel(item, typeCounters);
-          if (itemLabel.typeKey === "video") {
-            label.className = "weibo-img-select-item weibo-img-select-item-video";
+          input.setAttribute("aria-label", entry.title);
+          const thumb = documentRef.createElement("span");
+          thumb.className = "weibo-img-select-thumb";
+          const placeholder = documentRef.createElement("span");
+          placeholder.className = "weibo-img-select-placeholder";
+          placeholder.textContent = itemLabel.typeKey === "video" ? "▶" : itemLabel.typeKey === "gif" ? "GIF" : itemLabel.typeKey === "livephoto" ? "LIVE" : "无预览";
+          thumb.appendChild(placeholder);
+          const thumbnailUrl = item.thumbnailUrl || item.imageUrl;
+          if (thumbnailUrl) {
+            const img = documentRef.createElement("img");
+            img.src = thumbnailUrl;
+            img.alt = "";
+            img.loading = "lazy";
+            img.decoding = "async";
+            img.referrerPolicy = "no-referrer";
+            img.draggable = false;
+            img.addEventListener("error", () => img.remove());
+            thumb.appendChild(img);
           }
-          text.className = itemLabel.typeKey === "video" ? "weibo-img-select-item-text weibo-img-select-item-text-video" : "weibo-img-select-item-text";
+          if (itemLabel.typeKey !== "image") {
+            const kind = documentRef.createElement("span");
+            kind.className = "weibo-img-select-kind";
+            kind.textContent = itemLabel.typeKey === "video" ? "视频" : itemLabel.typeKey === "gif" ? "GIF" : "LIVE";
+            thumb.appendChild(kind);
+          }
+          const text = documentRef.createElement("span");
+          text.className = "weibo-img-select-label";
           text.textContent = itemLabel.text;
-          label.title = item && item.label ? item.label : text.textContent;
-          label.appendChild(input);
-          label.appendChild(text);
-          list.appendChild(label);
+          const check = documentRef.createElement("span");
+          check.className = "weibo-img-select-check";
+          check.setAttribute("aria-hidden", "true");
+          check.textContent = "✓";
+          entry.appendChild(input);
+          entry.appendChild(thumb);
+          entry.appendChild(text);
+          entry.appendChild(check);
+          list.appendChild(entry);
         });
         const actions = documentRef.createElement("div");
         actions.className = "weibo-img-select-actions";
@@ -4562,20 +4664,24 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           const inputs = getInputs();
           return inputs.length > 0 && inputs.every((input) => input.checked);
         };
-        const updateToggleText = () => {
-          toggleAllBtn.textContent = areAllChecked() ? "全不选" : "全选";
+        const updateSelectionState = () => {
+          const inputs = getInputs();
+          const selectedCount = inputs.filter((input) => input.checked).length;
+          toggleAllBtn.textContent = inputs.length > 0 && selectedCount === inputs.length ? "全不选" : "全选";
+          confirmBtn.textContent = selectedCount > 0 ? `下载所选 (${selectedCount})` : "下载所选";
+          confirmBtn.disabled = selectedCount === 0;
         };
         getInputs().forEach((input) => {
-          input.addEventListener("change", updateToggleText);
+          input.addEventListener("change", updateSelectionState);
         });
         toggleAllBtn.addEventListener("click", () => {
           const shouldCheckAll = !areAllChecked();
           getInputs().forEach((input) => {
             input.checked = shouldCheckAll;
           });
-          updateToggleText();
+          updateSelectionState();
         });
-        updateToggleText();
+        updateSelectionState();
         modal.appendChild(header);
         modal.appendChild(list);
         modal.appendChild(actions);

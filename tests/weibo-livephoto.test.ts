@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import { CONFIG } from "../src/config.ts";
 import { createUtils } from "../src/utils.ts";
@@ -137,9 +136,18 @@ interface TestElement {
     checked: boolean;
     className: string;
     textContent: string;
+    src: string;
+    alt: string;
+    title: string;
+    loading: string;
+    decoding: string;
+    referrerPolicy: string;
+    draggable: boolean;
+    disabled: boolean;
     children: TestElement[];
     parentNode: TestElement | null;
     style: Record<string, string>;
+    setAttribute(name: string, value: string): void;
     appendChild(child: TestElement): void;
     addEventListener(type: string, listener: () => void): void;
     removeEventListener(type: string): void;
@@ -156,9 +164,20 @@ function createTestElement(tagName: string): TestElement {
         checked: false,
         className: "",
         textContent: "",
+        src: "",
+        alt: "",
+        title: "",
+        loading: "",
+        decoding: "",
+        referrerPolicy: "",
+        draggable: false,
+        disabled: false,
         children: [],
         parentNode: null,
         style: {},
+        setAttribute(name, value) {
+            Object.assign(this, { [name]: value });
+        },
         appendChild(child) {
             child.parentNode = this;
             this.children.push(child);
@@ -629,6 +648,7 @@ const samplePureVideoStatus = {
     page_info: {
         type: "11",
         object_type: "video",
+        page_pic: "https://wx1.sinaimg.cn/orj480/demo-cover.jpg",
         media_info: {
             playback_list: [
                 {
@@ -667,6 +687,14 @@ test("live photo status resolves full media list", () => {
         sampleStatus.pic_ids
     );
     assert.ok(mediaItems.every((item) => item.videoUrl && item.kind === "livephoto"));
+    assert.deepEqual(
+        mediaItems.map((item) => item.thumbnailUrl),
+        [
+            "https://wx4.sinaimg.cn/orj360/ba6a4518gy1ic2xakxgvwj23b04eoe83.jpg",
+            "https://wx3.sinaimg.cn/orj360/ba6a4518gy1ic2xnphrkkj22c0340u0y.jpg",
+            "https://wx4.sinaimg.cn/orj360/ba6a4518gy1ic2xnuzaokj22c0340u0y.jpg"
+        ]
+    );
 });
 
 test("live photo expands to a merged Motion Photo job by default and jpg+mov pair when merge is off", () => {
@@ -743,6 +771,14 @@ test("gif media only creates image download jobs", () => {
     assert.equal(gifMediaItems[0].kind, "gif");
     assert.equal(gifMediaItems[0].videoUrl, null);
     assert.equal(gifMediaItems[0].imageExt, ".gif");
+    assert.equal(
+        gifMediaItems[0].thumbnailUrl,
+        "https://wx1.sinaimg.cn/orj360/006g4E90ly1ic0o6472r0g30ha0cub2d.gif"
+    );
+    assert.equal(
+        gifMediaItems[1].thumbnailUrl,
+        "https://wx1.sinaimg.cn/orj360/006g4E90ly1ic0o67wxswj30ta0gi48x.jpg"
+    );
     assert.deepEqual(
         gifJobs.map((job) => job.filename),
         [
@@ -807,6 +843,7 @@ test("video-enabled weibo status resolves highest quality video item", () => {
         "https://f.video.weibocdn.com/demo-1080.mp4?label=mp4_1080p"
     );
     assert.equal(mediaItems[0].videoExt, ".mp4");
+    assert.equal(mediaItems[0].thumbnailUrl, "https://wx1.sinaimg.cn/orj480/demo-cover.jpg");
 });
 
 test("search weibo video status resolves through GM cross-origin request", async () => {
@@ -869,6 +906,14 @@ test("video-enabled mixed media status keeps images and appends videos", () => {
     assert.equal(mediaItems[0].kind, "video");
     assert.equal(mediaItems[1].kind, "image");
     assert.equal(mediaItems[0].videoUrl, "https://video.weibo.com/media/play?livephoto=0");
+    assert.equal(
+        mediaItems[0].thumbnailUrl,
+        "https://wx3.sinaimg.cn/orj360/bc6e55efly1ic2ukvy56dj20zk0k03zx.jpg"
+    );
+    assert.equal(
+        mediaItems[1].thumbnailUrl,
+        "https://wx4.sinaimg.cn/orj360/bc6e55efly1ic2uitv1fxj20p00xctem.jpg"
+    );
 });
 
 test("mobile weibo status resolves image items from pics array", () => {
@@ -1268,50 +1313,79 @@ test("image selection modal uses compact p lp a labels by media type", () => {
     ]);
 
     const overlay = documentRef.body.children[0];
-    const textNodes = findElementsByClassName(overlay, "weibo-img-select-item-text");
+    const labelNodes = findElementsByClassName(overlay, "weibo-img-select-label");
 
     assert.deepEqual(
-        textNodes.map((node) => node.textContent),
+        labelNodes.map((node) => node.textContent),
         ["p1", "lp1", "a1"]
     );
 });
 
-test("image selection modal uses compact v labels and a video color class", () => {
+test("image selection modal uses compact v labels and kind badges", () => {
     const { ui, documentRef } = createUiForModalTests();
 
     ui.showImageSelectModal([
         asMediaItem({ id: "img-1", kind: "image", imageUrl: "https://wx1.sinaimg.cn/large/a.jpg", videoUrl: null }),
-        asMediaItem({ id: "video-1", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/a.mp4" }),
+        asMediaItem({
+            id: "video-1",
+            kind: "video",
+            imageUrl: null,
+            videoUrl: "https://f.video.weibocdn.com/a.mp4",
+            thumbnailUrl: "https://wx1.sinaimg.cn/orj480/a.jpg"
+        }),
         asMediaItem({ id: "video-2", kind: "video", imageUrl: null, videoUrl: "https://f.video.weibocdn.com/b.mp4" })
     ]);
 
     const overlay = documentRef.body.children[0];
-    const textNodes = findElementsByClassName(overlay, "weibo-img-select-item-text");
-    const videoNodes = findElementsByClassName(overlay, "weibo-img-select-item-text weibo-img-select-item-text-video");
-    const videoItems = findElementsByClassName(overlay, "weibo-img-select-item weibo-img-select-item-video");
+    const labelNodes = findElementsByClassName(overlay, "weibo-img-select-label");
+    const kindNodes = findElementsByClassName(overlay, "weibo-img-select-kind");
+    const videoItems = findElementsByClassName(overlay, "weibo-img-select-item-video");
+    const placeholderNodes = findElementsByClassName(overlay, "weibo-img-select-placeholder");
 
     assert.deepEqual(
-        textNodes.map((node) => node.textContent),
+        labelNodes.map((node) => node.textContent),
         ["p1", "v1", "v2"]
     );
-    assert.equal(videoNodes.length, 2);
+    assert.deepEqual(
+        kindNodes.map((node) => node.textContent),
+        ["视频", "视频"]
+    );
     assert.equal(videoItems.length, 2);
+    assert.deepEqual(
+        placeholderNodes.map((node) => node.textContent),
+        ["无预览", "▶", "▶"]
+    );
 });
 
-test("modal item text style keeps checkbox labels on a single line", () => {
-    const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+test("image selection modal renders one list thumbnail per media item and falls back to imageUrl", () => {
+    const { ui, documentRef } = createUiForModalTests();
+    const mediaItems = Array.from({ length: 12 }, (_, index) => asMediaItem({
+        id: `img-${index + 1}`,
+        kind: "image",
+        imageUrl: `https://wx1.sinaimg.cn/large/${index + 1}.jpg`,
+        videoUrl: null,
+        thumbnailUrl: index === 0 ? null : `https://wx1.sinaimg.cn/orj360/${index + 1}.jpg`
+    }));
 
-    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*white-space:\s*nowrap;/s);
-});
+    ui.showImageSelectModal(mediaItems);
 
-test("modal media item controls have stable center alignment", () => {
-    const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+    const overlay = documentRef.body.children[0];
+    const thumbs = findElementsByClassName(overlay, "weibo-img-select-thumb");
+    const images = thumbs
+        .map((thumb) => thumb.children.find((child) => child.tagName === "img"))
+        .filter(Boolean) as TestElement[];
 
-    assert.match(css, /\.weibo-img-select-item\s*\{[^}]*height:\s*48px;/s);
-    assert.match(css, /\.weibo-img-select-item\s*\{[^}]*box-sizing:\s*border-box;/s);
-    assert.match(css, /\.weibo-img-select-item input\s*\{[^}]*width:\s*16px;/s);
-    assert.match(css, /\.weibo-img-select-item input\s*\{[^}]*height:\s*16px;/s);
-    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*display:\s*inline-flex;/s);
-    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*align-items:\s*center;/s);
-    assert.match(css, /\.weibo-img-select-item-text\s*\{[^}]*line-height:\s*16px;/s);
+    assert.equal(thumbs.length, 12);
+    assert.equal(images.length, 12);
+    assert.deepEqual(
+        images.map((img) => img.src),
+        mediaItems.map((_, index) => index === 0
+            ? "https://wx1.sinaimg.cn/large/1.jpg"
+            : `https://wx1.sinaimg.cn/orj360/${index + 1}.jpg`)
+    );
+    assert.equal(images.every((img) => img.loading === "lazy" && img.referrerPolicy === "no-referrer"), true);
+    assert.deepEqual(
+        findElementsByClassName(overlay, "weibo-img-select-label").map((node) => node.textContent),
+        Array.from({ length: 12 }, (_, index) => `p${index + 1}`)
+    );
 });

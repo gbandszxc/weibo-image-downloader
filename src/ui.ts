@@ -17,6 +17,8 @@ export interface MediaItem {
     label: string;
     imageUrl: string | null;
     videoUrl: string | null;
+    /** 列表页同源缩略图，仅用于选择弹窗回显，不参与下载。 */
+    thumbnailUrl?: string | null;
     imageExt: string;
     videoExt: string;
 }
@@ -195,6 +197,8 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
                 label: `图片 ${mediaItems.length + 1}`,
                 imageUrl: url,
                 videoUrl: null,
+                // 列表页实际渲染的缩略图，直接复用可命中浏览器缓存。
+                thumbnailUrl: img.src,
                 imageExt: utils.getFileExtensionFromUrl(url, ".jpg"),
                 videoExt: ".mov"
             });
@@ -366,43 +370,88 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
 
             const header = documentRef.createElement("div");
             header.className = "weibo-img-select-header";
+
+            const headerTitle = documentRef.createElement("div");
+            headerTitle.className = "weibo-img-select-header-title";
+            const titleText = documentRef.createElement("span");
+            titleText.textContent = "选择要下载的内容";
+            const countText = documentRef.createElement("span");
+            countText.className = "weibo-img-select-count";
+            countText.textContent = `共 ${mediaItems.length} 项`;
+            headerTitle.appendChild(titleText);
+            headerTitle.appendChild(countText);
+
             const toggleAllBtn = documentRef.createElement("button");
             toggleAllBtn.type = "button";
             toggleAllBtn.className = "weibo-img-select-toggle-btn";
 
-            const headerTitle = documentRef.createElement("div");
-            headerTitle.className = "weibo-img-select-header-title";
-            headerTitle.textContent = `选择要下载的内容（共 ${mediaItems.length} 项）`;
-
-            header.appendChild(toggleAllBtn);
             header.appendChild(headerTitle);
+            header.appendChild(toggleAllBtn);
 
             const list = documentRef.createElement("div");
-            list.className = "weibo-img-select-list";
+            list.className = "weibo-img-select-grid";
             const typeCounters: Partial<Record<SelectionLabelTypeKey, number>> = {};
             mediaItems.forEach((item, index) => {
-                const label = documentRef.createElement("label");
-                label.className = "weibo-img-select-item";
+                const itemLabel = getSelectionItemLabel(item, typeCounters);
+                const entry = documentRef.createElement("label");
+                entry.className = itemLabel.typeKey === "image"
+                    ? "weibo-img-select-item"
+                    : `weibo-img-select-item weibo-img-select-item-${itemLabel.typeKey}`;
+                entry.title = item && item.label ? item.label : itemLabel.text;
 
                 const input = documentRef.createElement("input");
                 input.type = "checkbox";
                 input.checked = true;
                 input.value = String(index);
+                input.setAttribute("aria-label", entry.title);
+
+                const thumb = documentRef.createElement("span");
+                thumb.className = "weibo-img-select-thumb";
+
+                const placeholder = documentRef.createElement("span");
+                placeholder.className = "weibo-img-select-placeholder";
+                placeholder.textContent = itemLabel.typeKey === "video"
+                    ? "▶"
+                    : (itemLabel.typeKey === "gif" ? "GIF" : (itemLabel.typeKey === "livephoto" ? "LIVE" : "无预览"));
+                thumb.appendChild(placeholder);
+
+                // 缩略图仅用于回显：优先列表页同源缩略图，缺失时退回下载图，均不参与下载。
+                const thumbnailUrl = item.thumbnailUrl || item.imageUrl;
+                if (thumbnailUrl) {
+                    const img = documentRef.createElement("img");
+                    img.src = thumbnailUrl;
+                    img.alt = "";
+                    img.loading = "lazy";
+                    img.decoding = "async";
+                    img.referrerPolicy = "no-referrer";
+                    img.draggable = false;
+                    img.addEventListener("error", () => img.remove());
+                    thumb.appendChild(img);
+                }
+
+                if (itemLabel.typeKey !== "image") {
+                    const kind = documentRef.createElement("span");
+                    kind.className = "weibo-img-select-kind";
+                    kind.textContent = itemLabel.typeKey === "video"
+                        ? "视频"
+                        : (itemLabel.typeKey === "gif" ? "GIF" : "LIVE");
+                    thumb.appendChild(kind);
+                }
 
                 const text = documentRef.createElement("span");
-                const itemLabel = getSelectionItemLabel(item, typeCounters);
-                if (itemLabel.typeKey === "video") {
-                    label.className = "weibo-img-select-item weibo-img-select-item-video";
-                }
-                text.className = itemLabel.typeKey === "video"
-                    ? "weibo-img-select-item-text weibo-img-select-item-text-video"
-                    : "weibo-img-select-item-text";
+                text.className = "weibo-img-select-label";
                 text.textContent = itemLabel.text;
-                label.title = item && item.label ? item.label : text.textContent;
 
-                label.appendChild(input);
-                label.appendChild(text);
-                list.appendChild(label);
+                const check = documentRef.createElement("span");
+                check.className = "weibo-img-select-check";
+                check.setAttribute("aria-hidden", "true");
+                check.textContent = "✓";
+
+                entry.appendChild(input);
+                entry.appendChild(thumb);
+                entry.appendChild(text);
+                entry.appendChild(check);
+                list.appendChild(entry);
             });
 
             const actions = documentRef.createElement("div");
@@ -426,12 +475,16 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
                 const inputs = getInputs();
                 return inputs.length > 0 && inputs.every((input) => input.checked);
             };
-            const updateToggleText = (): void => {
-                toggleAllBtn.textContent = areAllChecked() ? "全不选" : "全选";
+            const updateSelectionState = (): void => {
+                const inputs = getInputs();
+                const selectedCount = inputs.filter((input) => input.checked).length;
+                toggleAllBtn.textContent = inputs.length > 0 && selectedCount === inputs.length ? "全不选" : "全选";
+                confirmBtn.textContent = selectedCount > 0 ? `下载所选 (${selectedCount})` : "下载所选";
+                confirmBtn.disabled = selectedCount === 0;
             };
 
             getInputs().forEach((input) => {
-                input.addEventListener("change", updateToggleText);
+                input.addEventListener("change", updateSelectionState);
             });
 
             toggleAllBtn.addEventListener("click", () => {
@@ -439,10 +492,10 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
                 getInputs().forEach((input) => {
                     input.checked = shouldCheckAll;
                 });
-                updateToggleText();
+                updateSelectionState();
             });
 
-            updateToggleText();
+            updateSelectionState();
 
             modal.appendChild(header);
             modal.appendChild(list);

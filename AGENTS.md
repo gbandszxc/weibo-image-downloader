@@ -9,6 +9,7 @@
 | [docs/TECHNICAL.md](docs/TECHNICAL.md) | 图片 URL 转换、批量下载策略、X 动图 GIF 转换实现与性能验证 | 对应机制或实现策略变化时，更新对应章节 |
 | [docs/FAQ.md](docs/FAQ.md) | 用户常见问题解答（含文件命名规则） | 新增高频问题，或行为变化导致既有答案失效时更新 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 构建、测试、目录与发布流程说明 | 构建/测试/发布流程、测试结构或关键依赖变化时更新 |
+| [docs/EXAMPLES.md](docs/EXAMPLES.md) | 回归实测用的微博/X 示例帖子与媒体特征 | 新增或失效示例时更新 |
 
 # 开发规约
 

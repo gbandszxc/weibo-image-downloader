@@ -22,6 +22,8 @@ export interface WeiboMediaItem {
     label: string;
     imageUrl: string | null;
     videoUrl: string | null;
+    /** 列表页同源缩略图，仅用于选择弹窗回显，不参与下载。 */
+    thumbnailUrl?: string | null;
     imageExt: string;
     videoExt: string;
 }
@@ -55,9 +57,9 @@ export interface WeiboPicInfo {
     videoSrc?: string;
     media_info?: WeiboMediaInfo | null;
     pic_info?: WeiboPicInfo | null;
-    pic_big?: string | null;
-    pic_middle?: string | null;
-    pic_small?: string | null;
+    pic_big?: string | WeiboPicVariant | null;
+    pic_middle?: string | WeiboPicVariant | null;
+    pic_small?: string | WeiboPicVariant | null;
     largest?: WeiboPicVariant | string | null;
     original?: WeiboPicVariant | string | null;
     large?: WeiboPicVariant | string | null;
@@ -81,6 +83,7 @@ export interface WeiboMixMediaItem {
 export interface WeiboPageInfo {
     type?: unknown;
     object_type?: unknown;
+    page_pic?: WeiboPicVariant | string | null;
     media_info?: WeiboMediaInfo | null;
 }
 
@@ -266,6 +269,56 @@ export function createWeiboPlatform({
         return url;
     }
 
+    function normalizeWeiboMediaUrl(url: unknown): string | null {
+        if (!url || typeof url !== "string") {
+            return null;
+        }
+
+        if (url.startsWith("//")) {
+            return `https:${url}`;
+        }
+
+        return url.replace(/^http:\/\//, "https://");
+    }
+
+    function getWeiboVariantUrl(value: WeiboPicVariant | string | null | undefined): string | null {
+        if (typeof value === "string") {
+            return value;
+        }
+
+        return value && typeof value === "object" && typeof value.url === "string" ? value.url : null;
+    }
+
+    // 列表页九宫格使用 sinaimg 的 orj360 变体（GIF 保留 .gif），弹窗沿用同一 URL，
+    // 既与列表视觉一致，也能命中浏览器已缓存的缩略图。
+    function getWeiboThumbnailUrl(url: unknown): string | null {
+        const normalized = normalizeWeiboMediaUrl(url);
+        if (!normalized) {
+            return null;
+        }
+
+        if (!normalized.includes("sinaimg.cn") && !normalized.includes("sina.cn")) {
+            return null;
+        }
+
+        if (isAvatarImage(normalized)) {
+            return null;
+        }
+
+        for (const size of IMAGE_SIZE_PATTERNS) {
+            if (normalized.includes(`/${size}/`)) {
+                return normalized.replace(`/${size}/`, "/orj360/");
+            }
+        }
+
+        const match = normalized.match(/(\.sinaimg\.cn\/)([a-z0-9]+\/)/);
+        if (match) {
+            return normalized.replace(match[2], "orj360/");
+        }
+
+        return normalized;
+    }
+
     function getBestWeiboImageUrl(picInfo: WeiboPicInfo | null | undefined): string | null {
         if (!picInfo || typeof picInfo !== "object") {
             return null;
@@ -322,7 +375,12 @@ export function createWeiboPlatform({
         return null;
     }
 
-    function createWeiboVideoMediaItem({ id, videoUrl, index }: { id: string; videoUrl: string | null | undefined; index: number }): WeiboMediaItem | null {
+    function createWeiboVideoMediaItem({ id, videoUrl, thumbnailUrl, index }: {
+        id: string;
+        videoUrl: string | null | undefined;
+        thumbnailUrl?: string | null;
+        index: number;
+    }): WeiboMediaItem | null {
         if (!videoUrl) {
             return null;
         }
@@ -333,6 +391,7 @@ export function createWeiboPlatform({
             label: `视频 ${index + 1}`,
             imageUrl: null,
             videoUrl,
+            thumbnailUrl: thumbnailUrl || null,
             imageExt: ".jpg",
             videoExt: getFileExtensionFromUrl(videoUrl, ".mp4")
         };
@@ -359,6 +418,9 @@ export function createWeiboPlatform({
                 return createWeiboVideoMediaItem({
                     id: data.id || data.media_id || `mix-video-${index + 1}`,
                     videoUrl: getBestWeiboVideoUrl(data.media_info) || data.videoSrc || data.stream_url_hd || data.stream_url,
+                    thumbnailUrl: getWeiboThumbnailUrl(getWeiboVariantUrl(
+                        data.pic_info && (data.pic_info.pic_big || data.pic_info.pic_middle || data.pic_info.pic_small)
+                    )),
                     index
                 });
             }
@@ -381,6 +443,7 @@ export function createWeiboPlatform({
                 label: `图片 ${index + 1}`,
                 imageUrl,
                 videoUrl: null,
+                thumbnailUrl: getWeiboThumbnailUrl(imageUrl),
                 imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
                 videoExt: ".mov"
             };
@@ -415,6 +478,7 @@ export function createWeiboPlatform({
             label,
             imageUrl,
             videoUrl,
+            thumbnailUrl: getWeiboThumbnailUrl(imageUrl),
             imageExt: getFileExtensionFromUrl(imageUrl, ".jpg"),
             videoExt: getFileExtensionFromUrl(videoUrl, ".mov")
         };
@@ -440,6 +504,7 @@ export function createWeiboPlatform({
                 return createWeiboVideoMediaItem({
                     id: pic.pid || `pic-video-${index + 1}`,
                     videoUrl: getBestWeiboVideoUrl(pic.media_info) || pic.videoSrc || pic.video,
+                    thumbnailUrl: getWeiboThumbnailUrl(getWeiboVariantUrl(pic.pic_middle || pic.pic_small || pic.pic_big)),
                     index
                 });
             }
@@ -505,6 +570,7 @@ export function createWeiboPlatform({
             const videoItem = createWeiboVideoMediaItem({
                 id: mediaSourceStatus.mblogid || mediaSourceStatus.idstr || "video-1",
                 videoUrl: getBestWeiboVideoUrl(pageInfo.media_info),
+                thumbnailUrl: normalizeWeiboMediaUrl(getWeiboVariantUrl(pageInfo.page_pic)),
                 index: 0
             });
             return videoItem ? [videoItem] : [];
