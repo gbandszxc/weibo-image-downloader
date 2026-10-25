@@ -441,16 +441,16 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
                 const text = documentRef.createElement("span");
                 text.className = "weibo-img-select-label";
                 text.textContent = itemLabel.text;
+                thumb.appendChild(text);
 
                 const check = documentRef.createElement("span");
                 check.className = "weibo-img-select-check";
                 check.setAttribute("aria-hidden", "true");
                 check.textContent = "✓";
+                thumb.appendChild(check);
 
                 entry.appendChild(input);
                 entry.appendChild(thumb);
-                entry.appendChild(text);
-                entry.appendChild(check);
                 list.appendChild(entry);
             });
 
@@ -547,6 +547,11 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
             });
 
             const preventScroll = (event: Event): void => {
+                const target = event.target;
+                // 网格内部交给浏览器滚动；只有网格外才拦截，避免带动背景页面。
+                if (target instanceof Element && target.closest(".weibo-img-select-grid")) {
+                    return;
+                }
                 event.preventDefault();
             };
 
