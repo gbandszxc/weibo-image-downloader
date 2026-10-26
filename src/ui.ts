@@ -1,13 +1,3 @@
-const SELECTION_LABEL_PREFIXES = {
-    image: "p",
-    livephoto: "lp",
-    gif: "a",
-    video: "v"
-} as const;
-
-/** 选择弹窗序号的类型键（与 SELECTION_LABEL_PREFIXES 的键一一对应）。 */
-type SelectionLabelTypeKey = keyof typeof SELECTION_LABEL_PREFIXES;
-
 /** 媒体条目：与各平台适配器产出的媒体项结构对齐的最小形状。 */
 export type MediaItemKind = "image" | "gif" | "livephoto" | "video";
 
@@ -343,19 +333,12 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
         documentRef.head.appendChild(marker);
     }
 
-    function getSelectionItemLabel(item: MediaItem, typeCounters: Partial<Record<SelectionLabelTypeKey, number>>): {
-        text: string;
-        typeKey: SelectionLabelTypeKey;
-    } {
+    function getMediaKindKey(item: MediaItem): MediaItemKind {
         const normalizedKind = item && item.kind ? item.kind : (item && item.videoUrl ? "livephoto" : "image");
-        const typeKey = normalizedKind === "livephoto"
-            ? "livephoto"
-            : (normalizedKind === "gif" ? "gif" : (normalizedKind === "video" ? "video" : "image"));
-        typeCounters[typeKey] = (typeCounters[typeKey] || 0) + 1;
-        return {
-            text: `${SELECTION_LABEL_PREFIXES[typeKey]}${typeCounters[typeKey]}`,
-            typeKey
-        };
+        if (normalizedKind === "livephoto" || normalizedKind === "gif" || normalizedKind === "video") {
+            return normalizedKind;
+        }
+        return "image";
     }
 
     function showImageSelectModal(mediaItems: MediaItem[]): Promise<MediaItem[] | null> {
@@ -390,14 +373,16 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
 
             const list = documentRef.createElement("div");
             list.className = "weibo-img-select-grid";
-            const typeCounters: Partial<Record<SelectionLabelTypeKey, number>> = {};
             mediaItems.forEach((item, index) => {
-                const itemLabel = getSelectionItemLabel(item, typeCounters);
+                const typeKey = getMediaKindKey(item);
+                const typeText = typeKey === "video"
+                    ? "视频"
+                    : (typeKey === "gif" ? "GIF" : (typeKey === "livephoto" ? "LIVE" : "图片"));
                 const entry = documentRef.createElement("label");
-                entry.className = itemLabel.typeKey === "image"
+                entry.className = typeKey === "image"
                     ? "weibo-img-select-item"
-                    : `weibo-img-select-item weibo-img-select-item-${itemLabel.typeKey}`;
-                entry.title = item && item.label ? item.label : itemLabel.text;
+                    : `weibo-img-select-item weibo-img-select-item-${typeKey}`;
+                entry.title = item && item.label ? item.label : typeText;
 
                 const input = documentRef.createElement("input");
                 input.type = "checkbox";
@@ -410,9 +395,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
 
                 const placeholder = documentRef.createElement("span");
                 placeholder.className = "weibo-img-select-placeholder";
-                placeholder.textContent = itemLabel.typeKey === "video"
-                    ? "▶"
-                    : (itemLabel.typeKey === "gif" ? "GIF" : (itemLabel.typeKey === "livephoto" ? "LIVE" : "无预览"));
+                placeholder.textContent = typeKey === "video" ? "▶" : (typeKey === "image" ? "无预览" : typeText);
                 thumb.appendChild(placeholder);
 
                 // 缩略图仅用于回显：优先列表页同源缩略图，缺失时退回下载图，均不参与下载。
@@ -429,19 +412,12 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
                     thumb.appendChild(img);
                 }
 
-                if (itemLabel.typeKey !== "image") {
+                if (typeKey !== "image") {
                     const kind = documentRef.createElement("span");
                     kind.className = "weibo-img-select-kind";
-                    kind.textContent = itemLabel.typeKey === "video"
-                        ? "视频"
-                        : (itemLabel.typeKey === "gif" ? "GIF" : "LIVE");
+                    kind.textContent = typeText;
                     thumb.appendChild(kind);
                 }
-
-                const text = documentRef.createElement("span");
-                text.className = "weibo-img-select-label";
-                text.textContent = itemLabel.text;
-                thumb.appendChild(text);
 
                 const check = documentRef.createElement("span");
                 check.className = "weibo-img-select-check";

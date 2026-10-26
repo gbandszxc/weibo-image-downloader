@@ -1303,7 +1303,7 @@ test("weibo video thumbnail image is filtered from fallback matching", () => {
     assert.equal(ui.isVideoThumbnailImage(videoThumbImage as HTMLImageElement), true);
 });
 
-test("image selection modal uses compact p lp a labels by media type", () => {
+test("image selection modal shows kind badges without serial labels", () => {
     const { ui, documentRef } = createUiForModalTests();
 
     ui.showImageSelectModal([
@@ -1314,14 +1314,16 @@ test("image selection modal uses compact p lp a labels by media type", () => {
 
     const overlay = documentRef.body.children[0];
     const labelNodes = findElementsByClassName(overlay, "weibo-img-select-label");
+    const kindNodes = findElementsByClassName(overlay, "weibo-img-select-kind");
 
+    assert.equal(labelNodes.length, 0);
     assert.deepEqual(
-        labelNodes.map((node) => node.textContent),
-        ["p1", "lp1", "a1"]
+        kindNodes.map((node) => node.textContent),
+        ["LIVE", "GIF"]
     );
 });
 
-test("image selection modal uses compact v labels and kind badges", () => {
+test("image selection modal shows video kind badges", () => {
     const { ui, documentRef } = createUiForModalTests();
 
     ui.showImageSelectModal([
@@ -1342,10 +1344,7 @@ test("image selection modal uses compact v labels and kind badges", () => {
     const videoItems = findElementsByClassName(overlay, "weibo-img-select-item-video");
     const placeholderNodes = findElementsByClassName(overlay, "weibo-img-select-placeholder");
 
-    assert.deepEqual(
-        labelNodes.map((node) => node.textContent),
-        ["p1", "v1", "v2"]
-    );
+    assert.equal(labelNodes.length, 0);
     assert.deepEqual(
         kindNodes.map((node) => node.textContent),
         ["视频", "视频"]
@@ -1384,8 +1383,5 @@ test("image selection modal renders one list thumbnail per media item and falls 
             : `https://wx1.sinaimg.cn/orj360/${index + 1}.jpg`)
     );
     assert.equal(images.every((img) => img.loading === "lazy" && img.referrerPolicy === "no-referrer"), true);
-    assert.deepEqual(
-        findElementsByClassName(overlay, "weibo-img-select-label").map((node) => node.textContent),
-        Array.from({ length: 12 }, (_, index) => `p${index + 1}`)
-    );
+    assert.equal(findElementsByClassName(overlay, "weibo-img-select-label").length, 0);
 });

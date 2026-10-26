@@ -180,22 +180,6 @@
     user-select: none;
 }
 
-.weibo-img-select-label {
-    position: absolute;
-    left: 6px;
-    bottom: 6px;
-    z-index: 2;
-    padding: 0 5px;
-    border-radius: 3px;
-    background: rgba(0, 0, 0, 0.62);
-    color: #ffffff;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 16px;
-    letter-spacing: 0.01em;
-    pointer-events: none;
-}
-
 .weibo-img-select-kind {
     position: absolute;
     right: 6px;
