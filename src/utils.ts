@@ -471,6 +471,11 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
     let directDownloadFallbackCount = 0;
 
     async function downloadImage(url: string, filename: string): Promise<boolean | "started"> {
+        // X 图片直链可能被下载链路按 CDN 原名保存；先取字节再保存，保留模板文件名。
+        if (platform.id === "x" && /^https?:\/\/pbs\.twimg\.com\//i.test(url)) {
+            return downloadImageFallback(url, filename);
+        }
+
         // 直链优先 GM_download(saveAs:false)：由 Tampermonkey 经浏览器下载 API 直连保存，
         // 显式 saveAs:false 在用户开启「下载前询问每个文件的保存位置」时依然静默落盘且
         // 命名正确，onload/onerror 可确认结果，按钮显示「完成」。a[download] 通道严格遵循

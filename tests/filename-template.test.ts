@@ -148,9 +148,9 @@ test("weibo LivePhoto merge keeps .MP.jpg suffix with a custom template", () => 
     ]);
 });
 
-test("weibo getPostAuthor reads mobile nickname, profile links and header nickname", () => {
-    const platform = createWeiboPlatform({
-        windowRef: { location: { hostname: "m.weibo.cn" }, open() {} },
+function createWeiboPlatformForHostname(hostname: string) {
+    return createWeiboPlatform({
+        windowRef: { location: { hostname }, open() {} },
         fetchRef: async () => {
             throw new Error("fetch should not be called");
         },
@@ -162,6 +162,10 @@ test("weibo getPostAuthor reads mobile nickname, profile links and header nickna
             return fallback;
         }
     });
+}
+
+test("weibo getPostAuthor reads the mobile nickname node excluding the injected button", () => {
+    const platform = createWeiboPlatformForHostname("m.weibo.cn");
 
     const mobilePost = {
         querySelector(selector: string) {
@@ -180,33 +184,89 @@ test("weibo getPostAuthor reads mobile nickname, profile links and header nickna
         }
     };
     assert.equal(platform.getPostAuthor(mobilePost as unknown as Element), "小明", "昵称节点应剔除注入按钮的文案");
+});
 
-    const linkPost = {
-        querySelector() {
-            return null;
-        },
+test("weibo getPostAuthor takes the header author link and ignores @mentions in the body", () => {
+    const platform = createWeiboPlatformForHostname("weibo.com");
+
+    const headerEl = {
         querySelectorAll(selector: string) {
             if (selector === "a[href]") {
                 return [
-                    { getAttribute: () => "https://weibo.com/123456/bid", textContent: "123456" },
-                    { getAttribute: () => "/n/爱吃西瓜", textContent: "爱吃西瓜" },
-                    { getAttribute: () => "https://weibo.com/q/search", textContent: "搜索" }
+                    { getAttribute: () => "https://weibo.com/u/123456", textContent: "" },
+                    { getAttribute: () => "/n/发帖人", textContent: "发帖人" }
                 ];
             }
             return [];
         }
     };
-    assert.equal(platform.getPostAuthor(linkPost as unknown as Element), "爱吃西瓜", "应取作者主页链接文本而非帖子链接");
-
-    const headerPost = {
+    const post = {
         querySelector(selector: string) {
-            return selector === ".woo-nickname" ? { textContent: "头部昵称", querySelector: () => null } : null;
+            return selector === "header" ? headerEl : null;
         },
         querySelectorAll() {
-            return [];
+            // 旧实现会全帖扫描并误取正文第一个 @提及（同样是 /n/ 链接）
+            return [{ getAttribute: () => "/n/正文提到的人", textContent: "正文提到的人" }];
         }
     };
-    assert.equal(platform.getPostAuthor(headerPost as unknown as Element), "头部昵称");
+    assert.equal(platform.getPostAuthor(post as unknown as Element), "发帖人", "应取头部作者链接而非正文 @提及");
+});
+
+test("weibo getPostAuthor accepts the profile URL formats used by desktop pages", () => {
+    const platform = createWeiboPlatformForHostname("weibo.com");
+    for (const href of [
+        "//weibo.com/u/5650270572",
+        "//www.weibo.com/u/5650270572",
+        "https://weibo.com/5650270572?refer_flag=1001030103_",
+        "/u/5650270572",
+        "/n/Hetin奶茶"
+    ]) {
+        const post = {
+            querySelector(selector: string) {
+                return selector === "header" ? {
+                    querySelectorAll() {
+                        return [
+                            { getAttribute: () => href, textContent: "" },
+                            { getAttribute: () => href, textContent: "Hetin奶茶" }
+                        ];
+                    }
+                } : null;
+            }
+        };
+        assert.equal(platform.getPostAuthor(post as unknown as Element), "Hetin奶茶", href);
+    }
+});
+
+test("weibo getPostAuthor falls back to header nickname text and never scans the body", () => {
+    const platform = createWeiboPlatformForHostname("weibo.com");
+
+    const nicknameEl = {
+        textContent: "纯文本昵称 ↓2",
+        querySelector(selector: string) {
+            return selector === ".weibo-img-download-btn" ? { textContent: "↓2" } : null;
+        }
+    };
+    const post = {
+        querySelector(selector: string) {
+            return selector === ".woo-nickname" ? nicknameEl : null;
+        },
+        querySelectorAll() {
+            return [{ getAttribute: () => "/n/正文提到的人", textContent: "正文提到的人" }];
+        }
+    };
+    assert.equal(platform.getPostAuthor(post as unknown as Element), "纯文本昵称");
+
+    // 搜索页：.name 即作者链接本身
+    const nameLink = { textContent: "搜索页作者", querySelectorAll: () => [] };
+    const searchPost = {
+        querySelector(selector: string) {
+            return selector === ".name" ? nameLink : null;
+        },
+        querySelectorAll() {
+            return [{ getAttribute: () => "/n/正文提到的人", textContent: "正文提到的人" }];
+        }
+    };
+    assert.equal(platform.getPostAuthor(searchPost as unknown as Element), "搜索页作者");
 
     const emptyPost = {
         querySelector() {
@@ -217,6 +277,52 @@ test("weibo getPostAuthor reads mobile nickname, profile links and header nickna
         }
     };
     assert.equal(platform.getPostAuthor(emptyPost as unknown as Element), "");
+});
+
+test("weibo getPostAuthor never substitutes the detail-page author for another post without a header", () => {
+    const windowRef = {
+        location: { hostname: "weibo.com", pathname: "/5650270572/Rppb9eovC" },
+        open() {},
+        document: {
+            querySelectorAll(selector: string) {
+                if (selector === 'a[href*="/u/5650270572"]') {
+                    return [
+                        { getAttribute: () => "//weibo.com/u/5650270572", textContent: "" },
+                        { getAttribute: () => "//weibo.com/u/5650270572", textContent: "Hetin 奶茶" }
+                    ];
+                }
+                return [];
+            }
+        }
+    };
+    const platform = createWeiboPlatform({
+        windowRef,
+        fetchRef: async () => {
+            throw new Error("fetch should not be called");
+        },
+        log() {},
+        getFileBasenameFromUrl(_url, fallback) {
+            return fallback;
+        },
+        getFileExtensionFromUrl(_url, fallback = ".jpg") {
+            return fallback;
+        }
+    });
+
+    // 详情页也可能出现其他帖子，不能借用页面主帖作者作为兜底。
+    const detailArticle = {
+        querySelector() {
+            return null;
+        },
+        querySelectorAll() {
+            return [];
+        }
+    };
+    assert.equal(
+        platform.getPostAuthor(detailArticle as unknown as Element),
+        "",
+        "无法识别当前帖子作者时留空，避免错误标成详情页主帖作者"
+    );
 });
 
 test("x getPostAuthor prefers the @handle text and falls back to profile links", () => {

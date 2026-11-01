@@ -877,8 +877,9 @@ export function createWeiboPlatform({
         return text.replace(buttonText, "").replace(/\s+/g, " ").trim();
     }
 
-    // 作者昵称用于自定义文件名模板：移动端取昵称节点（下载按钮同款定位），桌面端优先
-    // 作者主页链接（/n/昵称、/u/uid）的可见文本，再回退头部昵称节点；拿不到返回空串。
+    // 作者昵称用于自定义文件名模板：移动端取昵称节点（下载按钮同款定位），桌面端只在帖子
+    // 头部区域内找作者主页链接或昵称节点文本。正文里的 @提及 同样是 /n/ 昵称链接，
+    // 全帖范围扫描会误取正文第一个 @ 的人，因此不回退到头部以外的链接。
     function getPostAuthor(postContainer: Element): string {
         if (!postContainer || typeof postContainer.querySelector !== "function") {
             return "";
@@ -893,22 +894,53 @@ export function createWeiboPlatform({
             }
         }
 
-        const links = postContainer.querySelectorAll<HTMLAnchorElement>("a[href]");
-        for (const link of Array.from(links)) {
-            const href = link.getAttribute("href") || "";
-            const isProfileHref = /^\/(?:u|n)\/[^/?#]+/.test(href)
-                || /^https?:\/\/weibo\.(?:com|cn)\/(?:u|n)\//.test(href);
-            if (!isProfileHref) {
+        const headerEl = postContainer.querySelector("header");
+        if (headerEl) {
+            const author = readAuthorNameFromProfileLinks(headerEl);
+            if (author) {
+                return author;
+            }
+        }
+
+        // 头部昵称节点兜底（搜索页 .name 为作者链接本身，详情页 .woo-nickname 为昵称文本）
+        for (const selector of [".woo-nickname", 'header > div > div[class*="_nick_"]', ".name"]) {
+            const el = postContainer.querySelector(selector);
+            if (!el) {
                 continue;
             }
-            const name = readTextExcludingDownloadButton(link);
+            const fromLink = readAuthorNameFromProfileLinks(el);
+            if (fromLink) {
+                return fromLink;
+            }
+            const name = readTextExcludingDownloadButton(el);
             if (name) {
                 return name;
             }
         }
 
-        for (const selector of [".woo-nickname", 'header > div > div[class*="_nick_"]', ".name"]) {
-            const name = readTextExcludingDownloadButton(postContainer.querySelector(selector));
+        return "";
+    }
+
+    /** 只在作者区域内读取主页链接；兼容省略协议、数字 uid 路径，跳过无文本的头像链接。 */
+    function readAuthorNameFromProfileLinks(scope: Element): string {
+        if (!scope || typeof scope.querySelectorAll !== "function") {
+            return "";
+        }
+
+        const links = scope.querySelectorAll<HTMLAnchorElement>("a[href]");
+        for (const link of Array.from(links)) {
+            const href = link.getAttribute("href") || "";
+            let profileUrl: URL;
+            try {
+                profileUrl = new URL(href, "https://weibo.com");
+            } catch {
+                continue;
+            }
+            if (!/^(?:www\.)?weibo\.(?:com(?:\.cn)?|cn)$/.test(profileUrl.hostname)
+                || !/^\/(?:(?:u|n)\/[^/]+|\d+)\/?$/.test(profileUrl.pathname)) {
+                continue;
+            }
+            const name = readTextExcludingDownloadButton(link);
             if (name) {
                 return name;
             }

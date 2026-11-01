@@ -1495,20 +1495,46 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           return mobileName;
         }
       }
-      const links = postContainer.querySelectorAll("a[href]");
-      for (const link of Array.from(links)) {
-        const href = link.getAttribute("href") || "";
-        const isProfileHref = /^\/(?:u|n)\/[^/?#]+/.test(href) || /^https?:\/\/weibo\.(?:com|cn)\/(?:u|n)\//.test(href);
-        if (!isProfileHref) {
+      const headerEl = postContainer.querySelector("header");
+      if (headerEl) {
+        const author = readAuthorNameFromProfileLinks(headerEl);
+        if (author) {
+          return author;
+        }
+      }
+      for (const selector of [".woo-nickname", 'header > div > div[class*="_nick_"]', ".name"]) {
+        const el = postContainer.querySelector(selector);
+        if (!el) {
           continue;
         }
-        const name = readTextExcludingDownloadButton(link);
+        const fromLink = readAuthorNameFromProfileLinks(el);
+        if (fromLink) {
+          return fromLink;
+        }
+        const name = readTextExcludingDownloadButton(el);
         if (name) {
           return name;
         }
       }
-      for (const selector of [".woo-nickname", 'header > div > div[class*="_nick_"]', ".name"]) {
-        const name = readTextExcludingDownloadButton(postContainer.querySelector(selector));
+      return "";
+    }
+    function readAuthorNameFromProfileLinks(scope) {
+      if (!scope || typeof scope.querySelectorAll !== "function") {
+        return "";
+      }
+      const links = scope.querySelectorAll("a[href]");
+      for (const link of Array.from(links)) {
+        const href = link.getAttribute("href") || "";
+        let profileUrl;
+        try {
+          profileUrl = new URL(href, "https://weibo.com");
+        } catch {
+          continue;
+        }
+        if (!/^(?:www\.)?weibo\.(?:com(?:\.cn)?|cn)$/.test(profileUrl.hostname) || !/^\/(?:(?:u|n)\/[^/]+|\d+)\/?$/.test(profileUrl.pathname)) {
+          continue;
+        }
+        const name = readTextExcludingDownloadButton(link);
         if (name) {
           return name;
         }
@@ -4222,6 +4248,9 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     }
     let directDownloadFallbackCount = 0;
     async function downloadImage(url, filename) {
+      if (platform.id === "x" && /^https?:\/\/pbs\.twimg\.com\//i.test(url)) {
+        return downloadImageFallback(url, filename);
+      }
       const direct = await tryGmDownload(url, filename);
       if (direct.ok) {
         return true;

@@ -133,7 +133,6 @@ test("direct image downloads prefer GM_download with saveAs:false and report com
 
 test("direct downloads fall back to the browser anchor when GM_download fails and hint at TM permission", async () => {
     const { utils, clicks, toastMessages } = createTestUtils({
-        windowOverrides: { location: { hostname: "x.com" } },
         gmDownload(details) {
             queueMicrotask(() => details.onerror({ error: "not_permitted" }));
         },
@@ -146,16 +145,45 @@ test("direct downloads fall back to the browser anchor when GM_download fails an
     });
 
     const result = await utils.downloadMediaItems(asMediaItems([
-        { kind: "image", imageUrl: "https://pbs.twimg.com/media/demo.jpg", imageExt: ".jpg" }
+        { kind: "image", imageUrl: "https://wx2.sinaimg.cn/large/demo.jpg", imageExt: ".jpg" }
     ]), "123");
 
     assert.deepEqual(result, { successCount: 1, failedCount: 0, handedOffCount: 1 });
     assert.equal(clicks.length, 1, "GM_download 失败后应回退浏览器原生保存");
-    assert.equal(clicks[0].download, "x_123_1.jpg");
+    assert.equal(clicks[0].download, "weibo_123_1.jpg");
     assert.match(
         toastMessages[toastMessages.length - 1],
         /若弹出保存位置询问，请在 Tampermonkey 中允许下载权限$/
     );
+});
+
+test("X CDN images preserve default and custom filenames when direct downloads ignore the requested name", async () => {
+    for (const template of ["{platform}_{postId}_{index}", "{author}_{postId}_{index}"]) {
+        const directSavedNames: string[] = [];
+        const { utils, clicks } = createTestUtils({
+            windowOverrides: { location: { hostname: "x.com" } },
+            configOverrides: { FILENAME_TEMPLATE_X: template },
+            gmDownload(details) {
+                // 模拟实际故障：直链下载成功，但下载链路用 CDN 原文件名保存。
+                directSavedNames.push("HV86CnuboAAZCcn.jpg");
+                queueMicrotask(() => details.onload());
+            },
+            gmXmlhttpRequest(details) {
+                queueMicrotask(() => details.onload({
+                    status: 200,
+                    response: new Blob(["image"], { type: "image/jpeg" })
+                }));
+            }
+        });
+        const result = await utils.downloadMediaItems(asMediaItems([
+            { kind: "image", imageUrl: "https://pbs.twimg.com/media/HV86CnuboAAZCcn?format=jpg&name=orig", imageExt: ".jpg" }
+        ]), "2116474174684455411", { author: "Kanon_Takao" });
+        const expected = template.startsWith("{platform}")
+            ? "x_2116474174684455411_1.jpg"
+            : "Kanon_Takao_2116474174684455411_1.jpg";
+        assert.deepEqual([...directSavedNames, ...clicks.map((click) => click.download)], [expected]);
+        assert.equal(result.failedCount, 0);
+    }
 });
 
 test("downloadImage returns false when GM_download and byte fetching both fail", async () => {
@@ -236,9 +264,8 @@ test("failed X GIF conversion never saves an MP4 named GIF and continues other j
         { kind: "gif", imageUrl: "https://video.twimg.com/tweet_video/broken.mp4", imageExt: ".mp4" },
         { kind: "image", imageUrl: "https://pbs.twimg.com/media/photo.jpg", imageExt: ".jpg" }
     ]), "123");
-    // GIF 转换失败不落盘；普通图片走 GM_download 直链，不经 anchor
-    assert.deepEqual(mock.anchors.map((anchor) => anchor.download), []);
-    assert.match(toastMessages[toastMessages.length - 1], /^已下载 1 个文件，1 个失败；X GIF转换或保存失败/);
+    assert.deepEqual(mock.anchors.map((anchor) => anchor.download), ["x_123_2.jpg"], "GIF 转换失败不落盘，普通图片仍按模板保存");
+    assert.match(toastMessages[toastMessages.length - 1], /^已发起 1 个文件的下载，1 个失败；.*X GIF转换或保存失败/);
     // anchor 保存的 blob URL 由 setTimeout 延迟回收，测试窗口内只观察到 GIF 转换的源 revoke
     assert.deepEqual(mock.revokedUrls, ["blob:gif-source"]);
 });

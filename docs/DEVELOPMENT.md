@@ -20,6 +20,7 @@ bun run verify:dist
 - 源码位于 `src/`，全部为 TypeScript；测试（`tests/*.ts`）与源码同为 TypeScript
 - 平台实现位于 `src/platforms/`，共享流程通过统一适配器调用
 - `bun run test:placement` 可单独校验微博/X 各页面按钮位置是否回归
+- `tests/filename-template.test.ts` 回归模板渲染与各页面作者提取，包含桌面微博省略协议的主页链接；`tests/utils-download.test.ts` 同时验证 X 图片在直链下载忽略指定名称时，默认及自定义模板仍通过字节保存通道生效
 - `tests/fixtures/x-gif-dom.json` 保存了通过 chrome-devtools 提取的 X GIF 示例详情页及回复媒体结构；`tests/x-platform.test.ts` 基于该结构 mock 识别流程，`tests/x-gif.test.ts`、`tests/x-gif-workers.test.ts` 和 `tests/utils-download.test.ts` 无网络回归转换产物、真实 Worker 的帧序与失败回退、下载开关和资源清理。X 更新结构时可替换 fixture 并执行 `bun run test`
 - `tests/livephoto-merge.test.ts` 用合成 JPEG/视频字节回归微博 Live Photo 合并产物（XMP 插入、Samsung SEF trailer、偏移与错误回退）；`tests/weibo-livephoto.test.ts` 覆盖 Live Photo 识别与合并开关下的任务展开
 - GIF 编码使用打包进单文件产物的 [gifenc](https://github.com/mattdesl/gifenc)；Worker 代码也内嵌在产物中，运行时通过本地 Blob 创建，不需要额外下载。构建会保留其 MIT 许可声明，`bun run dev` 会跟踪 Worker 源码变化
