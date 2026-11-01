@@ -3,6 +3,10 @@ import type { PlatformAdapter } from "./platforms/index.ts";
 import { convertXVideoToGif } from "./x-gif.ts";
 import { buildMotionPhoto } from "./livephoto.ts";
 import { pairAppleLivePhoto } from "./apple-pair.ts";
+import { DEFAULT_FILENAME_TEMPLATE } from "./config.ts";
+
+// ui.ts 的命名设置面板也需要默认模板常量，从这里再导出保持依赖方向单一。
+export { DEFAULT_FILENAME_TEMPLATE };
 import type { WeiboMediaItem, WeiboPlatformWindow } from "./platforms/weibo.ts";
 import type { XMediaItem, XPlatformWindowRef } from "./platforms/x.ts";
 import type { GifWindowLike } from "./x-gif-workers.ts";
@@ -13,12 +17,69 @@ export type UtilsWindowRef = WeiboPlatformWindow & XPlatformWindowRef & GifWindo
 /** 两个平台媒体项的结构联合；本模块只消费 imageUrl/videoUrl/kind/ext 等公共字段。 */
 export type UtilsMediaItem = WeiboMediaItem | XMediaItem;
 
+/** 下载命名上下文：author 为帖子作者昵称/handle，采集不到时留空（模板中压缩掉空占位段）。 */
+export interface DownloadNamingContext {
+    author?: string | null;
+}
+
+/** 文件名模板占位符变量；source 为源站原文件名（hash 型），可为空。 */
+export interface FilenameTemplateVars {
+    platform: string;
+    postId: string;
+    index: number;
+    author?: string | null;
+    source?: string | null;
+}
+
+/** Windows 等平台文件名禁用字符与控制符；扩展名由脚本另行拼接，不在清洗范围。 */
+const FILENAME_ILLEGAL_CHARS = /[<>:"/\\|?*\u0000-\u001f]/g;
+
+/** 单个占位符值的清洗：非法字符替换为下划线并去掉首尾空白。 */
+function sanitizeFilenameValue(value: unknown): string {
+    return (value == null ? "" : String(value)).replace(FILENAME_ILLEGAL_CHARS, "_").trim();
+}
+
+/** 文件名主体清洗：非法字符替换、去结尾点/空白、限制长度（防超出 Windows 路径限制）。 */
+function sanitizeFilename(name: string): string {
+    let sanitized = name.replace(FILENAME_ILLEGAL_CHARS, "_").trim();
+    sanitized = sanitized.replace(/[.\s]+$/, "").trim();
+    if (sanitized.length > 100) {
+        sanitized = sanitized.slice(0, 100).replace(/[.\s]+$/, "").trim();
+    }
+    return sanitized;
+}
+
+/**
+ * 按模板渲染下载文件名主干（不含扩展名）：替换已知占位符，作者等缺失时压缩多余
+ * 分隔符避免出现 `x__1.jpg`、`_1.jpg` 这类空洞名字；未知占位符原样保留让用户可
+ * 以看出拼错；模板为空或清洗后为空时回退默认模板。
+ */
+export function renderFilenameTemplate(template: string, vars: FilenameTemplateVars): string {
+    const baseTemplate = typeof template === "string" && template.trim() ? template.trim() : DEFAULT_FILENAME_TEMPLATE;
+    let name = baseTemplate
+        .replace(/\{platform\}/g, sanitizeFilenameValue(vars.platform))
+        .replace(/\{postId\}/g, sanitizeFilenameValue(vars.postId))
+        .replace(/\{index\}/g, String(Math.max(1, Math.floor(vars.index) || 1)))
+        .replace(/\{author\}/g, sanitizeFilenameValue(vars.author))
+        .replace(/\{source\}/g, sanitizeFilenameValue(vars.source));
+
+    name = sanitizeFilename(name).replace(/_{2,}/g, "_").replace(/^_+|_+$/g, "");
+    if (!name) {
+        name = sanitizeFilename(`${vars.platform}_${vars.postId}_${vars.index}`)
+            .replace(/_{2,}/g, "_")
+            .replace(/^_+|_+$/g, "");
+    }
+    return name;
+}
+
 export interface UtilsConfig {
     DEBUG?: boolean;
     DELAY_MS: number;
     ENABLE_VIDEO_DOWNLOAD?: boolean;
     X_GIF_AUTO_CONVERT?: boolean;
     LIVEPHOTO_AUTO_MERGE?: boolean;
+    FILENAME_TEMPLATE_WEIBO?: string;
+    FILENAME_TEMPLATE_X?: string;
 }
 
 export interface GmDownloadOptions {
@@ -85,11 +146,11 @@ export interface Utils {
     getFileExtensionFromUrl(url: unknown, fallback?: string): string;
     getFileBasenameFromUrl(url: unknown, fallback: string): string;
     getFilename(postId: string, index: number): string;
-    buildMediaDownloadJobs(mediaItems: readonly UtilsMediaItem[], postId: string): MediaDownloadJob[];
+    buildMediaDownloadJobs(mediaItems: readonly UtilsMediaItem[], postId: string, context?: DownloadNamingContext): MediaDownloadJob[];
     downloadImage(url: string, filename: string): Promise<boolean | "started">;
     downloadImageFallback(url: string, filename: string): Promise<boolean | "started">;
-    downloadAllImages(urls: readonly (string | null)[] | null | undefined, postId: string): Promise<DownloadResult>;
-    downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string): Promise<DownloadResult>;
+    downloadAllImages(urls: readonly (string | null)[] | null | undefined, postId: string, context?: DownloadNamingContext): Promise<DownloadResult>;
+    downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string, context?: DownloadNamingContext): Promise<DownloadResult>;
 }
 
 export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui }: UtilsDeps): Utils {
@@ -164,7 +225,13 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return `${platform}_${postId}_${index}.jpg`;
     }
 
-    function buildMediaDownloadJobs(mediaItems: readonly UtilsMediaItem[], postId: string): MediaDownloadJob[] {
+    function getFilenameTemplate(): string {
+        return getCurrentPlatform() === "x"
+            ? (config.FILENAME_TEMPLATE_X || DEFAULT_FILENAME_TEMPLATE)
+            : (config.FILENAME_TEMPLATE_WEIBO || DEFAULT_FILENAME_TEMPLATE);
+    }
+
+    function buildMediaDownloadJobs(mediaItems: readonly UtilsMediaItem[], postId: string, context?: DownloadNamingContext): MediaDownloadJob[] {
         const platform = getCurrentPlatform();
         const jobs: MediaDownloadJob[] = [];
 
@@ -175,7 +242,13 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
 
             // 平台回退 postId 可能自带同名前缀（如 weibo_1791...），避免拼出 weibo_weibo_...
             const normalizedPostId = postId.startsWith(`${platform}_`) ? postId.slice(platform.length + 1) : postId;
-            const baseName = `${platform}_${normalizedPostId}_${index + 1}`;
+            const baseName = renderFilenameTemplate(getFilenameTemplate(), {
+                platform,
+                postId: normalizedPostId,
+                index: index + 1,
+                author: context?.author,
+                source: getFileBasenameFromUrl(item.imageUrl || item.videoUrl || "", "")
+            });
             // 微博 LivePhoto：开启合并时输出单文件 Motion Photo（JPEG 内嵌视频），
             // 关闭合并时输出 Apple Live Photo 配对文件（jpg + mov 同名、携带同一 ContentIdentifier）
             const isWeiboLivePhoto = platform === "weibo"
@@ -453,8 +526,8 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
     }
 
-    async function downloadAllImages(urls: readonly (string | null)[] | null | undefined, postId: string): Promise<DownloadResult> {
-        return downloadMediaItems(normalizeLegacyMediaItems(urls), postId);
+    async function downloadAllImages(urls: readonly (string | null)[] | null | undefined, postId: string, context?: DownloadNamingContext): Promise<DownloadResult> {
+        return downloadMediaItems(normalizeLegacyMediaItems(urls), postId, context);
     }
 
     async function downloadXGif(url: string, filename: string): Promise<boolean | "started"> {
@@ -546,7 +619,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         return { image: imageResult, video: videoResult };
     }
 
-    async function downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string): Promise<DownloadResult> {
+    async function downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string, context?: DownloadNamingContext): Promise<DownloadResult> {
         if (!mediaItems || mediaItems.length === 0) {
             if (ui && typeof ui.showToast === "function") {
                 ui.showToast("未找到图片");
@@ -554,7 +627,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             return { successCount: 0, failedCount: 0, handedOffCount: 0 };
         }
 
-        const jobs = buildMediaDownloadJobs(mediaItems, postId);
+        const jobs = buildMediaDownloadJobs(mediaItems, postId, context);
         if (jobs.length === 0) {
             if (ui && typeof ui.showToast === "function") {
                 ui.showToast("未找到图片");

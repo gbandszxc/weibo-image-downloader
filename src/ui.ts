@@ -1,3 +1,5 @@
+import { renderFilenameTemplate, DEFAULT_FILENAME_TEMPLATE } from "./utils.ts";
+
 /** 媒体条目：与各平台适配器产出的媒体项结构对齐的最小形状。 */
 export type MediaItemKind = "image" | "gif" | "livephoto" | "video";
 
@@ -26,6 +28,12 @@ export interface UiConfig {
     LONG_PRESS_MS: number;
 }
 
+/** 文件命名设置面板的当前值与保存结果（weibo/x 各一份模板）。 */
+export interface FilenameTemplateSettings {
+    weibo: string;
+    x: string;
+}
+
 /** ui 依赖的平台适配器最小接口（可选成员对应原 JS 的 typeof 判定）。 */
 export interface UiPlatformAdapter {
     findImagesInPost(container: Element): HTMLImageElement[];
@@ -39,6 +47,7 @@ export interface UiPlatformAdapter {
     }): boolean;
     getPostSelectors(): string[];
     shouldSkipPost(post: Element): boolean;
+    getPostAuthor?(postContainer: Element): string;
     isVideoThumbnailImage?(img: HTMLImageElement): boolean;
     getDomMediaItems?(postContainer: Element): MediaItem[] | null;
     selectPreferredMediaItems?<T>(fallbackItems: T[], resolvedMediaItems: T[], apiResolved: boolean): T[];
@@ -55,7 +64,7 @@ export interface UiUtils {
     getOriginalImageUrl(url: string): string | null;
     getFileExtensionFromUrl(url: string, fallback: string): string;
     log(...args: unknown[]): void;
-    downloadMediaItems(mediaItems: MediaItem[] | null, postId: string): Promise<UiDownloadResult>;
+    downloadMediaItems(mediaItems: MediaItem[] | null, postId: string, context?: { author?: string | null }): Promise<UiDownloadResult>;
 }
 
 /** createUi 的依赖注入入参。 */
@@ -78,6 +87,7 @@ export interface UiController {
     isVideoThumbnailImage(img: HTMLImageElement): boolean;
     selectPreferredMediaItems<T>(fallbackItems: T[], resolvedMediaItems: T[], apiResolved: boolean): T[];
     showImageSelectModal(mediaItems: MediaItem[]): Promise<MediaItem[] | null>;
+    showFilenameSettingsModal(current: FilenameTemplateSettings): Promise<FilenameTemplateSettings | null>;
     showToast(message: string, duration?: number): void;
     syncDownloadButtonState(btn: HTMLButtonElement | null, mediaItems: MediaItem[]): void;
     refreshDownloadButtons(): void;
@@ -103,6 +113,29 @@ interface DownloadButtonDetails {
 interface ResolvedMediaItemsCacheEntry {
     fingerprint: string;
     promise: Promise<MediaItem[]>;
+}
+
+/** 文件名模板可用占位符（与 renderFilenameTemplate 支持的变量一致），供设置面板点击/拖拽回填。 */
+const FILENAME_PLACEHOLDERS: { token: string; desc: string }[] = [
+    { token: "{platform}", desc: "平台" },
+    { token: "{postId}", desc: "帖子ID" },
+    { token: "{index}", desc: "序号" },
+    { token: "{author}", desc: "作者" },
+    { token: "{source}", desc: "原文件名" }
+];
+
+/** 设置面板预览用的示例数据：与真实命名形态对齐（X 帖子ID 为 19 位长数字）。 */
+const FILENAME_PREVIEW_SAMPLES: Record<"weibo" | "x", { postId: string; author: string; source: string }> = {
+    weibo: { postId: "5123456789", author: "小明", source: "008abcly1gw91xyz" },
+    x: { postId: "1791782688123456789", author: "handle", source: "GkN9XYZaIAA" }
+};
+
+const FILENAME_KNOWN_TOKENS = FILENAME_PLACEHOLDERS.map((placeholder) => placeholder.token.slice(1, -1));
+
+/** 找出模板中脚本不识别的 {xxx} 占位符（渲染时原样保留，但需提示用户可能拼错）。 */
+function findUnknownFilenameTokens(template: string): string[] {
+    const matches = typeof template === "string" ? template.match(/\{[a-zA-Z]+\}/g) || [] : [];
+    return matches.filter((token) => !FILENAME_KNOWN_TOKENS.includes(token.slice(1, -1)));
 }
 
 export function createUi({ config, utils, windowRef, documentRef, addStyle }: UiDependencies): UiController {
@@ -543,6 +576,210 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
         });
     }
 
+    /**
+     * 文件命名设置面板：占位符标签支持点击插入光标处、拖拽放入输入框，输入实时预览。
+     * 保存返回 { weibo, x } 两份模板（空模板归一为默认值），取消/Escape 返回 null，
+     * 持久化由 main.ts 完成。
+     */
+    function showFilenameSettingsModal(current: FilenameTemplateSettings): Promise<FilenameTemplateSettings | null> {
+        return new Promise((resolve) => {
+            ensureImageSelectModalStyles();
+
+            const overlay = documentRef.createElement("div");
+            overlay.className = "weibo-img-select-overlay";
+
+            const modal = documentRef.createElement("div");
+            modal.className = "weibo-img-filename-modal";
+
+            const header = documentRef.createElement("div");
+            header.className = "weibo-img-filename-header";
+            const title = documentRef.createElement("div");
+            title.className = "weibo-img-filename-title";
+            title.textContent = "文件命名设置";
+            header.appendChild(title);
+
+            const body = documentRef.createElement("div");
+            body.className = "weibo-img-filename-body";
+
+            const hint = documentRef.createElement("div");
+            hint.className = "weibo-img-filename-hint";
+            hint.textContent = "点击或拖动占位符插入输入框；扩展名（.jpg/.gif/.mov 等）由脚本自动添加。";
+            body.appendChild(hint);
+
+            const chips = documentRef.createElement("div");
+            chips.className = "weibo-img-filename-chips";
+            FILENAME_PLACEHOLDERS.forEach(({ token, desc }) => {
+                const chip = documentRef.createElement("button");
+                chip.type = "button";
+                chip.className = "weibo-img-filename-chip";
+                chip.draggable = true;
+                chip.title = `${desc}（点击插入，或拖到输入框）`;
+
+                const tokenText = documentRef.createElement("code");
+                tokenText.textContent = token;
+                const descText = documentRef.createElement("span");
+                descText.textContent = desc;
+                chip.appendChild(tokenText);
+                chip.appendChild(descText);
+
+                chip.addEventListener("click", () => insertToken(token));
+                chip.addEventListener("dragstart", (event) => {
+                    if (event.dataTransfer) {
+                        event.dataTransfer.setData("text/plain", token);
+                        event.dataTransfer.effectAllowed = "copy";
+                    }
+                });
+                chips.appendChild(chip);
+            });
+            body.appendChild(chips);
+
+            const inputs: Partial<Record<keyof FilenameTemplateSettings, HTMLInputElement>> = {};
+            const previews: Partial<Record<keyof FilenameTemplateSettings, HTMLElement>> = {};
+            const warns: Partial<Record<keyof FilenameTemplateSettings, HTMLElement>> = {};
+            let lastFocusedInput: HTMLInputElement | null = null;
+
+            const updatePreviews = (): void => {
+                (Object.keys(inputs) as (keyof FilenameTemplateSettings)[]).forEach((key) => {
+                    const input = inputs[key]!;
+                    const sample = FILENAME_PREVIEW_SAMPLES[key];
+                    previews[key]!.textContent = `示例：${renderFilenameTemplate(input.value, {
+                        platform: key,
+                        index: 1,
+                        ...sample
+                    })}`;
+                    const unknown = findUnknownFilenameTokens(input.value);
+                    warns[key]!.textContent = unknown.length > 0
+                        ? `未识别的占位符：${unknown.join("、")}，将原样保留在文件名中`
+                        : "";
+                });
+            };
+
+            const insertToken = (token: string): void => {
+                const target = lastFocusedInput || inputs.weibo!;
+                const start = target.selectionStart ?? target.value.length;
+                const end = target.selectionEnd ?? start;
+                target.value = target.value.slice(0, start) + token + target.value.slice(end);
+                const caret = start + token.length;
+                target.focus();
+                target.setSelectionRange(caret, caret);
+                updatePreviews();
+            };
+
+            ([
+                { key: "weibo" as const, label: "微博文件名模板" },
+                { key: "x" as const, label: "X 文件名模板" }
+            ]).forEach(({ key, label }) => {
+                const field = documentRef.createElement("div");
+                field.className = "weibo-img-filename-field";
+
+                const labelEl = documentRef.createElement("label");
+                labelEl.className = "weibo-img-filename-label";
+                labelEl.textContent = label;
+
+                const input = documentRef.createElement("input");
+                input.type = "text";
+                input.className = "weibo-img-filename-input";
+                input.value = current[key];
+                input.placeholder = DEFAULT_FILENAME_TEMPLATE;
+                input.spellcheck = false;
+                input.autocomplete = "off";
+                input.addEventListener("focus", () => {
+                    lastFocusedInput = input;
+                });
+                input.addEventListener("input", updatePreviews);
+
+                const preview = documentRef.createElement("div");
+                preview.className = "weibo-img-filename-preview";
+                const warn = documentRef.createElement("div");
+                warn.className = "weibo-img-filename-warn";
+
+                field.appendChild(labelEl);
+                field.appendChild(input);
+                field.appendChild(preview);
+                field.appendChild(warn);
+                body.appendChild(field);
+
+                inputs[key] = input;
+                previews[key] = preview;
+                warns[key] = warn;
+            });
+
+            updatePreviews();
+
+            const actions = documentRef.createElement("div");
+            actions.className = "weibo-img-filename-actions";
+
+            const resetBtn = documentRef.createElement("button");
+            resetBtn.type = "button";
+            resetBtn.className = "weibo-img-select-toggle-btn weibo-img-filename-reset";
+            resetBtn.textContent = "恢复默认";
+
+            const cancelBtn = documentRef.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.className = "weibo-img-select-btn weibo-img-select-btn-cancel";
+            cancelBtn.textContent = "取消";
+
+            const confirmBtn = documentRef.createElement("button");
+            confirmBtn.type = "button";
+            confirmBtn.className = "weibo-img-select-btn weibo-img-select-btn-confirm";
+            confirmBtn.textContent = "保存";
+
+            actions.appendChild(resetBtn);
+            actions.appendChild(cancelBtn);
+            actions.appendChild(confirmBtn);
+
+            modal.appendChild(header);
+            modal.appendChild(body);
+            modal.appendChild(actions);
+            overlay.appendChild(modal);
+
+            const closeWithResult = (result: FilenameTemplateSettings | null): void => {
+                documentRef.removeEventListener("keydown", onKeyDown);
+                if (overlay.parentNode) {
+                    overlay.parentNode.removeChild(overlay);
+                }
+                resolve(result);
+            };
+
+            const onKeyDown = (event: KeyboardEvent): void => {
+                if (event.key === "Escape") {
+                    closeWithResult(null);
+                }
+            };
+
+            resetBtn.addEventListener("click", () => {
+                closeWithResult({ weibo: DEFAULT_FILENAME_TEMPLATE, x: DEFAULT_FILENAME_TEMPLATE });
+            });
+            cancelBtn.addEventListener("click", () => closeWithResult(null));
+            confirmBtn.addEventListener("click", () => {
+                closeWithResult({
+                    weibo: inputs.weibo!.value.trim() || DEFAULT_FILENAME_TEMPLATE,
+                    x: inputs.x!.value.trim() || DEFAULT_FILENAME_TEMPLATE
+                });
+            });
+
+            overlay.addEventListener("click", (event) => {
+                if (event.target === overlay) {
+                    closeWithResult(null);
+                }
+            });
+
+            const preventScroll = (event: Event): void => {
+                event.preventDefault();
+            };
+
+            modal.addEventListener("click", (event) => {
+                event.stopPropagation();
+            });
+
+            overlay.addEventListener("wheel", preventScroll, { passive: false });
+            overlay.addEventListener("touchmove", preventScroll, { passive: false });
+
+            documentRef.addEventListener("keydown", onKeyDown);
+            documentRef.body.appendChild(overlay);
+        });
+    }
+
     function insertDownloadButtonIntoPost(post: Element, btn: HTMLElement | null): void {
         if (!btn) {
             return;
@@ -603,7 +840,11 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
                     renderDownloadButton(btn);
                     refreshPostDownloadState(postId);
                 }
-                const result = await utils.downloadMediaItems(mediaItems, postId);
+                // 作者昵称/handle 供自定义文件名模板使用；采集失败留空，命名时压缩空占位段。
+                const author = typeof platform.getPostAuthor === "function"
+                    ? platform.getPostAuthor(postContainer)
+                    : "";
+                const result = await utils.downloadMediaItems(mediaItems, postId, { author });
                 task.status = !result || result.failedCount > 0 || result.successCount === 0
                     ? "failed" : (result.handedOffCount > 0 ? "started" : "completed");
             } catch (error) {
@@ -792,6 +1033,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
         isVideoThumbnailImage,
         selectPreferredMediaItems,
         showImageSelectModal,
+        showFilenameSettingsModal,
         showToast,
         syncDownloadButtonState,
         refreshDownloadButtons,

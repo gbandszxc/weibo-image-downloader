@@ -175,6 +175,7 @@ export interface WeiboPlatform {
     shouldSkipPost(post: Element | null | undefined): boolean;
     shouldResolveEmptyMediaItems(postContainer: Element): boolean;
     getPostId(postContainer: Element): string;
+    getPostAuthor(postContainer: Element): string;
     insertDownloadButton(options: { post: Element; btn: HTMLElement }): boolean;
     getPostUrl(article: Element | null | undefined): string | null;
     injectGotoOriginalMenuItem(popMain: HTMLElement, article: Element | null | undefined, documentRef: Document): void;
@@ -858,6 +859,64 @@ export function createWeiboPlatform({
         return getStatusLookupId(postContainer) || getSyntheticPostId(postContainer);
     }
 
+    /** 读取节点可见文本，剔除注入的下载按钮文案（如"下载中"），避免混进作者名。 */
+    function readTextExcludingDownloadButton(el: Element | null | undefined): string {
+        if (!el) {
+            return "";
+        }
+
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        const button = typeof el.querySelector === "function"
+            ? el.querySelector(".weibo-img-download-btn")
+            : null;
+        const buttonText = button ? (button.textContent || "").replace(/\s+/g, " ").trim() : "";
+        if (!buttonText || !text.includes(buttonText)) {
+            return text;
+        }
+
+        return text.replace(buttonText, "").replace(/\s+/g, " ").trim();
+    }
+
+    // 作者昵称用于自定义文件名模板：移动端取昵称节点（下载按钮同款定位），桌面端优先
+    // 作者主页链接（/n/昵称、/u/uid）的可见文本，再回退头部昵称节点；拿不到返回空串。
+    function getPostAuthor(postContainer: Element): string {
+        if (!postContainer || typeof postContainer.querySelector !== "function") {
+            return "";
+        }
+
+        if (isMobileWeiboPage()) {
+            const mobileName = readTextExcludingDownloadButton(
+                postContainer.querySelector("header.weibo-top .m-text-box h3.m-text-cut")
+            );
+            if (mobileName) {
+                return mobileName;
+            }
+        }
+
+        const links = postContainer.querySelectorAll<HTMLAnchorElement>("a[href]");
+        for (const link of Array.from(links)) {
+            const href = link.getAttribute("href") || "";
+            const isProfileHref = /^\/(?:u|n)\/[^/?#]+/.test(href)
+                || /^https?:\/\/weibo\.(?:com|cn)\/(?:u|n)\//.test(href);
+            if (!isProfileHref) {
+                continue;
+            }
+            const name = readTextExcludingDownloadButton(link);
+            if (name) {
+                return name;
+            }
+        }
+
+        for (const selector of [".woo-nickname", 'header > div > div[class*="_nick_"]', ".name"]) {
+            const name = readTextExcludingDownloadButton(postContainer.querySelector(selector));
+            if (name) {
+                return name;
+            }
+        }
+
+        return "";
+    }
+
     function insertMobileDownloadButton(post: Element, btn: HTMLElement): boolean {
         const nameRow = post.querySelector<HTMLElement>("header.weibo-top .m-text-box h3.m-text-cut");
         if (nameRow) {
@@ -1057,6 +1116,7 @@ export function createWeiboPlatform({
         shouldSkipPost,
         shouldResolveEmptyMediaItems,
         getPostId,
+        getPostAuthor,
         insertDownloadButton,
         getPostUrl,
         injectGotoOriginalMenuItem,

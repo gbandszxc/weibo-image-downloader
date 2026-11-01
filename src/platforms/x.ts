@@ -82,6 +82,7 @@ export type XPlatform = {
     shouldSkipPost: (post: Element) => boolean;
     shouldResolveEmptyMediaItems: (postContainer: Element) => boolean;
     getPostId: (postContainer: Element) => string;
+    getPostAuthor: (postContainer: Element) => string;
     insertDownloadButton: (options: { post: Element; btn: HTMLElement }) => boolean;
     afterInjectDownloadButtons: () => void;
     initObservers: () => void;
@@ -582,6 +583,32 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return id;
     }
 
+    // 作者 handle 用于自定义文件名模板：优先取 User-Name 内的 @handle 文本，
+    // 回退推文内个人主页链接（/handle 形式）的首段路径；拿不到返回空串。
+    function getPostAuthor(postContainer: Element): string {
+        if (!postContainer || typeof postContainer.querySelector !== "function") {
+            return "";
+        }
+
+        const usernameEl = postContainer.querySelector('[data-testid="User-Name"]');
+        if (usernameEl && typeof usernameEl.textContent === "string") {
+            const match = usernameEl.textContent.match(/@([A-Za-z0-9_]{1,20})/);
+            if (match) {
+                return match[1];
+            }
+        }
+
+        const links = postContainer.querySelectorAll<HTMLAnchorElement>('a[href^="/"]');
+        for (const link of Array.from(links)) {
+            const match = (link.getAttribute("href") || "").match(/^\/([A-Za-z0-9_]{1,20})\/?$/);
+            if (match) {
+                return match[1];
+            }
+        }
+
+        return "";
+    }
+
     function shouldResolveEmptyMediaItems(postContainer: Element): boolean {
         if (!/^\d+$/.test(getPostId(postContainer))) {
             return false;
@@ -754,6 +781,7 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         shouldSkipPost,
         shouldResolveEmptyMediaItems,
         getPostId,
+        getPostAuthor,
         insertDownloadButton,
         afterInjectDownloadButtons() {},
         initObservers() {}

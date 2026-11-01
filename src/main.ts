@@ -1,10 +1,20 @@
 import cssText from "./style.css";
-import { CONFIG } from "./config.ts";
+import { CONFIG, DEFAULT_FILENAME_TEMPLATE } from "./config.ts";
 import { createUtils } from "./utils.ts";
 import { createUi } from "./ui.ts";
 import type { UiController } from "./ui.ts";
 
 const styleId = "weibo-image-downloader-style";
+/** 读取文件名模板持久化值；非字符串或空白时回退默认模板。 */
+function loadFilenameTemplate(key: string): string {
+    if (typeof GM_getValue !== "function") {
+        return DEFAULT_FILENAME_TEMPLATE;
+    }
+
+    const stored = GM_getValue(key, DEFAULT_FILENAME_TEMPLATE);
+    return typeof stored === "string" && stored.trim() ? stored : DEFAULT_FILENAME_TEMPLATE;
+}
+
 const runtimeConfig = {
     ...CONFIG,
     ENABLE_VIDEO_DOWNLOAD: typeof GM_getValue === "function"
@@ -15,7 +25,9 @@ const runtimeConfig = {
         : CONFIG.X_GIF_AUTO_CONVERT,
     LIVEPHOTO_AUTO_MERGE: typeof GM_getValue === "function"
         ? Boolean(GM_getValue(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY, CONFIG.LIVEPHOTO_AUTO_MERGE))
-        : CONFIG.LIVEPHOTO_AUTO_MERGE
+        : CONFIG.LIVEPHOTO_AUTO_MERGE,
+    FILENAME_TEMPLATE_WEIBO: loadFilenameTemplate(CONFIG.FILENAME_TEMPLATE_WEIBO_SETTING_KEY),
+    FILENAME_TEMPLATE_X: loadFilenameTemplate(CONFIG.FILENAME_TEMPLATE_X_SETTING_KEY)
 };
 
 function injectStyles(): void {
@@ -135,6 +147,26 @@ if (typeof GM_registerMenuCommand === "function") {
 
     GM_registerMenuCommand("刷新按钮", () => {
         ui.refreshDownloadButtons();
+    });
+
+    GM_registerMenuCommand("文件命名设置", () => {
+        ui.showFilenameSettingsModal({
+            weibo: runtimeConfig.FILENAME_TEMPLATE_WEIBO,
+            x: runtimeConfig.FILENAME_TEMPLATE_X
+        }).then((result) => {
+            if (!result) {
+                return;
+            }
+
+            if (typeof GM_setValue === "function") {
+                GM_setValue(CONFIG.FILENAME_TEMPLATE_WEIBO_SETTING_KEY, result.weibo);
+                GM_setValue(CONFIG.FILENAME_TEMPLATE_X_SETTING_KEY, result.x);
+            }
+            runtimeConfig.FILENAME_TEMPLATE_WEIBO = result.weibo;
+            runtimeConfig.FILENAME_TEMPLATE_X = result.x;
+            const customized = result.weibo !== DEFAULT_FILENAME_TEMPLATE || result.x !== DEFAULT_FILENAME_TEMPLATE;
+            ui.showToast(customized ? "文件命名已保存，下载时立即生效" : "文件命名已恢复默认");
+        });
     });
 
     registerVideoDownloadMenu();

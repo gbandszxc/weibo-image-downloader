@@ -39,7 +39,7 @@ test("X GIF menu uses the persisted setting and saves toggles immediately", asyn
         assert.equal(gifMenu.text, `X平台GIF自动转换：[${persistedValue === false ? "关闭" : "开启"}]`);
         gifMenu.callback();
         assert.equal(settings.get(CONFIG.X_GIF_AUTO_CONVERT_SETTING_KEY), persistedValue === false);
-        assert.equal(menus.size, 4);
+        assert.equal(menus.size, 5, "含新增的文件命名设置菜单项");
         assert.equal([...menus.values()].find((menu) => menu.text.startsWith("X平台GIF自动转换")).text,
             `X平台GIF自动转换：[${persistedValue === false ? "开启" : "关闭"}]`);
     }
@@ -79,7 +79,7 @@ test("LivePhoto merge menu uses the persisted setting and saves toggles immediat
         assert.equal(mergeMenu.text, `微博LivePhoto自动合并：[${persistedValue === false ? "关闭" : "开启"}]`);
         mergeMenu.callback();
         assert.equal(settings.get(CONFIG.LIVEPHOTO_AUTO_MERGE_SETTING_KEY), persistedValue === false);
-        assert.equal(menus.size, 4);
+        assert.equal(menus.size, 5, "含新增的文件命名设置菜单项");
         assert.equal([...menus.values()].find((menu) => menu.text.startsWith("微博LivePhoto自动合并")).text,
             `微博LivePhoto自动合并：[${persistedValue === false ? "开启" : "关闭"}]`);
     }
