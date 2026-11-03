@@ -4523,7 +4523,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     const resolveFailureCooldowns = /* @__PURE__ */ new WeakMap();
     const buttonDetails = /* @__PURE__ */ new WeakMap();
     const postDownloads = /* @__PURE__ */ new Map();
-    const downloadButtonTitle = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
+    const downloadButtonTitle = "点击下载全部，右键或长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
     function showToast(message, duration = 3e3) {
       const existing = documentRef.getElementById("weibo-img-toast");
       if (existing) {
@@ -5058,6 +5058,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       });
       let longPressTimer = null;
       let longPressTriggered = false;
+      let lastPointerType = null;
       const clearLongPressTimer = () => {
         if (longPressTimer) {
           clearTimeout(longPressTimer);
@@ -5111,6 +5112,10 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       btn.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (lastPointerType === "touch" || lastPointerType === "pen" || btn.disabled) {
+          return;
+        }
+        startDownload(true);
       });
       btn.addEventListener("click", (event) => {
         event.preventDefault();
@@ -5120,6 +5125,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         }
       });
       btn.addEventListener("pointerdown", (event) => {
+        lastPointerType = event.pointerType;
         if (event.pointerType === "mouse" && event.button !== 0) {
           return;
         }

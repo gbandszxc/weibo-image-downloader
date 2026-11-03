@@ -251,6 +251,55 @@ test("long press cancels without downloading and confirmation downloads only sel
     assert.equal(button.innerHTML, "完成");
 });
 
+test("desktop context menu opens the image selection modal and cancel restores the button", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const pending = deferred<UiDownloadResult>();
+    const h = harness({ download: () => pending.promise });
+    h.media.push(asMediaItem({ kind: "image", imageUrl: "https://example.test/second.jpg" }));
+    const { button } = h.addPost("1");
+    // 桌面右键的完整指针序列：右键按下（button=2，不启动长按计时）→ 系统派发 contextmenu
+    button.fire("pointerdown", { pointerType: "mouse", button: 2 });
+    button.fire("contextmenu");
+    await setImmediate();
+    assert.equal(button.innerHTML, "选择中");
+    assert.equal(h.calls.length, 0);
+    h.document.querySelectorAll(".weibo-img-select-btn-cancel")[0].fire("click");
+    await setImmediate();
+    assert.equal(button.innerHTML, "↓2");
+    assert.equal(h.calls.length, 0);
+    // 键盘菜单键（无前置 pointerdown）视为桌面来源，同样打开选图
+    button.fire("contextmenu");
+    await setImmediate();
+    assert.equal(button.innerHTML, "选择中");
+    h.document.querySelectorAll(".weibo-img-select-btn-cancel")[0].fire("click");
+    await setImmediate();
+    assert.equal(h.calls.length, 0);
+});
+
+test("touch and pen sourced context menus are ignored so long press stays the only selection trigger", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const h = harness();
+    h.media.push(asMediaItem({ kind: "image", imageUrl: "https://example.test/second.jpg" }));
+    // 安卓触屏长按：先按下触屏，随后系统派发 contextmenu，应被忽略（选图由长按计时器负责）
+    const touch = h.addPost("1");
+    touch.button.fire("pointerdown", { pointerType: "touch" });
+    touch.button.fire("contextmenu");
+    await setImmediate();
+    assert.equal(touch.button.innerHTML, "↓2");
+    assert.equal(h.calls.length, 0);
+    // 触控笔同理，仅保留长按
+    const pen = h.addPost("2");
+    pen.button.fire("pointerdown", { pointerType: "pen" });
+    pen.button.fire("contextmenu");
+    await setImmediate();
+    assert.equal(pen.button.innerHTML, "↓2");
+    assert.equal(h.calls.length, 0);
+    // 忽略后长按计时器仍正常触发选图
+    t.mock.timers.tick(CONFIG.LONG_PRESS_MS);
+    await setImmediate();
+    assert.equal(touch.button.innerHTML, "选择中");
+});
+
 test("keyboard activation starts one download and pointer-generated clicks do not start another", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const pending = deferred<UiDownloadResult>();

@@ -144,7 +144,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
     const resolveFailureCooldowns = new WeakMap<object, Map<string, number>>();
     const buttonDetails = new WeakMap<HTMLElement, DownloadButtonDetails>();
     const postDownloads = new Map<string, DownloadTask>();
-    const downloadButtonTitle = "点击下载全部，长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
+    const downloadButtonTitle = "点击下载全部，右键或长按选择下载；Live Photo 会同时下载 JPG 和 MOV";
 
     function showToast(message: string, duration = 3000): void {
         const existing = documentRef.getElementById("weibo-img-toast");
@@ -808,6 +808,9 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
 
         let longPressTimer: ReturnType<typeof setTimeout> | null = null;
         let longPressTriggered = false;
+        // 记录最近一次按下按钮的指针类型，供 contextmenu 区分来源：
+        // 安卓触屏长按同样会派发 contextmenu，若不区分会与长按逻辑双重触发选图弹窗。
+        let lastPointerType: string | null = null;
 
         const clearLongPressTimer = (): void => {
             if (longPressTimer) {
@@ -869,6 +872,11 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
         btn.addEventListener("contextmenu", (event) => {
             event.preventDefault();
             event.stopPropagation();
+            // 仅桌面鼠标右键打开选图；触屏/触控笔一律走长按，无指针来源（键盘菜单键）视为桌面。
+            if (lastPointerType === "touch" || lastPointerType === "pen" || btn.disabled) {
+                return;
+            }
+            startDownload(true);
         });
 
         btn.addEventListener("click", (event) => {
@@ -880,6 +888,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
         });
 
         btn.addEventListener("pointerdown", (event) => {
+            lastPointerType = event.pointerType;
             if (event.pointerType === "mouse" && event.button !== 0) {
                 return;
             }
