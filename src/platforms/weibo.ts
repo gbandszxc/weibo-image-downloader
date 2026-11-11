@@ -196,7 +196,11 @@ export function createWeiboPlatform({
         "img.woo-picture-img",
         ".picture img",
         ".m3 img",
-        'div[class^="m"] img'
+        'div[class^="m"] img',
+        // 微博改版兜底：容器/类名变化时仍按 CDN 域名圈定候选图；头像、视频封面、
+        // 文章封面等过滤链在选择器之后统一把关。
+        'img[src*="sinaimg.cn"]',
+        'img[src*="sina.cn"]'
     ];
     const mobilePostSelectors = [
         ".card.m-panel.card9"
@@ -214,7 +218,29 @@ export function createWeiboPlatform({
         ".woo-nickname",
         ".name"
     ];
+    // SPA 长时间刷 feed 时 status 缓存（每条为完整帖子 JSON）会无界增长，LRU 上限 50：
+    // Map 迭代保持插入序，命中后重插到队尾，超限逐出队首最旧条目。
+    const WEIBO_STATUS_CACHE_LIMIT = 50;
     const weiboStatusCache = new Map<string, Promise<WeiboStatus | null>>();
+
+    function touchStatusCache(statusId: string): void {
+        const cached = weiboStatusCache.get(statusId);
+        if (cached === undefined) {
+            return;
+        }
+        weiboStatusCache.delete(statusId);
+        weiboStatusCache.set(statusId, cached);
+    }
+
+    function evictStatusCacheOverflow(): void {
+        while (weiboStatusCache.size > WEIBO_STATUS_CACHE_LIMIT) {
+            const oldestKey = weiboStatusCache.keys().next().value;
+            if (oldestKey === undefined) {
+                break;
+            }
+            weiboStatusCache.delete(oldestKey);
+        }
+    }
 
     function isVideoDownloadEnabled(): boolean {
         return !!config.ENABLE_VIDEO_DOWNLOAD;
@@ -586,6 +612,7 @@ export function createWeiboPlatform({
         }
 
         if (weiboStatusCache.has(statusId)) {
+            touchStatusCache(statusId);
             return weiboStatusCache.get(statusId)!;
         }
 
@@ -651,6 +678,7 @@ export function createWeiboPlatform({
         })();
 
         weiboStatusCache.set(statusId, request);
+        evictStatusCacheOverflow();
 
         try {
             return await request;

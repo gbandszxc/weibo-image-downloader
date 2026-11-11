@@ -26,6 +26,7 @@ test("userscript metadata grants persistent settings APIs", () => {
     assert.match(buildScript, /@grant\s+GM_unregisterMenuCommand/);
     assert.match(buildScript, /@grant\s+GM_getValue/);
     assert.match(buildScript, /@grant\s+GM_setValue/);
+    assert.match(buildScript, /@grant\s+GM_openInTab/, "「常见问题」菜单入口需 GM_openInTab 打开 FAQ 文档页");
 });
 
 test("userscript metadata omits unused privileged APIs", () => {

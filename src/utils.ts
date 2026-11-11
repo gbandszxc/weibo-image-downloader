@@ -455,20 +455,18 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
     }
 
     async function downloadBlob(blob: Blob, filename: string): Promise<boolean | "started"> {
-        // Blob 优先走浏览器原生 a[download] 保存：部分浏览器/下载管理器会忽略 GM_download 对 Blob
-        // 的命名，以内部 UUID + 内容嗅探扩展名落盘（如合并产物被存成 *.exif），a[download] 是
-        // 唯一稳定保留文件名的通道；直链下载（downloadImage）仍优先 GM_download，不受此影响。
-        try {
-            return downloadBlobWithAnchor(blob, filename);
-        } catch (error) {
-            log("浏览器原生保存失败，回退 GM_download:", filename, (error as Error).message);
-            const gmResult = await tryGmDownload(blob, filename);
-            return gmResult.ok || downloadBlobWithAnchor(blob, filename);
+        // Blob 优先走 GM_download(saveAs:false)：与直链同通道，用户开启「下载前询问每个文件
+        // 的保存位置」时依然静默落盘且命名正确；不可用或失败时回退浏览器原生 a[download]
+        // 保存（后者严格遵循该用户设置，开启时逐文件弹保存对话框，网页侧无法绕过）。已知
+        // 个别下载接管工具或脚本管理器「下载 BETA」模式会忽略 GM_download 对 Blob 的命名，
+        // 以 UUID + 内容嗅探扩展名落盘，排查方式见 docs/FAQ.md。
+        const gmResult = await tryGmDownload(blob, filename);
+        if (gmResult.ok) {
+            return true;
         }
+        log("Blob GM_download失败，回退浏览器原生保存:", filename, gmResult.error);
+        return downloadBlobWithAnchor(blob, filename);
     }
-
-    /** 本次批量中 GM_download 失败后改走浏览器原生保存的文件数，用于批量结束时的授权提示 */
-    let directDownloadFallbackCount = 0;
 
     async function downloadImage(url: string, filename: string): Promise<boolean | "started"> {
         // X 图片直链可能被下载链路按 CDN 原名保存；先取字节再保存，保留模板文件名。
@@ -480,13 +478,10 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         // 显式 saveAs:false 在用户开启「下载前询问每个文件的保存位置」时依然静默落盘且
         // 命名正确，onload/onerror 可确认结果，按钮显示「完成」。a[download] 通道严格遵循
         // 该用户设置，开启时逐文件弹保存对话框，网页侧无法绕过，故只作回退使用；TM 未
-        // 提供下载权限或直链下载失败时回退，并在批量结束时提示用户授权。
+        // 提供下载权限或直链下载失败时回退，排查方式见 docs/FAQ.md。
         const direct = await tryGmDownload(url, filename);
         if (direct.ok) {
             return true;
-        }
-        if (direct.error !== "unavailable") {
-            directDownloadFallbackCount++;
         }
 
         try {
@@ -644,83 +639,74 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
 
         let successCount = 0;
         let failedCount = 0;
-        let failedGifCount = 0;
-        let failedLivePhotoMergeCount = 0;
-        let livePhotoFallbackSavedCount = 0;
         let handedOffCount = 0;
-        directDownloadFallbackCount = 0;
 
-        for (let i = 0; i < jobs.length; i++) {
-            const job = jobs[i];
-            const isLastJob = i === jobs.length - 1;
-            const delayBetweenJobs = async () => {
-                if (!isLastJob) {
-                    await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
-                }
-            };
-
-            if (job.livePhotoVideoUrl && job.livePhotoPair) {
-                // 关闭合并：分开保存并注入 Apple Live Photo 配对元数据（jpg + mov 同名）
-                const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
-                for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false as const, false as const]) {
-                    if (outcome) {
-                        successCount++;
-                        if (outcome === "started") {
-                            handedOffCount++;
-                        }
-                    } else {
-                        failedCount++;
-                    }
-                }
-                await delayBetweenJobs();
-                continue;
-            }
-
-            if (job.livePhotoVideoUrl) {
-                const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
-                if (merged) {
-                    successCount++;
-                    if (merged === "started") {
-                        handedOffCount++;
-                    }
-                } else {
-                    // 合并失败：回退为 Apple 配对方式分别保存同名 jpg 与 mov（去掉 .MP/_live 标记）
-                    failedLivePhotoMergeCount++;
-                    log("LivePhoto合并失败，回退为分别下载:", job.filename);
-                    const baseName = job.filename.replace(/(\.MP)?\.[a-z0-9]+$/i, "") || job.filename;
-                    const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, `${baseName}.jpg`);
-                    for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false as const, false as const]) {
-                        if (outcome) {
-                            successCount++;
-                            livePhotoFallbackSavedCount++;
-                            if (outcome === "started") {
-                                handedOffCount++;
-                            }
-                        } else {
-                            failedCount++;
-                        }
-                    }
-                }
-                await delayBetweenJobs();
-                continue;
-            }
-
-            const success = job.convertToGif
-                ? await downloadXGif(job.url, job.filename)
-                : await downloadImage(job.url, job.filename);
-            if (success) {
+        const recordOutcome = (outcome: boolean | "started"): void => {
+            if (outcome) {
                 successCount++;
-                if (success === "started") {
+                if (outcome === "started") {
                     handedOffCount++;
                 }
             } else {
                 failedCount++;
-                if (job.convertToGif) {
-                    failedGifCount++;
+            }
+        };
+
+        const recordPairOutcome = (pairResult: PairedLivePhotoResult | null): void => {
+            for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false as const, false as const]) {
+                recordOutcome(outcome);
+            }
+        };
+
+        // 单任务异常隔离：单个文件的意外错误只计入失败数，不中断池中其余任务
+        // （各下载通道内部已自捕获错误，这里是防御层）。
+        const runDownloadJob = async (job: MediaDownloadJob): Promise<void> => {
+            try {
+                if (job.livePhotoVideoUrl && job.livePhotoPair) {
+                    // 关闭合并：分开保存并注入 Apple Live Photo 配对元数据（jpg + mov 同名）
+                    recordPairOutcome(await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename));
+                    return;
+                }
+
+                if (job.livePhotoVideoUrl) {
+                    const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
+                    if (merged) {
+                        recordOutcome(merged);
+                    } else {
+                        // 合并失败：回退为 Apple 配对方式分别保存同名 jpg 与 mov（去掉 .MP/_live 标记）
+                        log("LivePhoto合并失败，回退为分别下载:", job.filename);
+                        const baseName = job.filename.replace(/(\.MP)?\.[a-z0-9]+$/i, "") || job.filename;
+                        recordPairOutcome(await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, `${baseName}.jpg`));
+                    }
+                    return;
+                }
+
+                recordOutcome(job.convertToGif
+                    ? await downloadXGif(job.url, job.filename)
+                    : await downloadImage(job.url, job.filename));
+            } catch (error) {
+                log("下载任务异常:", job.filename, (error as Error).message);
+                failedCount++;
+            }
+        };
+
+        // 并发池：多个普通下载并行执行，GIF 转换为 CPU 密集（Worker 内量化编码），存在时
+        // 降为 2；worker 领取下一个任务前保留 DELAY_MS 间隔，对平台的发起频率与原串行
+        // 逐个下载一致，仅缩短整体等待时间。间隔乘 0.5–1.5 均匀随机抖动：均值不变、
+        // 不牺牲平均速度，避免固定间隔形成完全规律的请求节奏。
+        const maxConcurrency = jobs.some((job) => job.convertToGif)
+            ? 2
+            : Math.min(3, Math.max(2, (windowRef.navigator?.hardwareConcurrency || 4) - 1));
+        let nextJob = 0;
+        await Promise.all(Array.from({ length: Math.max(1, Math.min(maxConcurrency, jobs.length)) }, async () => {
+            while (nextJob < jobs.length) {
+                const job = jobs[nextJob++];
+                await runDownloadJob(job);
+                if (nextJob < jobs.length && config.DELAY_MS > 0) {
+                    await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS * (0.5 + Math.random())));
                 }
             }
-            await delayBetweenJobs();
-        }
+        }));
 
         let message = "";
         if (failedCount === 0) {
@@ -741,16 +727,7 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
 
         if (handedOffCount > 0) {
-            message = `已发起 ${successCount} 个文件的下载${failedCount > 0 ? `，${failedCount} 个失败` : ""}；请查看浏览器下载列表`;
-        }
-        if (failedGifCount > 0) {
-            message += "；X GIF转换或保存失败，可关闭自动转换下载 MP4 源";
-        }
-        if (livePhotoFallbackSavedCount > 0) {
-            message += "；部分LivePhoto未能合并，已分别保存图片与视频";
-        }
-        if (directDownloadFallbackCount > 0) {
-            message += "；部分文件已改用浏览器保存，若弹出保存位置询问，请在 Tampermonkey 中允许下载权限";
+            message = `已发起 ${successCount} 个文件的下载${failedCount > 0 ? `，${failedCount} 个失败` : ""}`;
         }
         log(message);
         if (ui && typeof ui.showToast === "function") {

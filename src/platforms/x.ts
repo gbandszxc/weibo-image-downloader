@@ -583,8 +583,15 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
         return id;
     }
 
+    // /i/status/…、/intent/… 等 X 内部路径的首段不是真实 handle，URL 兜底时排除。
+    const X_RESERVED_PATH_HANDLES = new Set([
+        "i", "intent", "search", "explore", "notifications", "messages", "settings", "compose", "hashtag"
+    ]);
+
     // 作者 handle 用于自定义文件名模板：优先取 User-Name 内的 @handle 文本，
-    // 回退推文内个人主页链接（/handle 形式）的首段路径；拿不到返回空串。
+    // 回退推文内个人主页链接（/handle 形式）的首段路径；再回退当前页 URL 的
+    // /<handle>/status/<id> 首段（X 改版移除昵称节点时详情页命名不退化为默认模板），
+    // 仅当容器正是当前页主推文（postId 与路径一致）时成立，避免把主推文作者误配给回复。
     function getPostAuthor(postContainer: Element): string {
         if (!postContainer || typeof postContainer.querySelector !== "function") {
             return "";
@@ -604,6 +611,12 @@ export function createXPlatform({ config = {}, windowRef, fetchRef, log, getFile
             if (match) {
                 return match[1];
             }
+        }
+
+        const currentPath = windowRef.location && (windowRef.location.pathname || "");
+        const pathMatch = currentPath && currentPath.match(/^\/([A-Za-z0-9_]{1,20})\/status\/(\d+)/);
+        if (pathMatch && !X_RESERVED_PATH_HANDLES.has(pathMatch[1]) && getPostId(postContainer) === pathMatch[2]) {
+            return pathMatch[1];
         }
 
         return "";

@@ -25,6 +25,7 @@
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/dist/weibo-image-downloader.user.js
 // @downloadURL  https://raw.githubusercontent.com/gbandszxc/weibo-image-downloader/main/dist/weibo-image-downloader.user.js
 // @supportURL   https://github.com/gbandszxc/weibo-image-downloader/issues
@@ -946,7 +947,11 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       "img.woo-picture-img",
       ".picture img",
       ".m3 img",
-      'div[class^="m"] img'
+      'div[class^="m"] img',
+      // 微博改版兜底：容器/类名变化时仍按 CDN 域名圈定候选图；头像、视频封面、
+      // 文章封面等过滤链在选择器之后统一把关。
+      'img[src*="sinaimg.cn"]',
+      'img[src*="sina.cn"]'
     ];
     const mobilePostSelectors = [
       ".card.m-panel.card9"
@@ -964,7 +969,25 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       ".woo-nickname",
       ".name"
     ];
+    const WEIBO_STATUS_CACHE_LIMIT = 50;
     const weiboStatusCache = /* @__PURE__ */ new Map();
+    function touchStatusCache(statusId) {
+      const cached = weiboStatusCache.get(statusId);
+      if (cached === void 0) {
+        return;
+      }
+      weiboStatusCache.delete(statusId);
+      weiboStatusCache.set(statusId, cached);
+    }
+    function evictStatusCacheOverflow() {
+      while (weiboStatusCache.size > WEIBO_STATUS_CACHE_LIMIT) {
+        const oldestKey = weiboStatusCache.keys().next().value;
+        if (oldestKey === void 0) {
+          break;
+        }
+        weiboStatusCache.delete(oldestKey);
+      }
+    }
     function isVideoDownloadEnabled() {
       return !!config.ENABLE_VIDEO_DOWNLOAD;
     }
@@ -1252,6 +1275,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         return null;
       }
       if (weiboStatusCache.has(statusId)) {
+        touchStatusCache(statusId);
         return weiboStatusCache.get(statusId);
       }
       const statusUrl = `${isSearchPage() ? "https://weibo.com" : ""}/ajax/statuses/show?id=${encodeURIComponent(statusId)}&locale=zh-CN&isGetLongText=true`;
@@ -1310,6 +1334,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         return response.json();
       })();
       weiboStatusCache.set(statusId, request);
+      evictStatusCacheOverflow();
       try {
         return await request;
       } catch (error) {
@@ -2114,6 +2139,17 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       return id;
     }
+    const X_RESERVED_PATH_HANDLES = /* @__PURE__ */ new Set([
+      "i",
+      "intent",
+      "search",
+      "explore",
+      "notifications",
+      "messages",
+      "settings",
+      "compose",
+      "hashtag"
+    ]);
     function getPostAuthor(postContainer) {
       if (!postContainer || typeof postContainer.querySelector !== "function") {
         return "";
@@ -2131,6 +2167,11 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         if (match) {
           return match[1];
         }
+      }
+      const currentPath = windowRef.location && (windowRef.location.pathname || "");
+      const pathMatch = currentPath && currentPath.match(/^\/([A-Za-z0-9_]{1,20})\/status\/(\d+)/);
+      if (pathMatch && !X_RESERVED_PATH_HANDLES.has(pathMatch[1]) && getPostId(postContainer) === pathMatch[2]) {
+        return pathMatch[1];
       }
       return "";
     }
@@ -2365,7 +2406,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       view.setUint16(9, frame.left, true);
       view.setUint16(11, frame.top, true);
     }
-    return gif.bytesView();
+    return gif.bytes();
   }
 
   // src/x-gif-worker.ts
@@ -2568,7 +2609,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
   }
 
   // src/x-gif.ts
-  var workerSource = true ? '"use strict";(()=>{var ue=Object.create;var K=Object.defineProperty;var ge=Object.getOwnPropertyDescriptor;var he=Object.getOwnPropertyNames;var de=Object.getPrototypeOf,pe=Object.prototype.hasOwnProperty;var ye=(e,t)=>()=>(t||e((t={exports:{}}).exports,t),t.exports);var we=(e,t,r,n)=>{if(t&&typeof t=="object"||typeof t=="function")for(let o of he(t))!pe.call(e,o)&&o!==r&&K(e,o,{get:()=>t[o],enumerable:!(n=ge(t,o))||n.enumerable});return e};var X=(e,t,r)=>(r=e!=null?ue(de(e)):{},we(t||!e||!e.__esModule?K(r,"default",{value:e,enumerable:!0}):r,e));var N=ye(j=>{var ee=Object.defineProperty,be=e=>ee(e,"__esModule",{value:!0}),me=(e,t)=>{for(var r in t)ee(e,r,{get:t[r],enumerable:!0})};be(j);me(j,{GIFEncoder:()=>se,applyPalette:()=>Fe,default:()=>Re,nearestColor:()=>Ee,nearestColorIndex:()=>ie,nearestColorIndexWithDistance:()=>ce,prequantize:()=>Ge,quantize:()=>Ie,snapColorsToPalette:()=>_e});var xe={signature:"GIF",version:"89a",trailer:59,extensionIntroducer:33,applicationExtensionLabel:255,graphicControlExtensionLabel:249,imageSeparator:44,signatureSize:3,versionSize:3,globalColorTableFlagMask:128,colorResolutionMask:112,sortFlagMask:8,globalColorTableSizeMask:7,applicationIdentifierSize:8,applicationAuthCodeSize:3,disposalMethodMask:28,userInputFlagMask:2,transparentColorFlagMask:1,localColorTableFlagMask:128,interlaceFlagMask:64,idSortFlagMask:32,localColorTableSizeMask:7};function te(e=256){let t=0,r=new Uint8Array(e);return{get buffer(){return r.buffer},reset(){t=0},bytesView(){return r.subarray(0,t)},bytes(){return r.slice(0,t)},writeByte(o){n(t+1),r[t]=o,t++},writeBytes(o,c=0,i=o.length){n(t+i);for(let s=0;s<i;s++)r[t++]=o[s+c]},writeBytesView(o,c=0,i=o.byteLength){n(t+i),r.set(o.subarray(c,c+i),t),t+=i}};function n(o){var c=r.length;if(c>=o)return;var i=1024*1024;o=Math.max(o,c*(c<i?2:1.125)>>>0),c!=0&&(o=Math.max(o,256));let s=r;r=new Uint8Array(o),t>0&&r.set(s.subarray(0,t),0)}}var W=12,Y=5003,Ae=[0,1,3,7,15,31,63,127,255,511,1023,2047,4095,8191,16383,32767,65535];function Be(e,t,r,n,o=te(512),c=new Uint8Array(256),i=new Int32Array(Y),s=new Int32Array(Y)){let g=i.length,u=Math.max(2,n);c.fill(0),s.fill(0),i.fill(-1);let l=0,a=0,h=u+1,w=h,p=!1,y=w,d=(1<<y)-1,f=1<<h-1,B=f+1,A=f+2,b=0,C=r[0],U=0;for(let x=g;x<65536;x*=2)++U;U=8-U,o.writeByte(u),I(f);let m=r.length;for(let x=1;x<m;x++)e:{let G=r[x],F=(G<<W)+C,M=G<<U^C;if(i[M]===F){C=s[M];break e}let V=M===0?1:g-M;for(;i[M]>=0;)if(M-=V,M<0&&(M+=g),i[M]===F){C=s[M];break e}I(C),C=G,A<1<<W?(s[M]=A++,i[M]=F):(i.fill(-1),A=f+2,p=!0,I(f))}return I(C),I(B),o.writeByte(0),o.bytesView();function I(x){for(l&=Ae[a],a>0?l|=x<<a:l=x,a+=y;a>=8;)c[b++]=l&255,b>=254&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0),l>>=8,a-=8;if((A>d||p)&&(p?(y=w,d=(1<<y)-1,p=!1):(++y,d=y===W?1<<y:(1<<y)-1)),x==B){for(;a>0;)c[b++]=l&255,b>=254&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0),l>>=8,a-=8;b>0&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0)}}}var Ce=Be;function ne(e,t,r){return e<<8&63488|t<<2&992|r>>3}function re(e,t,r,n){return e>>4|t&240|(r&240)<<4|(n&240)<<8}function oe(e,t,r){return e>>4<<8|t&240|r>>4}function S(e,t,r){return e<t?t:e>r?r:e}function z(e){return e*e}function Q(e,t,r){var n=0,o=1e100;let c=e[t],i=c.cnt,s=c.ac,g=c.rc,u=c.gc,l=c.bc;for(var a=c.fw;a!=0;a=e[a].fw){let w=e[a],p=w.cnt,y=i*p/(i+p);if(!(y>=o)){var h=0;r&&(h+=y*z(w.ac-s),h>=o)||(h+=y*z(w.rc-g),!(h>=o)&&(h+=y*z(w.gc-u),!(h>=o)&&(h+=y*z(w.bc-l),!(h>=o)&&(o=h,n=a))))}}c.err=o,c.nn=n}function H(){return{ac:0,rc:0,gc:0,bc:0,cnt:0,nn:0,fw:0,bk:0,tm:0,mtm:0,err:0}}function Me(e,t){let r=t==="rgb444"?4096:65536,n=new Array(r),o=e.length;if(t==="rgba4444")for(let c=0;c<o;++c){let i=e[c],s=i>>24&255,g=i>>16&255,u=i>>8&255,l=i&255,a=re(l,u,g,s),h=a in n?n[a]:n[a]=H();h.rc+=l,h.gc+=u,h.bc+=g,h.ac+=s,h.cnt++}else if(t==="rgb444")for(let c=0;c<o;++c){let i=e[c],s=i>>16&255,g=i>>8&255,u=i&255,l=oe(u,g,s),a=l in n?n[l]:n[l]=H();a.rc+=u,a.gc+=g,a.bc+=s,a.cnt++}else for(let c=0;c<o;++c){let i=e[c],s=i>>16&255,g=i>>8&255,u=i&255,l=ne(u,g,s),a=l in n?n[l]:n[l]=H();a.rc+=u,a.gc+=g,a.bc+=s,a.cnt++}return n}function Ie(e,t,r={}){let{format:n="rgb565",clearAlpha:o=!0,clearAlphaColor:c=0,clearAlphaThreshold:i=0,oneBitAlpha:s=!1}=r;if(!e||!e.buffer)throw new Error("quantize() expected RGBA Uint8Array data");if(!(e instanceof Uint8Array)&&!(e instanceof Uint8ClampedArray))throw new Error("quantize() expected RGBA Uint8Array data");let g=new Uint32Array(e.buffer),u=r.useSqrt!==!1,l=n==="rgba4444",a=Me(g,n),h=a.length,w=h-1,p=new Uint32Array(h+1);for(var y=0,f=0;f<h;++f){let v=a[f];if(v!=null){var d=1/v.cnt;l&&(v.ac*=d),v.rc*=d,v.gc*=d,v.bc*=d,a[y++]=v}}z(t)/y<.022&&(u=!1);for(var f=0;f<y-1;++f)a[f].fw=f+1,a[f+1].bk=f,u&&(a[f].cnt=Math.sqrt(a[f].cnt));u&&(a[f].cnt=Math.sqrt(a[f].cnt));var B,A,b;for(f=0;f<y;++f){Q(a,f,!1);var C=a[f].err;for(A=++p[0];A>1&&(b=A>>1,!(a[B=p[b]].err<=C));A=b)p[A]=B;p[A]=f}var U=y-t;for(f=0;f<U;){for(var m;;){var I=p[1];if(m=a[I],m.tm>=m.mtm&&a[m.nn].mtm<=m.tm)break;m.mtm==w?I=p[1]=p[p[0]--]:(Q(a,I,!1),m.tm=f);var C=a[I].err;for(A=1;(b=A+A)<=p[0]&&(b<p[0]&&a[p[b]].err>a[p[b+1]].err&&b++,!(C<=a[B=p[b]].err));A=b)p[A]=B;p[A]=I}var x=a[m.nn],G=m.cnt,F=x.cnt,d=1/(G+F);l&&(m.ac=d*(G*m.ac+F*x.ac)),m.rc=d*(G*m.rc+F*x.rc),m.gc=d*(G*m.gc+F*x.gc),m.bc=d*(G*m.bc+F*x.bc),m.cnt+=x.cnt,m.mtm=++f,a[x.bk].fw=x.fw,a[x.fw].bk=x.bk,x.mtm=w}let M=[];var V=0;for(f=0;;++V){let O=S(Math.round(a[f].rc),0,255),v=S(Math.round(a[f].gc),0,255),J=S(Math.round(a[f].bc),0,255),E=255;l&&(E=S(Math.round(a[f].ac),0,255),s&&(E=E<=(typeof s=="number"?s:127)?0:255),o&&E<=i&&(O=v=J=c,E=0));let Z=l?[O,v,J,E]:[O,v,J];if(ve(M,Z)||M.push(Z),(f=a[f].fw)==0)break}return M}function ve(e,t){for(let r=0;r<e.length;r++){let n=e[r],o=n[0]===t[0]&&n[1]===t[1]&&n[2]===t[2],c=n.length>=4&&t.length>=4?n[3]===t[3]:!0;if(o&&c)return!0}return!1}function P(e,t){var r=0,n;for(n=0;n<e.length;n++){let o=e[n]-t[n];r+=o*o}return r}function R(e,t){return t>1?Math.round(e/t)*t:e}function Ge(e,{roundRGB:t=5,roundAlpha:r=10,oneBitAlpha:n=null}={}){let o=new Uint32Array(e.buffer);for(let c=0;c<o.length;c++){let i=o[c],s=i>>24&255,g=i>>16&255,u=i>>8&255,l=i&255;s=R(s,r),n&&(s=s<=(typeof n=="number"?n:127)?0:255),l=R(l,t),u=R(u,t),g=R(g,t),o[c]=s<<24|g<<16|u<<8|l<<0}}function Fe(e,t,r="rgb565"){if(!e||!e.buffer)throw new Error("quantize() expected RGBA Uint8Array data");if(!(e instanceof Uint8Array)&&!(e instanceof Uint8ClampedArray))throw new Error("quantize() expected RGBA Uint8Array data");if(t.length>256)throw new Error("applyPalette() only works with 256 colors or less");let n=new Uint32Array(e.buffer),o=n.length,c=r==="rgb444"?4096:65536,i=new Uint8Array(o),s=new Array(c),g=r==="rgba4444";if(r==="rgba4444")for(let u=0;u<o;u++){let l=n[u],a=l>>24&255,h=l>>16&255,w=l>>8&255,p=l&255,y=re(p,w,h,a),d=y in s?s[y]:s[y]=Ue(p,w,h,a,t);i[u]=d}else{let u=r==="rgb444"?oe:ne;for(let l=0;l<o;l++){let a=n[l],h=a>>16&255,w=a>>8&255,p=a&255,y=u(p,w,h),d=y in s?s[y]:s[y]=ke(p,w,h,t);i[l]=d}}return i}function Ue(e,t,r,n,o){let c=0,i=1e100;for(let s=0;s<o.length;s++){let g=o[s],u=g[3],l=_(u-n);if(l>i)continue;let a=g[0];if(l+=_(a-e),l>i)continue;let h=g[1];if(l+=_(h-t),l>i)continue;let w=g[2];l+=_(w-r),!(l>i)&&(i=l,c=s)}return c}function ke(e,t,r,n){let o=0,c=1e100;for(let i=0;i<n.length;i++){let s=n[i],g=s[0],u=_(g-e);if(u>c)continue;let l=s[1];if(u+=_(l-t),u>c)continue;let a=s[2];u+=_(a-r),!(u>c)&&(c=u,o=i)}return o}function _e(e,t,r=5){if(!e.length||!t.length)return;let n=e.map(i=>i.slice(0,3)),o=r*r,c=e[0].length;for(let i=0;i<t.length;i++){let s=t[i];s.length<c?s=[s[0],s[1],s[2],255]:s.length>c?s=s.slice(0,3):s=s.slice();let g=ce(n,s.slice(0,3),P),u=g[0],l=g[1];l>0&&l<=o&&(e[u]=s)}}function _(e){return e*e}function ie(e,t,r=P){let n=1/0,o=-1;for(let c=0;c<e.length;c++){let i=e[c],s=r(t,i);s<n&&(n=s,o=c)}return o}function ce(e,t,r=P){let n=1/0,o=-1;for(let c=0;c<e.length;c++){let i=e[c],s=r(t,i);s<n&&(n=s,o=c)}return[o,n]}function Ee(e,t,r=P){return e[ie(e,t,r)]}function se(e={}){let{initialCapacity:t=4096,auto:r=!0}=e,n=te(t),o=5003,c=new Uint8Array(256),i=new Int32Array(o),s=new Int32Array(o),g=!1;return{reset(){n.reset(),g=!1},finish(){n.writeByte(xe.trailer)},bytes(){return n.bytes()},bytesView(){return n.bytesView()},get buffer(){return n.buffer},get stream(){return n},writeHeader:u,writeFrame(l,a,h,w={}){let{transparent:p=!1,transparentIndex:y=0,delay:d=0,palette:f=null,repeat:B=0,colorDepth:A=8,dispose:b=-1}=w,C=!1;if(r?g||(C=!0,u(),g=!0):C=!!w.first,a=Math.max(0,Math.floor(a)),h=Math.max(0,Math.floor(h)),C){if(!f)throw new Error("First frame must include a { palette } option");De(n,a,h,f,A),$(n,f),B>=0&&Te(n,B)}let U=Math.round(d/10);ze(n,b,U,p,y);let m=!!f&&!C;qe(n,a,h,m?f:null),m&&$(n,f),Se(n,l,a,h,A,c,i,s)}};function u(){ae(n,"GIF89a")}}function ze(e,t,r,n,o){e.writeByte(33),e.writeByte(249),e.writeByte(4),o<0&&(o=0,n=!1);var c,i;n?(c=1,i=2):(c=0,i=0),t>=0&&(i=t&7),i<<=2,e.writeByte(0|i|0|c),k(e,r),e.writeByte(o||0),e.writeByte(0)}function De(e,t,r,n,o=8){let s=L(n.length)-1,g=128|o-1<<4|0|s,u=0,l=0;k(e,t),k(e,r),e.writeBytes([g,u,l])}function Te(e,t){e.writeByte(33),e.writeByte(255),e.writeByte(11),ae(e,"NETSCAPE2.0"),e.writeByte(3),e.writeByte(1),k(e,t),e.writeByte(0)}function $(e,t){let r=1<<L(t.length);for(let n=0;n<r;n++){let o=[0,0,0];n<t.length&&(o=t[n]),e.writeByte(o[0]),e.writeByte(o[1]),e.writeByte(o[2])}}function qe(e,t,r,n){if(e.writeByte(44),k(e,0),k(e,0),k(e,t),k(e,r),n){let i=L(n.length)-1;e.writeByte(128|i)}else e.writeByte(0)}function Se(e,t,r,n,o=8,c,i,s){Ce(r,n,t,o,e,c,i,s)}function k(e,t){e.writeByte(t&255),e.writeByte(t>>8&255)}function ae(e,t){for(var r=0;r<t.length;r++)e.writeByte(t.charCodeAt(r))}function L(e){return Math.max(Math.ceil(Math.log2(e)),1)}var Re=se});var q=X(N(),1);var D=X(N(),1),{GIFEncoder:Pe}=D.GIFEncoder?D:D.default;function le(e,t,r,n,o){let c=t.map(([d,f,B])=>d|f<<8|B<<16),i=new Uint32Array(e.length);for(let d=0;d<e.length;d++)i[d]=c[e[d]];let s=r,g=n,u=-1,l=-1,a=new Uint8Array(256);for(let d=0;d<i.length;d++)if(!o||i[d]!==o[d]){let f=d%r,B=Math.floor(d/r);s=Math.min(s,f),g=Math.min(g,B),u=Math.max(u,f),l=Math.max(l,B),a[e[d]]=1}if(u<0)return{pixels:i,frame:null};let h=o?a.indexOf(0):-1;h===t.length&&t.push([0,0,0]);let w=u-s+1,p=l-g+1,y=new Uint8Array(w*p);for(let d=0;d<p;d++)for(let f=0;f<w;f++){let B=(g+d)*r+s+f;y[d*w+f]=h>=0&&i[B]===o[B]?h:e[B]}return{pixels:i,frame:{index:y,palette:t,width:w,height:p,left:s,top:g,transparentIndex:h}}}function fe(e,t){let r=Pe({auto:!1});if(t&&r.writeHeader(),r.writeFrame(e.index,e.width,e.height,{first:t,palette:e.palette,delay:e.delay,repeat:0,colorDepth:Math.max(2,Math.ceil(Math.log2(e.palette.length))),dispose:1,transparent:e.transparentIndex>=0,transparentIndex:e.transparentIndex}),!t){if(r.bytesView()[8]!==44)throw new Error("GIF 编码器的帧结构不兼容");let n=new DataView(r.buffer);n.setUint16(9,e.left,!0),n.setUint16(11,e.top,!0)}return r.bytesView()}var{quantize:Ve,applyPalette:Oe}=q.quantize?q:q.default,T=null;function Je(e){let t=Ve(e,256);return{palette:t,index:Oe(e,t)}}function We(e){if(e.command==="capture")try{(!T||T.width!==e.width||T.height!==e.height)&&(T=new OffscreenCanvas(e.width,e.height));let t=T.getContext("2d",{willReadFrequently:!0});if(!t)throw new Error("Worker 不支持 Canvas 2D");return t.drawImage(e.bitmap,0,0,e.width,e.height),{pixels:t.getImageData(0,0,e.width,e.height).data}}finally{e.bitmap.close()}return e.command==="compare"?le(e.index,e.palette,e.width,e.height,e.previousPixels):e.command==="encode"?{bytes:fe(e.frame,e.first)}:Je(e.pixels)}if(typeof self<"u"&&!self.document){let e=self;e.onmessage=({data:t})=>{let{id:r}=t;try{let n=We(t),o=t.command==="capture"?[n.pixels.buffer]:t.command==="compare"?[n.pixels.buffer,...n.frame?[n.frame.index.buffer]:[]]:[(n.bytes||n.index).buffer];e.postMessage({id:r,...n},o)}catch(n){e.postMessage({id:r,error:n.message})}}}})();\n' : "";
+  var workerSource = true ? '"use strict";(()=>{var ue=Object.create;var K=Object.defineProperty;var ge=Object.getOwnPropertyDescriptor;var he=Object.getOwnPropertyNames;var de=Object.getPrototypeOf,pe=Object.prototype.hasOwnProperty;var ye=(e,t)=>()=>(t||e((t={exports:{}}).exports,t),t.exports);var we=(e,t,r,n)=>{if(t&&typeof t=="object"||typeof t=="function")for(let o of he(t))!pe.call(e,o)&&o!==r&&K(e,o,{get:()=>t[o],enumerable:!(n=ge(t,o))||n.enumerable});return e};var X=(e,t,r)=>(r=e!=null?ue(de(e)):{},we(t||!e||!e.__esModule?K(r,"default",{value:e,enumerable:!0}):r,e));var N=ye(j=>{var ee=Object.defineProperty,be=e=>ee(e,"__esModule",{value:!0}),me=(e,t)=>{for(var r in t)ee(e,r,{get:t[r],enumerable:!0})};be(j);me(j,{GIFEncoder:()=>se,applyPalette:()=>Fe,default:()=>Re,nearestColor:()=>Ee,nearestColorIndex:()=>ie,nearestColorIndexWithDistance:()=>ce,prequantize:()=>Ge,quantize:()=>Ie,snapColorsToPalette:()=>_e});var xe={signature:"GIF",version:"89a",trailer:59,extensionIntroducer:33,applicationExtensionLabel:255,graphicControlExtensionLabel:249,imageSeparator:44,signatureSize:3,versionSize:3,globalColorTableFlagMask:128,colorResolutionMask:112,sortFlagMask:8,globalColorTableSizeMask:7,applicationIdentifierSize:8,applicationAuthCodeSize:3,disposalMethodMask:28,userInputFlagMask:2,transparentColorFlagMask:1,localColorTableFlagMask:128,interlaceFlagMask:64,idSortFlagMask:32,localColorTableSizeMask:7};function te(e=256){let t=0,r=new Uint8Array(e);return{get buffer(){return r.buffer},reset(){t=0},bytesView(){return r.subarray(0,t)},bytes(){return r.slice(0,t)},writeByte(o){n(t+1),r[t]=o,t++},writeBytes(o,c=0,i=o.length){n(t+i);for(let s=0;s<i;s++)r[t++]=o[s+c]},writeBytesView(o,c=0,i=o.byteLength){n(t+i),r.set(o.subarray(c,c+i),t),t+=i}};function n(o){var c=r.length;if(c>=o)return;var i=1024*1024;o=Math.max(o,c*(c<i?2:1.125)>>>0),c!=0&&(o=Math.max(o,256));let s=r;r=new Uint8Array(o),t>0&&r.set(s.subarray(0,t),0)}}var W=12,Y=5003,Ae=[0,1,3,7,15,31,63,127,255,511,1023,2047,4095,8191,16383,32767,65535];function Be(e,t,r,n,o=te(512),c=new Uint8Array(256),i=new Int32Array(Y),s=new Int32Array(Y)){let g=i.length,u=Math.max(2,n);c.fill(0),s.fill(0),i.fill(-1);let l=0,a=0,h=u+1,w=h,p=!1,y=w,d=(1<<y)-1,f=1<<h-1,B=f+1,A=f+2,b=0,C=r[0],U=0;for(let x=g;x<65536;x*=2)++U;U=8-U,o.writeByte(u),I(f);let m=r.length;for(let x=1;x<m;x++)e:{let G=r[x],F=(G<<W)+C,M=G<<U^C;if(i[M]===F){C=s[M];break e}let V=M===0?1:g-M;for(;i[M]>=0;)if(M-=V,M<0&&(M+=g),i[M]===F){C=s[M];break e}I(C),C=G,A<1<<W?(s[M]=A++,i[M]=F):(i.fill(-1),A=f+2,p=!0,I(f))}return I(C),I(B),o.writeByte(0),o.bytesView();function I(x){for(l&=Ae[a],a>0?l|=x<<a:l=x,a+=y;a>=8;)c[b++]=l&255,b>=254&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0),l>>=8,a-=8;if((A>d||p)&&(p?(y=w,d=(1<<y)-1,p=!1):(++y,d=y===W?1<<y:(1<<y)-1)),x==B){for(;a>0;)c[b++]=l&255,b>=254&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0),l>>=8,a-=8;b>0&&(o.writeByte(b),o.writeBytesView(c,0,b),b=0)}}}var Ce=Be;function ne(e,t,r){return e<<8&63488|t<<2&992|r>>3}function re(e,t,r,n){return e>>4|t&240|(r&240)<<4|(n&240)<<8}function oe(e,t,r){return e>>4<<8|t&240|r>>4}function S(e,t,r){return e<t?t:e>r?r:e}function z(e){return e*e}function Q(e,t,r){var n=0,o=1e100;let c=e[t],i=c.cnt,s=c.ac,g=c.rc,u=c.gc,l=c.bc;for(var a=c.fw;a!=0;a=e[a].fw){let w=e[a],p=w.cnt,y=i*p/(i+p);if(!(y>=o)){var h=0;r&&(h+=y*z(w.ac-s),h>=o)||(h+=y*z(w.rc-g),!(h>=o)&&(h+=y*z(w.gc-u),!(h>=o)&&(h+=y*z(w.bc-l),!(h>=o)&&(o=h,n=a))))}}c.err=o,c.nn=n}function H(){return{ac:0,rc:0,gc:0,bc:0,cnt:0,nn:0,fw:0,bk:0,tm:0,mtm:0,err:0}}function Me(e,t){let r=t==="rgb444"?4096:65536,n=new Array(r),o=e.length;if(t==="rgba4444")for(let c=0;c<o;++c){let i=e[c],s=i>>24&255,g=i>>16&255,u=i>>8&255,l=i&255,a=re(l,u,g,s),h=a in n?n[a]:n[a]=H();h.rc+=l,h.gc+=u,h.bc+=g,h.ac+=s,h.cnt++}else if(t==="rgb444")for(let c=0;c<o;++c){let i=e[c],s=i>>16&255,g=i>>8&255,u=i&255,l=oe(u,g,s),a=l in n?n[l]:n[l]=H();a.rc+=u,a.gc+=g,a.bc+=s,a.cnt++}else for(let c=0;c<o;++c){let i=e[c],s=i>>16&255,g=i>>8&255,u=i&255,l=ne(u,g,s),a=l in n?n[l]:n[l]=H();a.rc+=u,a.gc+=g,a.bc+=s,a.cnt++}return n}function Ie(e,t,r={}){let{format:n="rgb565",clearAlpha:o=!0,clearAlphaColor:c=0,clearAlphaThreshold:i=0,oneBitAlpha:s=!1}=r;if(!e||!e.buffer)throw new Error("quantize() expected RGBA Uint8Array data");if(!(e instanceof Uint8Array)&&!(e instanceof Uint8ClampedArray))throw new Error("quantize() expected RGBA Uint8Array data");let g=new Uint32Array(e.buffer),u=r.useSqrt!==!1,l=n==="rgba4444",a=Me(g,n),h=a.length,w=h-1,p=new Uint32Array(h+1);for(var y=0,f=0;f<h;++f){let v=a[f];if(v!=null){var d=1/v.cnt;l&&(v.ac*=d),v.rc*=d,v.gc*=d,v.bc*=d,a[y++]=v}}z(t)/y<.022&&(u=!1);for(var f=0;f<y-1;++f)a[f].fw=f+1,a[f+1].bk=f,u&&(a[f].cnt=Math.sqrt(a[f].cnt));u&&(a[f].cnt=Math.sqrt(a[f].cnt));var B,A,b;for(f=0;f<y;++f){Q(a,f,!1);var C=a[f].err;for(A=++p[0];A>1&&(b=A>>1,!(a[B=p[b]].err<=C));A=b)p[A]=B;p[A]=f}var U=y-t;for(f=0;f<U;){for(var m;;){var I=p[1];if(m=a[I],m.tm>=m.mtm&&a[m.nn].mtm<=m.tm)break;m.mtm==w?I=p[1]=p[p[0]--]:(Q(a,I,!1),m.tm=f);var C=a[I].err;for(A=1;(b=A+A)<=p[0]&&(b<p[0]&&a[p[b]].err>a[p[b+1]].err&&b++,!(C<=a[B=p[b]].err));A=b)p[A]=B;p[A]=I}var x=a[m.nn],G=m.cnt,F=x.cnt,d=1/(G+F);l&&(m.ac=d*(G*m.ac+F*x.ac)),m.rc=d*(G*m.rc+F*x.rc),m.gc=d*(G*m.gc+F*x.gc),m.bc=d*(G*m.bc+F*x.bc),m.cnt+=x.cnt,m.mtm=++f,a[x.bk].fw=x.fw,a[x.fw].bk=x.bk,x.mtm=w}let M=[];var V=0;for(f=0;;++V){let O=S(Math.round(a[f].rc),0,255),v=S(Math.round(a[f].gc),0,255),J=S(Math.round(a[f].bc),0,255),E=255;l&&(E=S(Math.round(a[f].ac),0,255),s&&(E=E<=(typeof s=="number"?s:127)?0:255),o&&E<=i&&(O=v=J=c,E=0));let Z=l?[O,v,J,E]:[O,v,J];if(ve(M,Z)||M.push(Z),(f=a[f].fw)==0)break}return M}function ve(e,t){for(let r=0;r<e.length;r++){let n=e[r],o=n[0]===t[0]&&n[1]===t[1]&&n[2]===t[2],c=n.length>=4&&t.length>=4?n[3]===t[3]:!0;if(o&&c)return!0}return!1}function P(e,t){var r=0,n;for(n=0;n<e.length;n++){let o=e[n]-t[n];r+=o*o}return r}function R(e,t){return t>1?Math.round(e/t)*t:e}function Ge(e,{roundRGB:t=5,roundAlpha:r=10,oneBitAlpha:n=null}={}){let o=new Uint32Array(e.buffer);for(let c=0;c<o.length;c++){let i=o[c],s=i>>24&255,g=i>>16&255,u=i>>8&255,l=i&255;s=R(s,r),n&&(s=s<=(typeof n=="number"?n:127)?0:255),l=R(l,t),u=R(u,t),g=R(g,t),o[c]=s<<24|g<<16|u<<8|l<<0}}function Fe(e,t,r="rgb565"){if(!e||!e.buffer)throw new Error("quantize() expected RGBA Uint8Array data");if(!(e instanceof Uint8Array)&&!(e instanceof Uint8ClampedArray))throw new Error("quantize() expected RGBA Uint8Array data");if(t.length>256)throw new Error("applyPalette() only works with 256 colors or less");let n=new Uint32Array(e.buffer),o=n.length,c=r==="rgb444"?4096:65536,i=new Uint8Array(o),s=new Array(c),g=r==="rgba4444";if(r==="rgba4444")for(let u=0;u<o;u++){let l=n[u],a=l>>24&255,h=l>>16&255,w=l>>8&255,p=l&255,y=re(p,w,h,a),d=y in s?s[y]:s[y]=Ue(p,w,h,a,t);i[u]=d}else{let u=r==="rgb444"?oe:ne;for(let l=0;l<o;l++){let a=n[l],h=a>>16&255,w=a>>8&255,p=a&255,y=u(p,w,h),d=y in s?s[y]:s[y]=ke(p,w,h,t);i[l]=d}}return i}function Ue(e,t,r,n,o){let c=0,i=1e100;for(let s=0;s<o.length;s++){let g=o[s],u=g[3],l=_(u-n);if(l>i)continue;let a=g[0];if(l+=_(a-e),l>i)continue;let h=g[1];if(l+=_(h-t),l>i)continue;let w=g[2];l+=_(w-r),!(l>i)&&(i=l,c=s)}return c}function ke(e,t,r,n){let o=0,c=1e100;for(let i=0;i<n.length;i++){let s=n[i],g=s[0],u=_(g-e);if(u>c)continue;let l=s[1];if(u+=_(l-t),u>c)continue;let a=s[2];u+=_(a-r),!(u>c)&&(c=u,o=i)}return o}function _e(e,t,r=5){if(!e.length||!t.length)return;let n=e.map(i=>i.slice(0,3)),o=r*r,c=e[0].length;for(let i=0;i<t.length;i++){let s=t[i];s.length<c?s=[s[0],s[1],s[2],255]:s.length>c?s=s.slice(0,3):s=s.slice();let g=ce(n,s.slice(0,3),P),u=g[0],l=g[1];l>0&&l<=o&&(e[u]=s)}}function _(e){return e*e}function ie(e,t,r=P){let n=1/0,o=-1;for(let c=0;c<e.length;c++){let i=e[c],s=r(t,i);s<n&&(n=s,o=c)}return o}function ce(e,t,r=P){let n=1/0,o=-1;for(let c=0;c<e.length;c++){let i=e[c],s=r(t,i);s<n&&(n=s,o=c)}return[o,n]}function Ee(e,t,r=P){return e[ie(e,t,r)]}function se(e={}){let{initialCapacity:t=4096,auto:r=!0}=e,n=te(t),o=5003,c=new Uint8Array(256),i=new Int32Array(o),s=new Int32Array(o),g=!1;return{reset(){n.reset(),g=!1},finish(){n.writeByte(xe.trailer)},bytes(){return n.bytes()},bytesView(){return n.bytesView()},get buffer(){return n.buffer},get stream(){return n},writeHeader:u,writeFrame(l,a,h,w={}){let{transparent:p=!1,transparentIndex:y=0,delay:d=0,palette:f=null,repeat:B=0,colorDepth:A=8,dispose:b=-1}=w,C=!1;if(r?g||(C=!0,u(),g=!0):C=!!w.first,a=Math.max(0,Math.floor(a)),h=Math.max(0,Math.floor(h)),C){if(!f)throw new Error("First frame must include a { palette } option");De(n,a,h,f,A),$(n,f),B>=0&&Te(n,B)}let U=Math.round(d/10);ze(n,b,U,p,y);let m=!!f&&!C;qe(n,a,h,m?f:null),m&&$(n,f),Se(n,l,a,h,A,c,i,s)}};function u(){ae(n,"GIF89a")}}function ze(e,t,r,n,o){e.writeByte(33),e.writeByte(249),e.writeByte(4),o<0&&(o=0,n=!1);var c,i;n?(c=1,i=2):(c=0,i=0),t>=0&&(i=t&7),i<<=2,e.writeByte(0|i|0|c),k(e,r),e.writeByte(o||0),e.writeByte(0)}function De(e,t,r,n,o=8){let s=L(n.length)-1,g=128|o-1<<4|0|s,u=0,l=0;k(e,t),k(e,r),e.writeBytes([g,u,l])}function Te(e,t){e.writeByte(33),e.writeByte(255),e.writeByte(11),ae(e,"NETSCAPE2.0"),e.writeByte(3),e.writeByte(1),k(e,t),e.writeByte(0)}function $(e,t){let r=1<<L(t.length);for(let n=0;n<r;n++){let o=[0,0,0];n<t.length&&(o=t[n]),e.writeByte(o[0]),e.writeByte(o[1]),e.writeByte(o[2])}}function qe(e,t,r,n){if(e.writeByte(44),k(e,0),k(e,0),k(e,t),k(e,r),n){let i=L(n.length)-1;e.writeByte(128|i)}else e.writeByte(0)}function Se(e,t,r,n,o=8,c,i,s){Ce(r,n,t,o,e,c,i,s)}function k(e,t){e.writeByte(t&255),e.writeByte(t>>8&255)}function ae(e,t){for(var r=0;r<t.length;r++)e.writeByte(t.charCodeAt(r))}function L(e){return Math.max(Math.ceil(Math.log2(e)),1)}var Re=se});var q=X(N(),1);var D=X(N(),1),{GIFEncoder:Pe}=D.GIFEncoder?D:D.default;function le(e,t,r,n,o){let c=t.map(([d,f,B])=>d|f<<8|B<<16),i=new Uint32Array(e.length);for(let d=0;d<e.length;d++)i[d]=c[e[d]];let s=r,g=n,u=-1,l=-1,a=new Uint8Array(256);for(let d=0;d<i.length;d++)if(!o||i[d]!==o[d]){let f=d%r,B=Math.floor(d/r);s=Math.min(s,f),g=Math.min(g,B),u=Math.max(u,f),l=Math.max(l,B),a[e[d]]=1}if(u<0)return{pixels:i,frame:null};let h=o?a.indexOf(0):-1;h===t.length&&t.push([0,0,0]);let w=u-s+1,p=l-g+1,y=new Uint8Array(w*p);for(let d=0;d<p;d++)for(let f=0;f<w;f++){let B=(g+d)*r+s+f;y[d*w+f]=h>=0&&i[B]===o[B]?h:e[B]}return{pixels:i,frame:{index:y,palette:t,width:w,height:p,left:s,top:g,transparentIndex:h}}}function fe(e,t){let r=Pe({auto:!1});if(t&&r.writeHeader(),r.writeFrame(e.index,e.width,e.height,{first:t,palette:e.palette,delay:e.delay,repeat:0,colorDepth:Math.max(2,Math.ceil(Math.log2(e.palette.length))),dispose:1,transparent:e.transparentIndex>=0,transparentIndex:e.transparentIndex}),!t){if(r.bytesView()[8]!==44)throw new Error("GIF 编码器的帧结构不兼容");let n=new DataView(r.buffer);n.setUint16(9,e.left,!0),n.setUint16(11,e.top,!0)}return r.bytes()}var{quantize:Ve,applyPalette:Oe}=q.quantize?q:q.default,T=null;function Je(e){let t=Ve(e,256);return{palette:t,index:Oe(e,t)}}function We(e){if(e.command==="capture")try{(!T||T.width!==e.width||T.height!==e.height)&&(T=new OffscreenCanvas(e.width,e.height));let t=T.getContext("2d",{willReadFrequently:!0});if(!t)throw new Error("Worker 不支持 Canvas 2D");return t.drawImage(e.bitmap,0,0,e.width,e.height),{pixels:t.getImageData(0,0,e.width,e.height).data}}finally{e.bitmap.close()}return e.command==="compare"?le(e.index,e.palette,e.width,e.height,e.previousPixels):e.command==="encode"?{bytes:fe(e.frame,e.first)}:Je(e.pixels)}if(typeof self<"u"&&!self.document){let e=self;e.onmessage=({data:t})=>{let{id:r}=t;try{let n=We(t),o=t.command==="capture"?[n.pixels.buffer]:t.command==="compare"?[n.pixels.buffer,...n.frame?[n.frame.index.buffer]:[]]:[(n.bytes||n.index).buffer];e.postMessage({id:r,...n},o)}catch(n){e.postMessage({id:r,error:n.message})}}}})();\n' : "";
   function waitForVideo(video, eventName, action) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => finish(new Error("视频解码超时")), 3e4);
@@ -2640,7 +2681,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         result.catch(() => {
         });
         encoding.push(result);
-        if (encoding.length > 2) encodedParts.push((await encoding.shift()).bytes);
+        if (encoding.length > 2) encodedParts.push(new Blob([(await encoding.shift()).bytes], { type: "image/gif" }));
       }
       async function consumeFrame() {
         const { result, delay } = queuedFrames.shift();
@@ -2709,7 +2750,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
       while (queuedFrames.length) await consumeFrame();
       await writeFrame(pendingFrame);
-      while (encoding.length) encodedParts.push((await encoding.shift()).bytes);
+      while (encoding.length) encodedParts.push(new Blob([(await encoding.shift()).bytes], { type: "image/gif" }));
       return new Blob([...encodedParts, new Uint8Array([59])], { type: "image/gif" });
     } finally {
       workers?.release();
@@ -4238,15 +4279,13 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       }
     }
     async function downloadBlob(blob, filename) {
-      try {
-        return downloadBlobWithAnchor(blob, filename);
-      } catch (error) {
-        log("浏览器原生保存失败，回退 GM_download:", filename, error.message);
-        const gmResult = await tryGmDownload(blob, filename);
-        return gmResult.ok || downloadBlobWithAnchor(blob, filename);
+      const gmResult = await tryGmDownload(blob, filename);
+      if (gmResult.ok) {
+        return true;
       }
+      log("Blob GM_download失败，回退浏览器原生保存:", filename, gmResult.error);
+      return downloadBlobWithAnchor(blob, filename);
     }
-    let directDownloadFallbackCount = 0;
     async function downloadImage(url, filename) {
       if (platform.id === "x" && /^https?:\/\/pbs\.twimg\.com\//i.test(url)) {
         return downloadImageFallback(url, filename);
@@ -4254,9 +4293,6 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       const direct = await tryGmDownload(url, filename);
       if (direct.ok) {
         return true;
-      }
-      if (direct.error !== "unavailable") {
-        directDownloadFallbackCount++;
       }
       try {
         const blob = await fetchMediaBlob(url);
@@ -4381,75 +4417,56 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       log(`开始下载 ${mediaItems.length} 个媒体项，共 ${jobs.length} 个文件...`);
       let successCount = 0;
       let failedCount = 0;
-      let failedGifCount = 0;
-      let failedLivePhotoMergeCount = 0;
-      let livePhotoFallbackSavedCount = 0;
       let handedOffCount = 0;
-      directDownloadFallbackCount = 0;
-      for (let i = 0; i < jobs.length; i++) {
-        const job = jobs[i];
-        const isLastJob = i === jobs.length - 1;
-        const delayBetweenJobs = async () => {
-          if (!isLastJob) {
-            await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS));
-          }
-        };
-        if (job.livePhotoVideoUrl && job.livePhotoPair) {
-          const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
-          for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false, false]) {
-            if (outcome) {
-              successCount++;
-              if (outcome === "started") {
-                handedOffCount++;
-              }
-            } else {
-              failedCount++;
-            }
-          }
-          await delayBetweenJobs();
-          continue;
-        }
-        if (job.livePhotoVideoUrl) {
-          const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
-          if (merged) {
-            successCount++;
-            if (merged === "started") {
-              handedOffCount++;
-            }
-          } else {
-            failedLivePhotoMergeCount++;
-            log("LivePhoto合并失败，回退为分别下载:", job.filename);
-            const baseName = job.filename.replace(/(\.MP)?\.[a-z0-9]+$/i, "") || job.filename;
-            const pairResult = await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, `${baseName}.jpg`);
-            for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false, false]) {
-              if (outcome) {
-                successCount++;
-                livePhotoFallbackSavedCount++;
-                if (outcome === "started") {
-                  handedOffCount++;
-                }
-              } else {
-                failedCount++;
-              }
-            }
-          }
-          await delayBetweenJobs();
-          continue;
-        }
-        const success = job.convertToGif ? await downloadXGif(job.url, job.filename) : await downloadImage(job.url, job.filename);
-        if (success) {
+      const recordOutcome = (outcome) => {
+        if (outcome) {
           successCount++;
-          if (success === "started") {
+          if (outcome === "started") {
             handedOffCount++;
           }
         } else {
           failedCount++;
-          if (job.convertToGif) {
-            failedGifCount++;
+        }
+      };
+      const recordPairOutcome = (pairResult) => {
+        for (const outcome of pairResult ? [pairResult.image, pairResult.video] : [false, false]) {
+          recordOutcome(outcome);
+        }
+      };
+      const runDownloadJob = async (job) => {
+        try {
+          if (job.livePhotoVideoUrl && job.livePhotoPair) {
+            recordPairOutcome(await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename));
+            return;
+          }
+          if (job.livePhotoVideoUrl) {
+            const merged = await downloadMergedLivePhoto(job.url, job.livePhotoVideoUrl, job.filename);
+            if (merged) {
+              recordOutcome(merged);
+            } else {
+              log("LivePhoto合并失败，回退为分别下载:", job.filename);
+              const baseName = job.filename.replace(/(\.MP)?\.[a-z0-9]+$/i, "") || job.filename;
+              recordPairOutcome(await downloadPairedLivePhoto(job.url, job.livePhotoVideoUrl, `${baseName}.jpg`));
+            }
+            return;
+          }
+          recordOutcome(job.convertToGif ? await downloadXGif(job.url, job.filename) : await downloadImage(job.url, job.filename));
+        } catch (error) {
+          log("下载任务异常:", job.filename, error.message);
+          failedCount++;
+        }
+      };
+      const maxConcurrency = jobs.some((job) => job.convertToGif) ? 2 : Math.min(3, Math.max(2, (windowRef.navigator?.hardwareConcurrency || 4) - 1));
+      let nextJob = 0;
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(maxConcurrency, jobs.length)) }, async () => {
+        while (nextJob < jobs.length) {
+          const job = jobs[nextJob++];
+          await runDownloadJob(job);
+          if (nextJob < jobs.length && config.DELAY_MS > 0) {
+            await new Promise((resolve) => setTimeout(resolve, config.DELAY_MS * (0.5 + Math.random())));
           }
         }
-        await delayBetweenJobs();
-      }
+      }));
       let message = "";
       if (failedCount === 0) {
         const allVideos = mediaItems.length > 0 && mediaItems.every((item) => item.kind === "video");
@@ -4466,16 +4483,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         message = `已下载 ${successCount} 个文件，${failedCount} 个失败`;
       }
       if (handedOffCount > 0) {
-        message = `已发起 ${successCount} 个文件的下载${failedCount > 0 ? `，${failedCount} 个失败` : ""}；请查看浏览器下载列表`;
-      }
-      if (failedGifCount > 0) {
-        message += "；X GIF转换或保存失败，可关闭自动转换下载 MP4 源";
-      }
-      if (livePhotoFallbackSavedCount > 0) {
-        message += "；部分LivePhoto未能合并，已分别保存图片与视频";
-      }
-      if (directDownloadFallbackCount > 0) {
-        message += "；部分文件已改用浏览器保存，若弹出保存位置询问，请在 Tampermonkey 中允许下载权限";
+        message = `已发起 ${successCount} 个文件的下载${failedCount > 0 ? `，${failedCount} 个失败` : ""}`;
       }
       log(message);
       if (ui2 && typeof ui2.showToast === "function") {
@@ -4549,6 +4557,15 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           setTimeout(() => toast.remove(), 300);
         }
       }, duration);
+    }
+    function scheduleAuthorMissingHint(author) {
+      if (author || typeof utils2.getCurrentPlatform !== "function" || utils2.getCurrentPlatform() !== "x") {
+        return;
+      }
+      if (!(config.FILENAME_TEMPLATE_X || "").includes("{author}")) {
+        return;
+      }
+      setTimeout(() => showToast("未能识别作者，命名模板中的 {author} 已省略"), 3400);
     }
     function findImagesInPost(container) {
       return platform.findImagesInPost(container);
@@ -4640,7 +4657,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       btn.disabled = busy;
       btn.setAttribute("data-download-state", status);
       btn.setAttribute("aria-busy", String(busy));
-      btn.title = status === "started" ? "已发起下载，请查看浏览器下载列表" : status === "failed" ? "下载失败，请重试" : labels[status] ? `${labels[status]}${busy ? "，请稍候" : ""}` : downloadButtonTitle;
+      btn.title = status === "started" ? "已发起下载" : status === "failed" ? "下载失败，请重试" : labels[status] ? `${labels[status]}${busy ? "，请稍候" : ""}` : downloadButtonTitle;
       btn.setAttribute("aria-label", labels[status] ? btn.title : `下载 ${count} 个媒体项；${downloadButtonTitle}`);
       if (previousWidth > 0 && typeof btn.animate === "function" && !windowRef.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         const nextWidth = btn.getBoundingClientRect().width;
@@ -5091,6 +5108,7 @@ OR OTHER DEALINGS IN THE SOFTWARE.
           const author = typeof platform.getPostAuthor === "function" ? platform.getPostAuthor(postContainer) : "";
           const result = await utils2.downloadMediaItems(mediaItems, postId, { author });
           task.status = !result || result.failedCount > 0 || result.successCount === 0 ? "failed" : result.handedOffCount > 0 ? "started" : "completed";
+          scheduleAuthorMissingHint(author);
         } catch (error) {
           utils2.log("下载失败:", error.message);
           task.status = "failed";
@@ -5439,6 +5457,11 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     let livePhotoMergeMenuId = null;
     let livePhotoMergeMenuRegistered = false;
     registerLivePhotoMergeMenu();
+    GM_registerMenuCommand("常见问题", () => {
+      if (typeof GM_openInTab === "function") {
+        GM_openInTab("https://github.com/gbandszxc/weibo-image-downloader/blob/main/docs/FAQ.md", { active: true });
+      }
+    });
   }
   var getVideoDownloadMenuText2;
   var registerVideoDownloadMenu2;

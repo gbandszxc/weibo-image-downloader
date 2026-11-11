@@ -91,5 +91,7 @@ export function encodeGifFrame(frame: GifFrame, first: boolean): Uint8Array {
         view.setUint16(9, frame.left, true);
         view.setUint16(11, frame.top, true);
     }
-    return gif.bytesView();
+    // bytes() 为右尺寸拷贝：bytesView 会连同 gifenc 内部含增长余量的整块缓冲一起
+    // 被 postMessage 转移/持有，逐帧拷贝可让余量缓冲即刻可回收。
+    return gif.bytes();
 }

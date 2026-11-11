@@ -218,4 +218,10 @@ if (typeof GM_registerMenuCommand === "function") {
         livePhotoMergeMenuRegistered = true;
     }
     registerLivePhotoMergeMenu();
+
+    GM_registerMenuCommand("常见问题", () => {
+        if (typeof GM_openInTab === "function") {
+            GM_openInTab("https://github.com/gbandszxc/weibo-image-downloader/blob/main/docs/FAQ.md", { active: true });
+        }
+    });
 }

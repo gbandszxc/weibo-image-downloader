@@ -72,8 +72,9 @@ export async function convertXVideoToGif(blob: Blob, windowRef: GifWindowLike): 
             throw new Error("浏览器不支持 Canvas 2D");
         }
 
-        // gifenc 的字节缓冲均为普通 ArrayBuffer，故元素类型可收窄为 <ArrayBuffer> 以满足 BlobPart。
-        const encodedParts: Uint8Array<ArrayBuffer>[] = [];
+        // 逐帧立即包成 Blob：帧字节即刻脱离 gifenc 内部含增长余量的缓冲，避免全部帧
+        // 攒到最后一次性拼接时出现约两倍 GIF 体积的峰值内存；输出字节不变。
+        const encodedParts: Blob[] = [];
         const encoding: Promise<{ bytes: Uint8Array }>[] = [];
         let firstFrame = true;
         // shortcut: 按 20 FPS 采样，若需要保留更高帧率则改用逐帧解码。
@@ -94,7 +95,7 @@ export async function convertXVideoToGif(blob: Blob, windowRef: GifWindowLike): 
             firstFrame = false;
             result.catch(() => {});
             encoding.push(result);
-            if (encoding.length > 2) encodedParts.push((await encoding.shift()!).bytes as Uint8Array<ArrayBuffer>);
+            if (encoding.length > 2) encodedParts.push(new Blob([(await encoding.shift()!).bytes as BlobPart], { type: "image/gif" }));
         }
 
         async function consumeFrame(): Promise<void> {
@@ -168,7 +169,7 @@ export async function convertXVideoToGif(blob: Blob, windowRef: GifWindowLike): 
         }
         while (queuedFrames.length) await consumeFrame();
         await writeFrame(pendingFrame!);
-        while (encoding.length) encodedParts.push((await encoding.shift()!).bytes as Uint8Array<ArrayBuffer>);
+        while (encoding.length) encodedParts.push(new Blob([(await encoding.shift()!).bytes as BlobPart], { type: "image/gif" }));
         return new Blob([...encodedParts, new Uint8Array([0x3b])], { type: "image/gif" });
     } finally {
         workers?.release();

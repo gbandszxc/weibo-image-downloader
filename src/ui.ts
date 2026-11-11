@@ -26,6 +26,8 @@ export interface UiDownloadResult {
 export interface UiConfig {
     MEDIA_RESOLVE_RETRY_COOLDOWN_MS: number;
     LONG_PRESS_MS: number;
+    /** X 文件名模板，用于判断作者缺失提示是否与用户命名相关；缺省视为不含 {author} */
+    FILENAME_TEMPLATE_X?: string;
 }
 
 /** 文件命名设置面板的当前值与保存结果（weibo/x 各一份模板）。 */
@@ -61,6 +63,7 @@ export interface UiPlatformAdapter {
 /** ui 内部实际调用的 utils 最小形状。 */
 export interface UiUtils {
     getPlatformAdapter(): UiPlatformAdapter;
+    getCurrentPlatform?(): string;
     getOriginalImageUrl(url: string): string | null;
     getFileExtensionFromUrl(url: string, fallback: string): string;
     log(...args: unknown[]): void;
@@ -178,6 +181,19 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
         }, duration);
     }
 
+    // 作者采集失败时模板中的 {author} 被压缩省略，产物与默认模板一致，用户难以区分
+    // 「模板没生效」和「作者缺失」。结果提示显示约 3s 后再补一条说明，延迟弹出避免
+    // 两条 toast 相互覆盖；仅在 X 平台且模板确实用到 {author} 时提示。
+    function scheduleAuthorMissingHint(author: string | null | undefined): void {
+        if (author || typeof utils.getCurrentPlatform !== "function" || utils.getCurrentPlatform() !== "x") {
+            return;
+        }
+        if (!(config.FILENAME_TEMPLATE_X || "").includes("{author}")) {
+            return;
+        }
+        setTimeout(() => showToast("未能识别作者，命名模板中的 {author} 已省略"), 3400);
+    }
+
     function findImagesInPost(container: Element): HTMLImageElement[] {
         return platform.findImagesInPost(container);
     }
@@ -284,7 +300,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
         btn.disabled = busy;
         btn.setAttribute("data-download-state", status);
         btn.setAttribute("aria-busy", String(busy));
-        btn.title = status === "started" ? "已发起下载，请查看浏览器下载列表"
+        btn.title = status === "started" ? "已发起下载"
             : (status === "failed" ? "下载失败，请重试"
                 : (labels[status] ? `${labels[status]}${busy ? "，请稍候" : ""}` : downloadButtonTitle));
         btn.setAttribute("aria-label", labels[status] ? btn.title : `下载 ${count} 个媒体项；${downloadButtonTitle}`);
@@ -850,6 +866,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
                 const result = await utils.downloadMediaItems(mediaItems, postId, { author });
                 task.status = !result || result.failedCount > 0 || result.successCount === 0
                     ? "failed" : (result.handedOffCount > 0 ? "started" : "completed");
+                scheduleAuthorMissingHint(author);
             } catch (error) {
                 utils.log("下载失败:", (error as Error).message);
                 task.status = "failed";
