@@ -43,7 +43,9 @@
 .weibo-img-select-modal {
     width: 100%;
     max-width: 560px;
+    /* 高度随内容自适应；超出视口可用高度时才在网格内部滚动 */
     max-height: 80vh;
+    max-height: 80dvh;
     background: #ffffff;
     border: 1px solid rgba(255, 130, 0, 0.18);
     border-radius: 10px;
@@ -61,6 +63,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    /* 高度受限时只压缩网格，头部与底部按钮保持原高 */
+    flex: none;
 }
 
 .weibo-img-select-header-title {
@@ -104,18 +108,108 @@
     background: #fff4e8;
 }
 
+/*
+ * 滚动区容器：网格在其内部滚动，覆盖式滑块绝对定位在右侧。
+ * 原生滚动条一律隐藏——它会渲染上下箭头与轨道底色方框，且宿主页面的
+ * ::-webkit-scrollbar 规则还可能覆盖我们声明的样式，无法保证沉浸观感。
+ */
+.weibo-img-select-scroll {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+}
+
 .weibo-img-select-grid {
     padding: 12px;
-    overflow: auto;
+    /* 内容超出弹窗可用高度时由网格自身滚动，弹窗头部/底部按钮保持固定 */
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    /* 移动端：允许网格内单指纵向滑动与双指缩放，横向拖动留给页面/系统手势 */
+    touch-action: pan-y pinch-zoom;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
+    /* 行高由内容（方形缩略图）决定，避免被容器高度摊分压扁 */
+    grid-auto-rows: max-content;
+    align-content: start;
     gap: 8px;
+    /* 隐藏原生滚动条（保留滚动能力），改由自绘滑块呈现 */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+/*
+ * 旧版 Chromium/Safari 不支持 scrollbar-width，用伪元素兜底隐藏，
+ * 确保任何引擎都只剩自绘滑块。
+ */
+.weibo-img-select-grid::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+    background: transparent;
+}
+
+/* 自绘滑块：仅一根 3px 细条，无轨道背景、无箭头、无方框 */
+.weibo-img-select-scrollbar {
+    position: absolute;
+    top: 4px;
+    right: 3px;
+    bottom: 4px;
+    /* 8px 宽整体落在网格 12px 内边距内，不遮挡最右列图片的点击 */
+    width: 8px;
+    z-index: 4;
+    /* 默认不拦截指针，只有滚动条显形时才可拖动 */
+    pointer-events: none;
+}
+
+.weibo-img-select-scrollbar-thumb {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 3px;
+    height: 0;
+    border-radius: 999px;
+    background: rgba(100, 116, 139, 0.55);
+    opacity: 0;
+    /* 水平居中由 JS 与位移合并设置，避免两者互相覆盖 */
+    transform: translate(-50%, 0);
+    transition: opacity 0.18s ease, width 0.12s ease, background-color 0.12s ease;
+    will-change: transform, height;
+}
+
+/* 指针在滚动区内、拖动滑块、滚动中或键盘聚焦时显形；其余场景完全隐藏 */
+.weibo-img-select-scroll.has-scrollbar:hover .weibo-img-select-scrollbar,
+.weibo-img-select-grid:focus-within ~ .weibo-img-select-scrollbar,
+.weibo-img-select-scroll.is-scrolling .weibo-img-select-scrollbar,
+.weibo-img-select-scroll.is-dragging .weibo-img-select-scrollbar {
+    pointer-events: auto;
+}
+
+.weibo-img-select-scroll.has-scrollbar:hover .weibo-img-select-scrollbar-thumb,
+.weibo-img-select-grid:focus-within ~ .weibo-img-select-scrollbar .weibo-img-select-scrollbar-thumb,
+.weibo-img-select-scroll.is-scrolling .weibo-img-select-scrollbar-thumb,
+.weibo-img-select-scroll.is-dragging .weibo-img-select-scrollbar-thumb {
+    opacity: 1;
+}
+
+/* 拖动或悬停在滑块上时略微加粗，便于抓取 */
+.weibo-img-select-scrollbar-thumb:hover,
+.weibo-img-select-scrollbar-thumb:active {
+    width: 5px;
+    background: rgba(71, 85, 105, 0.72);
 }
 
 .weibo-img-select-item {
     position: relative;
     display: block;
+    /* 方形约束放在网格项上：缩略图的 aspect-ratio 不参与网格固有尺寸计算 */
+    aspect-ratio: 1 / 1;
+    align-self: start;
     border: 1px solid rgba(255, 130, 0, 0.16);
     border-radius: 4px;
     background: #f3f4f6;
@@ -153,7 +247,8 @@
 .weibo-img-select-thumb {
     position: relative;
     display: block;
-    aspect-ratio: 1 / 1;
+    /* 方形由外层 item 决定，这里只负责填满，避免行高受限时再次压扁 */
+    height: 100%;
     overflow: hidden;
 }
 
@@ -227,6 +322,7 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+    flex: none;
 }
 
 .weibo-img-select-btn {

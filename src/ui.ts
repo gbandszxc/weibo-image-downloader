@@ -422,6 +422,20 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
 
             const list = documentRef.createElement("div");
             list.className = "weibo-img-select-grid";
+
+            // 原生滚动条会带上下箭头与轨道底色方框，且宿主页面的 ::-webkit-scrollbar 规则可能覆盖样式。
+            // 因此完全隐藏原生条，改由脚本绘制覆盖式细滑块（见下方 syncScrollbar）。
+            const scrollArea = documentRef.createElement("div");
+            scrollArea.className = "weibo-img-select-scroll";
+            const scrollbar = documentRef.createElement("div");
+            scrollbar.className = "weibo-img-select-scrollbar";
+            scrollbar.setAttribute("aria-hidden", "true");
+            const scrollbarThumb = documentRef.createElement("div");
+            scrollbarThumb.className = "weibo-img-select-scrollbar-thumb";
+            scrollbar.appendChild(scrollbarThumb);
+            scrollArea.appendChild(list);
+            scrollArea.appendChild(scrollbar);
+
             mediaItems.forEach((item, index) => {
                 const typeKey = getMediaKindKey(item);
                 const typeText = typeKey === "video"
@@ -522,13 +536,112 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
 
             updateSelectionState();
 
+            /**
+             * 覆盖式滚动条：原生滚动条已隐藏，这里按滚动位置同步滑块尺寸与位移。
+             * 滑块高度按可视比例计算（最小 28px 便于指针操作），无内容溢出时整条隐藏。
+             */
+            const syncScrollbar = (): void => {
+                const viewportHeight = list.clientHeight;
+                const contentHeight = list.scrollHeight;
+                const canScroll = contentHeight - viewportHeight > 1;
+
+                if (!canScroll) {
+                    scrollArea.classList.remove("has-scrollbar");
+                    scrollbarThumb.style.height = "0px";
+                    scrollbarThumb.style.transform = "translate(-50%, 0px)";
+                    return;
+                }
+
+                // 轨道含上下 4px 留白，优先用其自身高度；布局未就绪时退回可视区高度。
+                const trackHeight = scrollbar.clientHeight || viewportHeight;
+                const thumbHeight = Math.max(28, Math.round(trackHeight * (viewportHeight / contentHeight)));
+                const maxThumbOffset = Math.max(0, trackHeight - thumbHeight);
+                const maxScrollTop = Math.max(1, contentHeight - viewportHeight);
+                const thumbOffset = Math.round(maxThumbOffset * (list.scrollTop / maxScrollTop));
+
+                scrollArea.classList.add("has-scrollbar");
+                scrollbarThumb.style.height = `${thumbHeight}px`;
+                scrollbarThumb.style.transform = `translate(-50%, ${thumbOffset}px)`;
+            };
+
+            // 滚动中与指针位于弹窗内时显示滑块，其余场景淡出（见 .is-scrolling / :hover 样式）。
+            let scrollIdleTimer: ReturnType<typeof setTimeout> | null = null;
+            const onScroll = (): void => {
+                syncScrollbar();
+                scrollArea.classList.add("is-scrolling");
+                if (scrollIdleTimer) {
+                    clearTimeout(scrollIdleTimer);
+                }
+                scrollIdleTimer = setTimeout(() => {
+                    scrollIdleTimer = null;
+                    scrollArea.classList.remove("is-scrolling");
+                }, 700);
+            };
+            list.addEventListener("scroll", onScroll, { passive: true });
+
+            // 拖动滑块：pointer capture 保证指针移出轨道后仍跟随。
+            const onThumbPointerDown = (event: PointerEvent): void => {
+                if (event.button !== undefined && event.button !== 0) {
+                    return;
+                }
+                event.preventDefault();
+                const startY = event.clientY;
+                const startScrollTop = list.scrollTop;
+                const viewportHeight = list.clientHeight;
+                const contentHeight = list.scrollHeight;
+                const trackHeight = scrollbar.clientHeight || viewportHeight;
+                const thumbHeight = scrollbarThumb.offsetHeight || 28;
+                const maxThumbOffset = Math.max(1, trackHeight - thumbHeight);
+                const maxScrollTop = Math.max(0, contentHeight - viewportHeight);
+
+                const onMove = (moveEvent: PointerEvent): void => {
+                    const delta = moveEvent.clientY - startY;
+                    list.scrollTop = startScrollTop + (delta / maxThumbOffset) * maxScrollTop;
+                };
+                const onUp = (): void => {
+                    scrollArea.classList.remove("is-dragging");
+                    scrollbarThumb.removeEventListener("pointermove", onMove);
+                    scrollbarThumb.removeEventListener("pointerup", onUp);
+                    scrollbarThumb.removeEventListener("pointercancel", onUp);
+                };
+
+                // 拖动期间保持滑块显形且可接收事件，即使指针移出滚动区。
+                scrollArea.classList.add("is-dragging");
+                scrollbarThumb.setPointerCapture?.(event.pointerId);
+                scrollbarThumb.addEventListener("pointermove", onMove);
+                scrollbarThumb.addEventListener("pointerup", onUp);
+                scrollbarThumb.addEventListener("pointercancel", onUp);
+            };
+            scrollbarThumb.addEventListener("pointerdown", onThumbPointerDown);
+
+            // 点击轨道空白处：按点击位置跳转，滑块至少移动半屏更符合直觉。
+            const onTrackPointerDown = (event: PointerEvent): void => {
+                if (event.target !== scrollbar) {
+                    return;
+                }
+                const rect = scrollbar.getBoundingClientRect();
+                const ratio = (event.clientY - rect.top) / Math.max(1, rect.height);
+                const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+                list.scrollTo?.({ top: maxScrollTop * ratio, behavior: "smooth" });
+            };
+            scrollbar.addEventListener("pointerdown", onTrackPointerDown);
+
             modal.appendChild(header);
-            modal.appendChild(list);
+            modal.appendChild(scrollArea);
             modal.appendChild(actions);
             overlay.appendChild(modal);
 
+            // 缩略图异步加载会改变内容高度，加载完成后重新计算滑块比例。
+            list.addEventListener("load", syncScrollbar, true);
+            windowRef.addEventListener?.("resize", syncScrollbar);
+
             const cleanup = (): void => {
+                if (scrollIdleTimer) {
+                    clearTimeout(scrollIdleTimer);
+                    scrollIdleTimer = null;
+                }
                 documentRef.removeEventListener("keydown", onKeyDown);
+                windowRef.removeEventListener?.("resize", syncScrollbar);
                 overlay.removeEventListener("wheel", preventScroll, { passive: false } as EventListenerOptions);
                 overlay.removeEventListener("touchmove", preventScroll, { passive: false } as EventListenerOptions);
                 if (overlay.parentNode) {
@@ -574,7 +687,7 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
             const preventScroll = (event: Event): void => {
                 const target = event.target;
                 // 网格内部交给浏览器滚动；只有网格外才拦截，避免带动背景页面。
-                if (target instanceof Element && target.closest(".weibo-img-select-grid")) {
+                if (target instanceof Element && target.closest(".weibo-img-select-scroll")) {
                     return;
                 }
                 event.preventDefault();
@@ -589,6 +702,10 @@ export function createUi({ config, utils, windowRef, documentRef, addStyle }: Ui
 
             documentRef.addEventListener("keydown", onKeyDown);
             documentRef.body.appendChild(overlay);
+
+            // 挂载后才能量到真实尺寸；首帧用 rAF 再同步一次，等布局稳定。
+            syncScrollbar();
+            windowRef.requestAnimationFrame?.(() => syncScrollbar());
         });
     }
 

@@ -147,6 +147,7 @@ interface TestElement {
     children: TestElement[];
     parentNode: TestElement | null;
     style: Record<string, string>;
+    classList: { add(name: string): void; remove(name: string): void; contains(name: string): boolean };
     setAttribute(name: string, value: string): void;
     appendChild(child: TestElement): void;
     addEventListener(type: string, listener: () => void): void;
@@ -156,7 +157,7 @@ interface TestElement {
 }
 
 function createTestElement(tagName: string): TestElement {
-    return {
+    const node: TestElement = {
         tagName,
         id: "",
         type: "",
@@ -175,6 +176,20 @@ function createTestElement(tagName: string): TestElement {
         children: [],
         parentNode: null,
         style: {},
+        // 选图弹窗会切换选择器样式类；闭包引用 node，避免 this 指向 classList 自身
+        classList: {
+            add(name: string) {
+                const names = new Set(node.className.split(/\s+/).filter(Boolean));
+                names.add(name);
+                node.className = [...names].join(" ");
+            },
+            remove(name: string) {
+                node.className = node.className.split(/\s+/).filter((item) => item && item !== name).join(" ");
+            },
+            contains(name: string) {
+                return node.className.split(/\s+/).includes(name);
+            }
+        },
         setAttribute(name, value) {
             Object.assign(this, { [name]: value });
         },
@@ -215,6 +230,7 @@ function createTestElement(tagName: string): TestElement {
             return results;
         }
     };
+    return node;
 }
 
 function createButtonElement() {
