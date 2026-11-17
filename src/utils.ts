@@ -75,6 +75,7 @@ export function renderFilenameTemplate(template: string, vars: FilenameTemplateV
 export interface UtilsConfig {
     DEBUG?: boolean;
     DELAY_MS: number;
+    BLOB_GM_DOWNLOAD_TIMEOUT_MS?: number;
     ENABLE_VIDEO_DOWNLOAD?: boolean;
     X_GIF_AUTO_CONVERT?: boolean;
     LIVEPHOTO_AUTO_MERGE?: boolean;
@@ -337,32 +338,60 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
             return { ok: false, error: "unavailable" };
         }
 
+        // Blob 资源在部分脚本引擎（如 X浏览器）不受支持，且既不回调 onload/onerror
+        // 也不返回 false，必须靠超时主动降级，否则批量下载会永久挂起、按钮卡在「下载中」。
+        // 直链是真实网络下载，耗时取决于文件大小，不设超时。
+        const blobResource = typeof resource !== "string";
+        const timeoutMs = typeof config.BLOB_GM_DOWNLOAD_TIMEOUT_MS === "number"
+            ? config.BLOB_GM_DOWNLOAD_TIMEOUT_MS
+            : 8000;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let downloadId: unknown = null;
+
         try {
             return await new Promise<GmDownloadAttempt>((resolve) => {
+                const finish = (attempt: GmDownloadAttempt): void => {
+                    if (timeoutId !== null) {
+                        clearTimeout(timeoutId);
+                        timeoutId = null;
+                    }
+                    resolve(attempt);
+                };
+
+                if (blobResource && timeoutMs > 0) {
+                    timeoutId = setTimeout(() => {
+                        timeoutId = null;
+                        // 挂起的任务可能仍在后台，取消以避免超时后重复落盘。
+                        (downloadId as { abort?: () => void } | null)?.abort?.();
+                        log(`GM_download保存Blob超时（${timeoutMs}ms），改用浏览器原生保存:`, filename);
+                        resolve({ ok: false, error: "timeout" });
+                    }, timeoutMs);
+                }
+
                 try {
-                    const downloadId = gmDownload({
+                    downloadId = gmDownload({
                         url: resource,
                         name: filename,
                         headers: getDownloadRequestHeaders(resource),
                         saveAs: false,
                         onload() {
-                            resolve({ ok: true });
+                            finish({ ok: true });
                         },
                         onerror(error) {
                             const reason = error.error || error.message || "未知错误";
                             log(`GM_download失败: ${reason}`);
-                            resolve({ ok: false, error: reason });
+                            finish({ ok: false, error: reason });
                         },
                         onprogress: () => {}
                     });
 
                     if (downloadId === false) {
                         log("GM_download返回false，尝试备用方案:", filename);
-                        resolve({ ok: false, error: "rejected" });
+                        finish({ ok: false, error: "rejected" });
                     }
                 } catch (error) {
                     log("GM_download异常:", (error as Error).message);
-                    resolve({ ok: false, error: (error as Error).message });
+                    finish({ ok: false, error: (error as Error).message });
                 }
             });
         } catch (error) {
@@ -454,17 +483,27 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
         }
     }
 
+    // 会话级降级记忆：一旦确认当前引擎无法用 GM_download 保存 Blob（超时或明确拒绝），
+    // 本页后续 Blob 直接走浏览器原生保存，避免逐文件重复等待超时。
+    let blobGmDownloadUnsupported = false;
+
     async function downloadBlob(blob: Blob, filename: string): Promise<boolean | "started"> {
         // Blob 优先走 GM_download(saveAs:false)：与直链同通道，用户开启「下载前询问每个文件
         // 的保存位置」时依然静默落盘且命名正确；不可用或失败时回退浏览器原生 a[download]
         // 保存（后者严格遵循该用户设置，开启时逐文件弹保存对话框，网页侧无法绕过）。已知
         // 个别下载接管工具或脚本管理器「下载 BETA」模式会忽略 GM_download 对 Blob 的命名，
         // 以 UUID + 内容嗅探扩展名落盘，排查方式见 docs/FAQ.md。
-        const gmResult = await tryGmDownload(blob, filename);
-        if (gmResult.ok) {
-            return true;
+        if (!blobGmDownloadUnsupported) {
+            const gmResult = await tryGmDownload(blob, filename);
+            if (gmResult.ok) {
+                return true;
+            }
+            // 超时/返回 false 说明该引擎不支持 Blob 下载通道（如 X浏览器）；单次网络错误不降级。
+            if (gmResult.error === "timeout" || gmResult.error === "rejected") {
+                blobGmDownloadUnsupported = true;
+            }
+            log("Blob GM_download失败，回退浏览器原生保存:", filename, gmResult.error);
         }
-        log("Blob GM_download失败，回退浏览器原生保存:", filename, gmResult.error);
         return downloadBlobWithAnchor(blob, filename);
     }
 

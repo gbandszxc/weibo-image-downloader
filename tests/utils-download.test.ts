@@ -203,6 +203,55 @@ test("X images save fetched bytes via GM_download blob silently, falling back to
     }
 });
 
+test("Blob GM_download without any callback (XBrowser) times out to the anchor and degrades for the session", async () => {
+    const gmCalls: GmDownloadOptions[] = [];
+    let abortCount = 0;
+    const { utils, clicks } = createTestUtils({
+        windowOverrides: { location: { hostname: "x.com" } },
+        configOverrides: { BLOB_GM_DOWNLOAD_TIMEOUT_MS: 20 },
+        gmDownload(details) {
+            gmCalls.push(details);
+            // X浏览器 对 Blob 既不回调 onload/onerror，也不返回 false：只能靠超时兜底
+            return { abort() { abortCount++; } };
+        },
+        gmXmlhttpRequest(details) {
+            queueMicrotask(() => details.onload({
+                status: 200,
+                response: new Blob(["image"], { type: "image/jpeg" })
+            }));
+        }
+    });
+
+    const first = await utils.downloadImage("https://pbs.twimg.com/media/first.jpg?name=orig", "x_1_1.jpg");
+    assert.equal(first, "started", "超时后应回退浏览器原生保存，并如实报告「已发起」");
+    assert.equal(gmCalls.length, 1);
+    assert.equal(abortCount, 1, "超时应 abort 挂起的任务，避免超时后后台重复落盘");
+    assert.deepEqual(clicks.map((click) => click.download), ["x_1_1.jpg"]);
+
+    const second = await utils.downloadImage("https://pbs.twimg.com/media/second.jpg?name=orig", "x_1_2.jpg");
+    assert.equal(second, "started");
+    assert.equal(gmCalls.length, 1, "已确认不支持 Blob 的会话内，后续 Blob 不再重复等待超时");
+    assert.deepEqual(clicks.map((click) => click.download), ["x_1_1.jpg", "x_1_2.jpg"]);
+});
+
+test("direct link downloads are not subject to the Blob timeout", async () => {
+    const gmCalls: GmDownloadOptions[] = [];
+    const { utils, clicks } = createTestUtils({
+        configOverrides: { BLOB_GM_DOWNLOAD_TIMEOUT_MS: 10 },
+        gmDownload(details) {
+            gmCalls.push(details);
+            // 直链的真实网络下载可能慢于 Blob 阈值，完成后仍应判定成功
+            setTimeout(() => details.onload(), 40);
+        }
+    });
+
+    const success = await utils.downloadImage("https://wx2.sinaimg.cn/large/demo.jpg", "weibo_1_1.jpg");
+
+    assert.equal(success, true, "直链不设超时，慢速下载完成仍应返回 true（按钮「完成」）");
+    assert.equal(gmCalls.length, 1);
+    assert.equal(clicks.length, 0, "直链成功时不应回退 anchor");
+});
+
 test("downloadImage returns false when GM_download and byte fetching both fail", async () => {
     const gmCalls: GmDownloadOptions[] = [];
     const { utils, clicks } = createTestUtils({

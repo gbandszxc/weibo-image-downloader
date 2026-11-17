@@ -905,6 +905,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     DELAY_MS: 300,
     LONG_PRESS_MS: 500,
     MEDIA_RESOLVE_RETRY_COOLDOWN_MS: 6e4,
+    /** Blob 资源经 GM_download 保存的超时；不回调的引擎（如 X浏览器）靠它主动降级。 */
+    BLOB_GM_DOWNLOAD_TIMEOUT_MS: 8e3,
     VIDEO_DOWNLOAD_SETTING_KEY: "weiboImageDownloader.enableVideoDownload",
     ENABLE_VIDEO_DOWNLOAD: false,
     X_GIF_AUTO_CONVERT_SETTING_KEY: "weiboImageDownloader.xGifAutoConvert",
@@ -4176,32 +4178,51 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       if (typeof gmDownload !== "function") {
         return { ok: false, error: "unavailable" };
       }
+      const blobResource = typeof resource !== "string";
+      const timeoutMs = typeof config.BLOB_GM_DOWNLOAD_TIMEOUT_MS === "number" ? config.BLOB_GM_DOWNLOAD_TIMEOUT_MS : 8e3;
+      let timeoutId = null;
+      let downloadId = null;
       try {
         return await new Promise((resolve) => {
+          const finish = (attempt) => {
+            if (timeoutId !== null) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+            resolve(attempt);
+          };
+          if (blobResource && timeoutMs > 0) {
+            timeoutId = setTimeout(() => {
+              timeoutId = null;
+              downloadId?.abort?.();
+              log(`GM_download保存Blob超时（${timeoutMs}ms），改用浏览器原生保存:`, filename);
+              resolve({ ok: false, error: "timeout" });
+            }, timeoutMs);
+          }
           try {
-            const downloadId = gmDownload({
+            downloadId = gmDownload({
               url: resource,
               name: filename,
               headers: getDownloadRequestHeaders(resource),
               saveAs: false,
               onload() {
-                resolve({ ok: true });
+                finish({ ok: true });
               },
               onerror(error) {
                 const reason = error.error || error.message || "未知错误";
                 log(`GM_download失败: ${reason}`);
-                resolve({ ok: false, error: reason });
+                finish({ ok: false, error: reason });
               },
               onprogress: () => {
               }
             });
             if (downloadId === false) {
               log("GM_download返回false，尝试备用方案:", filename);
-              resolve({ ok: false, error: "rejected" });
+              finish({ ok: false, error: "rejected" });
             }
           } catch (error) {
             log("GM_download异常:", error.message);
-            resolve({ ok: false, error: error.message });
+            finish({ ok: false, error: error.message });
           }
         });
       } catch (error) {
@@ -4278,12 +4299,18 @@ OR OTHER DEALINGS IN THE SOFTWARE.
         return await fetchBlobWithWindowFetch(url);
       }
     }
+    let blobGmDownloadUnsupported = false;
     async function downloadBlob(blob, filename) {
-      const gmResult = await tryGmDownload(blob, filename);
-      if (gmResult.ok) {
-        return true;
+      if (!blobGmDownloadUnsupported) {
+        const gmResult = await tryGmDownload(blob, filename);
+        if (gmResult.ok) {
+          return true;
+        }
+        if (gmResult.error === "timeout" || gmResult.error === "rejected") {
+          blobGmDownloadUnsupported = true;
+        }
+        log("Blob GM_download失败，回退浏览器原生保存:", filename, gmResult.error);
       }
-      log("Blob GM_download失败，回退浏览器原生保存:", filename, gmResult.error);
       return downloadBlobWithAnchor(blob, filename);
     }
     async function downloadImage(url, filename) {
