@@ -9,6 +9,7 @@ import { createGifVideoMock } from "./helpers/gif-video-mock.ts";
 interface TestUtilsOptions {
     gmDownload?: GmDownload | null;
     gmXmlhttpRequest?: GmXmlBlobRequest | null;
+    scriptHandler?: string | null;
     fetchRef?: typeof fetch;
     windowOverrides?: Record<string, unknown>;
     configOverrides?: Partial<UtilsConfig>;
@@ -21,6 +22,7 @@ function asMediaItems(items: readonly Partial<UtilsMediaItem>[]): UtilsMediaItem
 function createTestUtils({
     gmDownload = null,
     gmXmlhttpRequest = null,
+    scriptHandler = null,
     fetchRef = async () => {
         throw new Error("fetch not mocked");
     },
@@ -93,6 +95,7 @@ function createTestUtils({
         fetchRef,
         gmDownload,
         gmXmlhttpRequest,
+        scriptHandler,
         ui: {
             showToast(message) {
                 toastMessages.push(message);
@@ -168,6 +171,7 @@ test("X images save fetched bytes via GM_download blob silently, falling back to
         const okUtils = createTestUtils({
             windowOverrides: { location: { hostname: "x.com" } },
             configOverrides: { FILENAME_TEMPLATE_X: template },
+            scriptHandler: "Tampermonkey",
             gmDownload(details) {
                 gmCalls.push(details);
                 queueMicrotask(() => details.onload());
@@ -190,6 +194,7 @@ test("X images save fetched bytes via GM_download blob silently, falling back to
         const anchorUtils = createTestUtils({
             windowOverrides: { location: { hostname: "x.com" } },
             configOverrides: { FILENAME_TEMPLATE_X: template },
+            scriptHandler: "Tampermonkey",
             gmXmlhttpRequest(details) {
                 queueMicrotask(() => details.onload({
                     status: 200,
@@ -203,16 +208,45 @@ test("X images save fetched bytes via GM_download blob silently, falling back to
     }
 });
 
-test("Blob GM_download without any callback (XBrowser) times out to the anchor and degrades for the session", async () => {
+test("X images use direct GM_download on engines without Blob support (XBrowser)", async () => {
+    const gmCalls: GmDownloadOptions[] = [];
+    let xhrCalls = 0;
+    const { utils, clicks } = createTestUtils({
+        windowOverrides: { location: { hostname: "x.com" } },
+        scriptHandler: "X浏览器",
+        gmDownload(details) {
+            gmCalls.push(details);
+            queueMicrotask(() => details.onload());
+        },
+        gmXmlhttpRequest() {
+            xhrCalls++;
+        }
+    });
+
+    const success = await utils.downloadImage("https://pbs.twimg.com/media/demo.jpg?name=orig", "x_1_1.jpg");
+
+    assert.equal(success, true, "直链 GM_download 有 onload 回调时应报告「完成」");
+    assert.equal(gmCalls.length, 1);
+    assert.equal(typeof gmCalls[0].url, "string", "不支持 Blob 的引擎应直接传直链 URL，避免超时与确认弹框");
+    assert.equal(gmCalls[0].name, "x_1_1.jpg", "直链通道同样保留模板文件名");
+    assert.equal(xhrCalls, 0, "不支持 Blob 的引擎不应再拉取图片字节");
+    assert.equal(clicks.length, 0, "直链成功时不应回退 anchor");
+});
+
+test("Blob GM_download without any callback times out, then the session switches X images to the direct link", async () => {
     const gmCalls: GmDownloadOptions[] = [];
     let abortCount = 0;
     const { utils, clicks } = createTestUtils({
         windowOverrides: { location: { hostname: "x.com" } },
         configOverrides: { BLOB_GM_DOWNLOAD_TIMEOUT_MS: 20 },
+        scriptHandler: "Tampermonkey",
         gmDownload(details) {
             gmCalls.push(details);
-            // X浏览器 对 Blob 既不回调 onload/onerror，也不返回 false：只能靠超时兜底
-            return { abort() { abortCount++; } };
+            // 模拟引擎对 Blob 既不回调也不返回 false；直链保存正常
+            if (details.url instanceof Blob) {
+                return { abort() { abortCount++; } };
+            }
+            queueMicrotask(() => details.onload());
         },
         gmXmlhttpRequest(details) {
             queueMicrotask(() => details.onload({
@@ -229,9 +263,10 @@ test("Blob GM_download without any callback (XBrowser) times out to the anchor a
     assert.deepEqual(clicks.map((click) => click.download), ["x_1_1.jpg"]);
 
     const second = await utils.downloadImage("https://pbs.twimg.com/media/second.jpg?name=orig", "x_1_2.jpg");
-    assert.equal(second, "started");
-    assert.equal(gmCalls.length, 1, "已确认不支持 Blob 的会话内，后续 Blob 不再重复等待超时");
-    assert.deepEqual(clicks.map((click) => click.download), ["x_1_1.jpg", "x_1_2.jpg"]);
+    assert.equal(second, true, "会话降级后改走直链 GM_download，恢复静默并确认完成");
+    assert.equal(gmCalls.length, 2, "第二次不再尝试 Blob 通道");
+    assert.equal(typeof gmCalls[1].url, "string", "降级后应传入原始直链");
+    assert.deepEqual(clicks.map((click) => click.download), ["x_1_1.jpg"], "直链成功时不再产生 anchor 弹框");
 });
 
 test("direct link downloads are not subject to the Blob timeout", async () => {

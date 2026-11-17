@@ -57,6 +57,8 @@ const utils = createUtils({
     fetchRef: window.fetch.bind(window),
     gmDownload: typeof GM_download === "function" ? GM_download : null,
     gmXmlhttpRequest: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
+    // GM_download(Blob) 的可用性随脚本管理器而异；传入名称供 utils 选择保存通道。
+    scriptHandler: typeof GM_info !== "undefined" && GM_info ? GM_info.scriptHandler || null : null,
     ui: {
         showToast(message) {
             if (ui) {

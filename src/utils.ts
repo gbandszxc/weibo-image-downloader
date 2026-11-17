@@ -118,6 +118,8 @@ export interface UtilsDeps {
     fetchRef: typeof fetch;
     gmDownload?: GmDownload | null;
     gmXmlhttpRequest?: GmXmlBlobRequest | null;
+    /** 脚本管理器名称（GM_info.scriptHandler）；用于判断是否支持 GM_download(Blob)。 */
+    scriptHandler?: string | null;
     ui?: UtilsUi | null;
 }
 
@@ -154,8 +156,14 @@ export interface Utils {
     downloadMediaItems(mediaItems: readonly UtilsMediaItem[] | null | undefined, postId: string, context?: DownloadNamingContext): Promise<DownloadResult>;
 }
 
-export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui }: UtilsDeps): Utils {
+export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, scriptHandler = null, ui }: UtilsDeps): Utils {
     let platformLabel = "weibo";
+
+    // 已知支持 GM_download(Blob) 的脚本管理器：Tampermonkey 5.4+、ScriptCat。
+    // 其余引擎（X浏览器、Violentmonkey 等）对 Blob 不保证支持且可能不回调，
+    // 这类引擎的 X 图片改走直链 GM_download（静默、支持 name），避免超时与弹框。
+    const blobGmDownloadSupported = typeof scriptHandler === "string" &&
+        ["Tampermonkey", "ScriptCat"].includes(scriptHandler);
 
     function log(...args: unknown[]): void {
         if (config.DEBUG) {
@@ -509,7 +517,10 @@ export function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttp
 
     async function downloadImage(url: string, filename: string): Promise<boolean | "started"> {
         // X 图片直链可能被下载链路按 CDN 原名保存；先取字节再保存，保留模板文件名。
-        if (platform.id === "x" && /^https?:\/\/pbs\.twimg\.com\//i.test(url)) {
+        // 仅在已知支持 Blob 保存的引擎启用该通道：其他引擎（如 X浏览器）的 GM_download
+        // 不支持 Blob，超时回退 a[download] 会弹确认框，直链 GM_download 反而更可靠。
+        const xImage = platform.id === "x" && /^https?:\/\/pbs\.twimg\.com\//i.test(url);
+        if (xImage && blobGmDownloadSupported && !blobGmDownloadUnsupported) {
             return downloadImageFallback(url, filename);
         }
 

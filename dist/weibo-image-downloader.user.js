@@ -4035,8 +4035,9 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     }
     return name;
   }
-  function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, ui: ui2 }) {
+  function createUtils({ config, windowRef, fetchRef, gmDownload, gmXmlhttpRequest, scriptHandler = null, ui: ui2 }) {
     let platformLabel = "weibo";
+    const blobGmDownloadSupported = typeof scriptHandler === "string" && ["Tampermonkey", "ScriptCat"].includes(scriptHandler);
     function log(...args) {
       if (config.DEBUG) {
         console.log(`[${platformLabel} Downloader]`, ...args);
@@ -4314,7 +4315,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
       return downloadBlobWithAnchor(blob, filename);
     }
     async function downloadImage(url, filename) {
-      if (platform.id === "x" && /^https?:\/\/pbs\.twimg\.com\//i.test(url)) {
+      const xImage = platform.id === "x" && /^https?:\/\/pbs\.twimg\.com\//i.test(url);
+      if (xImage && blobGmDownloadSupported && !blobGmDownloadUnsupported) {
         return downloadImageFallback(url, filename);
       }
       const direct = await tryGmDownload(url, filename);
@@ -5436,6 +5438,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
     fetchRef: window.fetch.bind(window),
     gmDownload: typeof GM_download === "function" ? GM_download : null,
     gmXmlhttpRequest: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
+    // GM_download(Blob) 的可用性随脚本管理器而异；传入名称供 utils 选择保存通道。
+    scriptHandler: typeof GM_info !== "undefined" && GM_info ? GM_info.scriptHandler || null : null,
     ui: {
       showToast(message) {
         if (ui) {
